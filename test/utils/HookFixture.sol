@@ -12,8 +12,9 @@ import {SinkRouter} from "./SinkRouter.sol";
 /// @dev The launch as the tests see it: the hook at a mined CREATE2 address, and the ETH/PUPATE pool
 /// opened on it at time T0 with 85% of supply as one-sided liquidity.
 abstract contract HookFixture is PoolSetup {
-    /// @dev afterInitialize, beforeSwap, afterSwap, beforeSwapReturnDelta, afterSwapReturnDelta.
-    uint160 internal constant HOOK_FLAGS = 0x10CC;
+    /// @dev afterInitialize, beforeAddLiquidity, beforeSwap, afterSwap, beforeSwapReturnDelta,
+    /// afterSwapReturnDelta.
+    uint160 internal constant HOOK_FLAGS = 0x18CC;
 
     SinkRouter internal sink;
     PupateHook internal hook;
@@ -75,9 +76,17 @@ abstract contract HookFixture is PoolSetup {
 
     /// @dev The PoolManager wraps a hook revert: WrappedError(hook, callback, reason, HookCallFailed).
     function _hookRevert(bytes4 callback, bytes4 reason) internal view returns (bytes memory) {
+        return _hookRevertFrom(address(hook), callback, reason);
+    }
+
+    function _hookRevertFrom(address target, bytes4 callback, bytes4 reason)
+        internal
+        pure
+        returns (bytes memory)
+    {
         return abi.encodeWithSelector(
             CustomRevert.WrappedError.selector,
-            address(hook),
+            target,
             callback,
             abi.encodeWithSelector(reason),
             abi.encodeWithSelector(Hooks.HookCallFailed.selector)

@@ -8,7 +8,7 @@ import {BalanceDelta, toBalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {PupateHook} from "../src/PupateHook.sol";
 import {PupateToken} from "../src/PupateToken.sol";
 import {HookFixture} from "./utils/HookFixture.sol";
@@ -19,9 +19,9 @@ contract PupateHookTest is HookFixture {
     function test_addressEncodesExactlyTheDeclaredPermissions() public view {
         assertEq(uint160(address(hook)) & Hooks.ALL_HOOK_MASK, HOOK_FLAGS);
         Hooks.Permissions memory p = hook.getHookPermissions();
-        assertTrue(p.afterInitialize && p.beforeSwap && p.afterSwap);
+        assertTrue(p.afterInitialize && p.beforeAddLiquidity && p.beforeSwap && p.afterSwap);
         assertTrue(p.beforeSwapReturnDelta && p.afterSwapReturnDelta);
-        assertFalse(p.beforeInitialize || p.beforeAddLiquidity || p.afterAddLiquidity);
+        assertFalse(p.beforeInitialize || p.afterAddLiquidity);
         assertFalse(p.beforeRemoveLiquidity || p.afterRemoveLiquidity || p.beforeDonate || p.afterDonate);
         assertFalse(p.afterAddLiquidityReturnDelta || p.afterRemoveLiquidityReturnDelta);
     }
@@ -46,6 +46,8 @@ contract PupateHookTest is HookFixture {
         vm.expectRevert(PupateHook.OnlyPoolManager.selector);
         hook.afterInitialize(address(this), key, SQRT_PRICE_OPEN, 0);
         vm.expectRevert(PupateHook.OnlyPoolManager.selector);
+        hook.beforeAddLiquidity(address(this), key, ModifyLiquidityParams(0, 0, 0, bytes32(0)), "");
+        vm.expectRevert(PupateHook.OnlyPoolManager.selector);
         hook.beforeSwap(address(this), key, params, "");
         vm.expectRevert(PupateHook.OnlyPoolManager.selector);
         hook.afterSwap(address(this), key, params, toBalanceDelta(0, 0), "");
@@ -58,21 +60,22 @@ contract PupateHookTest is HookFixture {
     function test_firstNativePoolBecomesTheLaunchPool() public view {
         assertEq(PoolId.unwrap(hook.launchPool()), PoolId.unwrap(key.toId()));
         assertEq(hook.openedAt(), T0);
+        assertEq(hook.openedAtBlock(), block.number);
     }
 
-    function test_aSecondNativePoolIsNeitherTheLaunchPoolNorTaxed() public {
+    function test_aSecondNativePoolIsNotTheLaunchPoolAndTakesNoLiquidity() public {
         _endLaunch();
         PupateToken other = new PupateToken();
         other.approve(address(router), type(uint256).max);
         PoolKey memory second = _ethPool(address(other), address(hook));
-        _open(second, POOL_SHARE);
+        manager.initialize(second, SQRT_PRICE_OPEN);
 
         assertEq(PoolId.unwrap(hook.launchPool()), PoolId.unwrap(key.toId()));
         assertEq(hook.openedAt(), T0);
 
-        _swap(router, second, true, -1 ether);
-        assertEq(_claims(), 0);
-        assertEq(hook.totalTax(), 0);
+        // Same block as the launch pool opened, so only the pool check can reject this.
+        vm.expectRevert(_hookRevert(IHooks.beforeAddLiquidity.selector, PupateHook.LiquidityClosed.selector));
+        router.addLiquidity(second, ModifyLiquidityParams(-887_220, 887_220, 1e18, bytes32(0)));
     }
 
     function test_aPoolWithoutNativeEthDoesNotBecomeTheLaunchPool() public {
@@ -455,5 +458,47 @@ contract PupateHookTest is HookFixture {
         assertEq(flushed, 2.06 ether);
         assertEq(sink.deposited(), 2.06 ether);
         assertEq(hook.totalTax(), 0.06 ether, "totalTax counts tax only");
+    }
+
+    // ------------------------------------------------------------------ liquidity gate
+
+    function test_liquidityCanBeAddedOnlyInTheBlockTheLaunchPoolOpened() public {
+        assertEq(hook.openedAtBlock(), block.number);
+        _seed(key, 1_000 ether);
+
+        vm.roll(block.number + 1);
+        vm.expectRevert(_hookRevert(IHooks.beforeAddLiquidity.selector, PupateHook.LiquidityClosed.selector));
+        router.addLiquidity(key, ModifyLiquidityParams(seedLower, seedUpper, 1e15, bytes32(0)));
+    }
+
+    function test_liquidityCanStillBeRemovedAfterTheOpeningBlock() public {
+        vm.roll(block.number + 1);
+        uint256 before = token.balanceOf(address(this));
+
+        router.addLiquidity(
+            key, ModifyLiquidityParams(seedLower, seedUpper, -int256(seedLiquidity / 2), bytes32(0))
+        );
+
+        assertGt(token.balanceOf(address(this)), before);
+    }
+
+    function test_noPoolOnTheHookTakesLiquidityBeforeTheLaunchPoolOpens() public {
+        PupateHook fresh = _deployHook(address(sink), owner);
+        PupateToken a = new PupateToken();
+        PupateToken b = new PupateToken();
+        a.approve(address(router), type(uint256).max);
+        b.approve(address(router), type(uint256).max);
+        (address low, address high) =
+            address(a) < address(b) ? (address(a), address(b)) : (address(b), address(a));
+        PoolKey memory pair =
+            PoolKey(Currency.wrap(low), Currency.wrap(high), LP_FEE, TICK_SPACING, IHooks(address(fresh)));
+        manager.initialize(pair, SQRT_PRICE_OPEN);
+
+        vm.expectRevert(
+            _hookRevertFrom(
+                address(fresh), IHooks.beforeAddLiquidity.selector, PupateHook.LiquidityClosed.selector
+            )
+        );
+        router.addLiquidity(pair, ModifyLiquidityParams(-887_220, 887_220, 1e18, bytes32(0)));
     }
 }

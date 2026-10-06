@@ -20,14 +20,14 @@
 - Token: 18 decimals, supply 1,000,000,000, minted once to the deployer, no fee, limit, pause or mint.
 - Standing tax: 6% of the ETH side of every buy and every sell, rounded down. It can only be lowered.
 - Launch schedule: the buy tax starts at 99% when the launch pool opens and falls one percentage point a minute until it meets the standing tax. Sells are always at the standing tax.
-- Hook address flags: `0x10CC` (afterInitialize, beforeSwap, afterSwap, beforeSwapReturnDelta, afterSwapReturnDelta).
+- Hook address flags: `0x18CC` (afterInitialize, beforeAddLiquidity, beforeSwap, afterSwap, beforeSwapReturnDelta, afterSwapReturnDelta). The beforeAddLiquidity gate was added in Task 8.
 - During a swap no ETH moves and no contract other than the PoolManager is called.
 
 ## Review Focus
 
 1. A swap that names an exact ETH amount but cannot be filled in full (price limit, thin liquidity): it must revert, not be taxed on ETH that never moved. Test: `test_exactEthSwapThatCannotFillReverts`.
 2. The first buy into a pool that holds no ETH yet: it must go through. Test: `test_firstBuyWorksWhileThePoolHoldsNoEth`.
-3. A stranger opens a second native-ETH pool on the hook: it must not replace the launch pool and must not be taxed. Test: `test_aSecondNativePoolIsNeitherTheLaunchPoolNorTaxed`.
+3. A stranger opens a second native-ETH pool on the hook: it must not replace the launch pool and must not be taxed. Test: `test_aSecondNativePoolIsNotTheLaunchPoolAndTakesNoLiquidity`.
 4. The sink refuses a deposit: `flush` reverts and the collected tax is still there. Test: `test_flushLeavesTheTaxInPlaceWhenTheSinkRejects`.
 5. A trade so small its tax rounds to zero, and a standing tax lowered to zero: swaps still go through. Tests: `test_dustSwapWhoseTaxRoundsToZeroStillGoesThrough`, `test_taxCanBeLoweredToZero`.
 
@@ -686,6 +686,11 @@ abstract contract PoolSetup is Test {
     PoolRouter internal router;
     PupateToken internal token;
 
+    /// @dev The last position `_seed` opened, so tests can remove from it.
+    int24 internal seedLower;
+    int24 internal seedUpper;
+    uint256 internal seedLiquidity;
+
     receive() external payable {}
 
     function setUp() public virtual {
@@ -716,6 +721,9 @@ abstract contract PoolSetup is Test {
         int24 lower = TickMath.minUsableTick(poolKey.tickSpacing);
         uint256 width = TickMath.getSqrtPriceAtTick(upper) - TickMath.getSqrtPriceAtTick(lower);
         uint256 liquidity = FullMath.mulDiv(tokens, FixedPoint96.Q96, width);
+        seedLower = lower;
+        seedUpper = upper;
+        seedLiquidity = liquidity;
         router.addLiquidity(poolKey, ModifyLiquidityParams(lower, upper, int256(liquidity), bytes32(0)));
     }
 
@@ -873,8 +881,9 @@ import {SinkRouter} from "./SinkRouter.sol";
 /// @dev The launch as the tests see it: the hook at a mined CREATE2 address, and the ETH/PUPATE pool
 /// opened on it at time T0 with 85% of supply as one-sided liquidity.
 abstract contract HookFixture is PoolSetup {
-    /// @dev afterInitialize, beforeSwap, afterSwap, beforeSwapReturnDelta, afterSwapReturnDelta.
-    uint160 internal constant HOOK_FLAGS = 0x10CC;
+    /// @dev afterInitialize, beforeAddLiquidity, beforeSwap, afterSwap, beforeSwapReturnDelta,
+    /// afterSwapReturnDelta.
+    uint160 internal constant HOOK_FLAGS = 0x18CC;
 
     SinkRouter internal sink;
     PupateHook internal hook;
@@ -936,9 +945,17 @@ abstract contract HookFixture is PoolSetup {
 
     /// @dev The PoolManager wraps a hook revert: WrappedError(hook, callback, reason, HookCallFailed).
     function _hookRevert(bytes4 callback, bytes4 reason) internal view returns (bytes memory) {
+        return _hookRevertFrom(address(hook), callback, reason);
+    }
+
+    function _hookRevertFrom(address target, bytes4 callback, bytes4 reason)
+        internal
+        pure
+        returns (bytes memory)
+    {
         return abi.encodeWithSelector(
             CustomRevert.WrappedError.selector,
-            address(hook),
+            target,
             callback,
             abi.encodeWithSelector(reason),
             abi.encodeWithSelector(Hooks.HookCallFailed.selector)
@@ -962,7 +979,7 @@ import {BalanceDelta, toBalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {PupateHook} from "../src/PupateHook.sol";
 import {PupateToken} from "../src/PupateToken.sol";
 import {HookFixture} from "./utils/HookFixture.sol";
@@ -973,9 +990,9 @@ contract PupateHookTest is HookFixture {
     function test_addressEncodesExactlyTheDeclaredPermissions() public view {
         assertEq(uint160(address(hook)) & Hooks.ALL_HOOK_MASK, HOOK_FLAGS);
         Hooks.Permissions memory p = hook.getHookPermissions();
-        assertTrue(p.afterInitialize && p.beforeSwap && p.afterSwap);
+        assertTrue(p.afterInitialize && p.beforeAddLiquidity && p.beforeSwap && p.afterSwap);
         assertTrue(p.beforeSwapReturnDelta && p.afterSwapReturnDelta);
-        assertFalse(p.beforeInitialize || p.beforeAddLiquidity || p.afterAddLiquidity);
+        assertFalse(p.beforeInitialize || p.afterAddLiquidity);
         assertFalse(p.beforeRemoveLiquidity || p.afterRemoveLiquidity || p.beforeDonate || p.afterDonate);
         assertFalse(p.afterAddLiquidityReturnDelta || p.afterRemoveLiquidityReturnDelta);
     }
@@ -1000,6 +1017,8 @@ contract PupateHookTest is HookFixture {
         vm.expectRevert(PupateHook.OnlyPoolManager.selector);
         hook.afterInitialize(address(this), key, SQRT_PRICE_OPEN, 0);
         vm.expectRevert(PupateHook.OnlyPoolManager.selector);
+        hook.beforeAddLiquidity(address(this), key, ModifyLiquidityParams(0, 0, 0, bytes32(0)), "");
+        vm.expectRevert(PupateHook.OnlyPoolManager.selector);
         hook.beforeSwap(address(this), key, params, "");
         vm.expectRevert(PupateHook.OnlyPoolManager.selector);
         hook.afterSwap(address(this), key, params, toBalanceDelta(0, 0), "");
@@ -1012,21 +1031,22 @@ contract PupateHookTest is HookFixture {
     function test_firstNativePoolBecomesTheLaunchPool() public view {
         assertEq(PoolId.unwrap(hook.launchPool()), PoolId.unwrap(key.toId()));
         assertEq(hook.openedAt(), T0);
+        assertEq(hook.openedAtBlock(), block.number);
     }
 
-    function test_aSecondNativePoolIsNeitherTheLaunchPoolNorTaxed() public {
+    function test_aSecondNativePoolIsNotTheLaunchPoolAndTakesNoLiquidity() public {
         _endLaunch();
         PupateToken other = new PupateToken();
         other.approve(address(router), type(uint256).max);
         PoolKey memory second = _ethPool(address(other), address(hook));
-        _open(second, POOL_SHARE);
+        manager.initialize(second, SQRT_PRICE_OPEN);
 
         assertEq(PoolId.unwrap(hook.launchPool()), PoolId.unwrap(key.toId()));
         assertEq(hook.openedAt(), T0);
 
-        _swap(router, second, true, -1 ether);
-        assertEq(_claims(), 0);
-        assertEq(hook.totalTax(), 0);
+        // Same block as the launch pool opened, so only the pool check can reject this.
+        vm.expectRevert(_hookRevert(IHooks.beforeAddLiquidity.selector, PupateHook.LiquidityClosed.selector));
+        router.addLiquidity(second, ModifyLiquidityParams(-887_220, 887_220, 1e18, bytes32(0)));
     }
 
     function test_aPoolWithoutNativeEthDoesNotBecomeTheLaunchPool() public {
@@ -1410,6 +1430,48 @@ contract PupateHookTest is HookFixture {
         assertEq(sink.deposited(), 2.06 ether);
         assertEq(hook.totalTax(), 0.06 ether, "totalTax counts tax only");
     }
+
+    // ------------------------------------------------------------------ liquidity gate
+
+    function test_liquidityCanBeAddedOnlyInTheBlockTheLaunchPoolOpened() public {
+        assertEq(hook.openedAtBlock(), block.number);
+        _seed(key, 1_000 ether);
+
+        vm.roll(block.number + 1);
+        vm.expectRevert(_hookRevert(IHooks.beforeAddLiquidity.selector, PupateHook.LiquidityClosed.selector));
+        router.addLiquidity(key, ModifyLiquidityParams(seedLower, seedUpper, 1e15, bytes32(0)));
+    }
+
+    function test_liquidityCanStillBeRemovedAfterTheOpeningBlock() public {
+        vm.roll(block.number + 1);
+        uint256 before = token.balanceOf(address(this));
+
+        router.addLiquidity(
+            key, ModifyLiquidityParams(seedLower, seedUpper, -int256(seedLiquidity / 2), bytes32(0))
+        );
+
+        assertGt(token.balanceOf(address(this)), before);
+    }
+
+    function test_noPoolOnTheHookTakesLiquidityBeforeTheLaunchPoolOpens() public {
+        PupateHook fresh = _deployHook(address(sink), owner);
+        PupateToken a = new PupateToken();
+        PupateToken b = new PupateToken();
+        a.approve(address(router), type(uint256).max);
+        b.approve(address(router), type(uint256).max);
+        (address low, address high) =
+            address(a) < address(b) ? (address(a), address(b)) : (address(b), address(a));
+        PoolKey memory pair =
+            PoolKey(Currency.wrap(low), Currency.wrap(high), LP_FEE, TICK_SPACING, IHooks(address(fresh)));
+        manager.initialize(pair, SQRT_PRICE_OPEN);
+
+        vm.expectRevert(
+            _hookRevertFrom(
+                address(fresh), IHooks.beforeAddLiquidity.selector, PupateHook.LiquidityClosed.selector
+            )
+        );
+        router.addLiquidity(pair, ModifyLiquidityParams(-887_220, 887_220, 1e18, bytes32(0)));
+    }
 }
 ```
 
@@ -1440,14 +1502,16 @@ import {
 import {CurrencyLibrary} from "v4-core/src/types/Currency.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {ITaxSink} from "./interfaces/ITaxSink.sol";
 
 /// @notice Uniswap v4 hook that taxes the ETH side of every trade in the Pupate launch pool.
 /// @dev The tax is taken inside the swap as ERC-6909 claims on the PoolManager: no ETH moves and no
 /// contract other than the PoolManager is called from a swap callback. `flush` turns the claims into
 /// ETH and hands them to the sink. The hook's address must encode afterInitialize, beforeSwap,
-/// afterSwap, beforeSwapReturnDelta and afterSwapReturnDelta: low 14 bits 0x10CC.
+/// beforeAddLiquidity, afterSwap, beforeSwapReturnDelta and afterSwapReturnDelta: low 14 bits 0x18CC.
+/// Liquidity can be added only to the launch pool and only in the block that opens it, so after the
+/// launch the pool's liquidity can only shrink and nobody can trade by resting liquidity untaxed.
 contract PupateHook is IUnlockCallback {
     using SafeCast for uint256;
 
@@ -1457,6 +1521,7 @@ contract PupateHook is IUnlockCallback {
     error NotLower();
     error PartialFill();
     error NothingToFlush();
+    error LiquidityClosed();
 
     event LaunchPoolSet(PoolId indexed poolId, uint256 openedAt);
     event Taxed(address indexed sender, bool buy, uint256 tax, uint256 rateBps);
@@ -1482,6 +1547,8 @@ contract PupateHook is IUnlockCallback {
     uint40 public openedAt;
     /// @notice Standing tax on the ETH side of every buy and sell, in basis points.
     uint16 public taxBps = 600;
+    /// @notice Block in which the launch pool was initialised. Liquidity can be added in that block only.
+    uint40 public openedAtBlock;
     /// @notice The first native-ETH pool initialised on this hook. Only this pool is taxed.
     PoolId public launchPool;
     /// @notice Every wei of tax ever collected.
@@ -1510,6 +1577,7 @@ contract PupateHook is IUnlockCallback {
 
     function getHookPermissions() public pure returns (Hooks.Permissions memory permissions) {
         permissions.afterInitialize = true;
+        permissions.beforeAddLiquidity = true;
         permissions.beforeSwap = true;
         permissions.afterSwap = true;
         permissions.beforeSwapReturnDelta = true;
@@ -1539,9 +1607,26 @@ contract PupateHook is IUnlockCallback {
             PoolId id = key.toId();
             launchPool = id;
             openedAt = uint40(block.timestamp);
+            openedAtBlock = uint40(block.number);
             emit LaunchPoolSet(id, block.timestamp);
         }
         return IHooks.afterInitialize.selector;
+    }
+
+    /// @notice `IHooks.beforeAddLiquidity`. Admits liquidity only into the launch pool, and only in
+    /// the block that opened it: the factory opens and seeds the pool in one transaction. Removing
+    /// liquidity is never gated.
+    function beforeAddLiquidity(address, PoolKey calldata key, ModifyLiquidityParams calldata, bytes calldata)
+        external
+        view
+        onlyPoolManager
+        returns (bytes4)
+    {
+        uint256 opened = openedAtBlock;
+        if (opened == 0 || block.number != opened || PoolId.unwrap(key.toId()) != PoolId.unwrap(launchPool)) {
+            revert LiquidityClosed();
+        }
+        return IHooks.beforeAddLiquidity.selector;
     }
 
     /// @notice `IHooks.beforeSwap`. When the trader names the ETH amount, the tax is returned here as a
@@ -1909,4 +1994,47 @@ Expected: all suites pass; FloorFeed has 44 tests, the hook 41.
 ```bash
 git add -A
 git commit -m "fix: rate-limit FloorFeed rises and pin the attestation's panel and chain"
+```
+
+---
+
+### Task 8: Liquidity gate
+
+Adopted after the review's second finding (`docs/REVIEW.md`): trades made by resting liquidity escaped the tax. Approved by the project owner on 2026-10-06.
+
+**Files:**
+- Modify: `src/PupateHook.sol`, `test/utils/HookFixture.sol` (flags `0x18CC`, `_hookRevertFrom`), `test/utils/PoolSetup.sol` (records the seeded position), `test/PupateHook.t.sol`
+
+**Interfaces:**
+- Changes: `PupateHook` gains `beforeAddLiquidity`, `uint40 public openedAtBlock` and `error LiquidityClosed()`; `getHookPermissions()` sets `beforeAddLiquidity`; the launch manifest's `permissions` list gains `beforeAddLiquidity`.
+
+- [x] **Step 1: Record the opening block and gate liquidity**
+
+```solidity
+    function beforeAddLiquidity(address, PoolKey calldata key, ModifyLiquidityParams calldata, bytes calldata)
+        external
+        view
+        onlyPoolManager
+        returns (bytes4)
+    {
+        uint256 opened = openedAtBlock;
+        if (opened == 0 || block.number != opened || PoolId.unwrap(key.toId()) != PoolId.unwrap(launchPool)) {
+            revert LiquidityClosed();
+        }
+        return IHooks.beforeAddLiquidity.selector;
+    }
+```
+
+- [x] **Step 2: Tests**
+
+Liquidity can be added in the opening block and not after; it can still be removed after; no pool on the hook takes liquidity before the launch pool opens; a second native pool on the hook takes none. The fixture mines `0x18CC`.
+
+Run: `forge test`
+Expected: all suites pass; the hook suite has 44 tests.
+
+- [x] **Step 3: Commit**
+
+```bash
+git add -A
+git commit -m "feat: admit liquidity only in the block the launch pool opens"
 ```

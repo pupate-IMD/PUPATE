@@ -30,6 +30,11 @@ abstract contract PoolSetup is Test {
     PoolRouter internal router;
     PupateToken internal token;
 
+    /// @dev The last position `_seed` opened, so tests can remove from it.
+    int24 internal seedLower;
+    int24 internal seedUpper;
+    uint256 internal seedLiquidity;
+
     receive() external payable {}
 
     function setUp() public virtual {
@@ -60,6 +65,9 @@ abstract contract PoolSetup is Test {
         int24 lower = TickMath.minUsableTick(poolKey.tickSpacing);
         uint256 width = TickMath.getSqrtPriceAtTick(upper) - TickMath.getSqrtPriceAtTick(lower);
         uint256 liquidity = FullMath.mulDiv(tokens, FixedPoint96.Q96, width);
+        seedLower = lower;
+        seedUpper = upper;
+        seedLiquidity = liquidity;
         router.addLiquidity(poolKey, ModifyLiquidityParams(lower, upper, int256(liquidity), bytes32(0)));
     }
 

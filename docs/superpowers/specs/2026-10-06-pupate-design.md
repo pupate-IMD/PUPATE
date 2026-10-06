@@ -53,6 +53,7 @@ A plain ERC-20, as IMD requires: 18 decimals, fixed supply of 1,000,000,000 mint
 A Uniswap v4 hook on the launch pool. Not upgradeable. Constructor arguments: the PoolManager, the sink (Cocoon), and the owner (the timelock).
 
 - **Launch pool.** The first native-ETH pool initialised on the hook becomes the launch pool. Only that pool is taxed. The IMD factory deploys the hook and initialises the pool in one transaction, so no other pool can take that place.
+- **Liquidity.** Liquidity can be added only to the launch pool, and only in the block that opens it, which is when IMD's factory seeds it. After that the pool's liquidity can only shrink; removing liquidity is never blocked. This closes trading by resting liquidity, which the hook could not tax.
 - **Standing tax.** 6% of the ETH side of every buy and every sell. On a buy that is 6% of the ETH the trader pays; on a sell it is 6% of the ETH the pool pays out. Rounded down.
 - **Launch schedule.** The buy tax starts at 99% when the launch pool opens and falls continuously, one percentage point per minute, until it meets the standing tax (93 minutes at 6%). Sells are always at the standing tax.
 - **Collection.** The tax is taken inside the swap as PoolManager claims. No ETH moves, and no contract other than the PoolManager is called, during a swap. `flush()` is callable by anyone: it converts the claims to ETH and hands the hook's whole ETH balance to Cocoon. ETH forced into the hook reaches Cocoon the same way, so deliveries can exceed the hook's `totalTax`; nothing downstream assumes they are equal.
@@ -140,7 +141,7 @@ A static site at pupate.si, hosted on IPFS, with no backend. It reads the chain 
 
 #### UI/UX concept: the life cycle is the interface
 
-The page is the insect's life cycle, and each stage is a live part of the protocol. A visitor who reads it top to bottom has read how Pupate works.
+The page is the insect's life cycle, and each stage is a live part of the protocol. A visitor who reads it top to bottom has read how Pupate works. A static design preview with sample figures is at `site/prototype.html`; it is the reference for Plan 4's site.
 
 | Stage | What it is in the protocol | What the visitor sees |
 |---|---|---|
@@ -174,7 +175,7 @@ All site copy is English.
 - The timelock owns the hook, FloorFeed and Cocoon.
 - The standing tax can only be lowered.
 - Changeable by the timelock within hard-coded bounds: mode split (30–70%), listing start multiple (1.1x–3x), listing end multiple (1.0x–1.5x), listing decay period (1–60 days), price tolerance above the floor (0–10%), caller rewards (0–1%), report freshness (1–24 hours), burn price-impact limit (1–10%), blocks between burns (1–300), operator address, oracle attester address, oracle question hash (setting it clears the stored price).
-- Not changeable by anyone: target collection, token supply, the 85/10/5 split, the launch schedule, the hook's sink, the evidence chain the oracle question reads, the rise limit of 25% per 6 hours, and the rule that pot ETH can only buy seats or buy and burn PUPATE.
+- Not changeable by anyone: target collection, token supply, the 85/10/5 split, the launch schedule, the liquidity gate, the hook's sink, the evidence chain the oracle question reads, the rise limit of 25% per 6 hours, and the rule that pot ETH can only buy seats or buy and burn PUPATE.
 
 ## Developer income
 
@@ -230,7 +231,7 @@ The Sepolia rehearsal in Plan 4 is where the remaining Phase 0 questions are set
 - **The tax can be avoided in other pools.** The tax lives in the hook of the launch pool. The token is a plain ERC-20, so anyone can open another pool for it and trade there untaxed. IMD6900 does not have this weakness: its token refuses transfers that bypass its pool, which is possible because it was not launched through IMD. The launch pool holds 85% of supply and the site trades through it, which keeps most early volume there, but the leak grows with success. Lowering the standing tax narrows it.
 - **Token scanners will flag the launch.** For the first 93 minutes the buy tax is far above what scanners treat as normal.
 - **Reference-price manipulation.** Wash sales can move a median of recent sales. Limited by the rise limit of 25% per 6 hours, which applies whether or not the previous report is fresh, and by the price tolerance and the 30–70% split range. A sustained manipulation can still raise the reference by about 25% every 6 hours for as long as the oracle keeps reporting the inflated figure, and a 24-hour sales window means one burst of wash sales lasts a day. Anyone holding a seat can still sell it to the vault at up to 105% of the reference price.
-- **Trades made by providing liquidity are not taxed.** The hook taxes swaps. Someone who places PUPATE as a narrow liquidity position just above the price and lets buyers fill it has sold without paying the sell tax; someone who rests ETH just under the price at the open has bought without paying the launch tax. Each matched trade is then taxed once, on the taker. Closing this needs a `beforeAddLiquidity` gate that admits liquidity only in the block that opens the launch pool, after which the pool's liquidity can only shrink. IMD's factory does initialise and seed in one transaction (verified on launch 775), so the gate would not break the launch. Decision pending; see `docs/REVIEW.md`.
+- **Trades made by providing liquidity would not be taxed.** The hook taxes swaps, so a seller who could rest PUPATE as a narrow position just above the price would be filled by buyers without paying the sell tax. The liquidity gate closes this: liquidity can be added only in the block that opens the launch pool, and IMD's factory opens and seeds in one transaction (verified on launch 775). What remains is a bot bundling its own position into that same block, which would need the launch transaction to be visible in advance. The pool therefore never has liquidity beyond the factory's position, and nobody can provide liquidity later.
 - **Thin seat yield.** Seat earnings are split across all connected seats (about 650 today) and may be small. The design still works without them, as a tax-and-flip strategy.
 - **Seats that do not sell.** After 14 days a seat sits at 1.1x until bought. Capital is tied up if the market falls below that.
 - **Oracle dependency.** If the IMD oracle stops, buying halts and the split falls back to 50/50, with the seat pot accumulating unspent.
@@ -265,5 +266,5 @@ The Sepolia rehearsal in Plan 4 is where the remaining Phase 0 questions are set
 3. Setting FloorFeed's question clears the stored price.
 4. The launch schedule is described as continuous, as the hook implements it.
 5. `flush` is described as handing over the hook's whole balance.
-6. New known risk: trades made by providing liquidity are not taxed. Decision pending.
+6. The hook gates liquidity: it can be added only to the launch pool in the block that opens it. Adopted after the review showed that trades made by resting liquidity escaped the tax.
 7. Notes for Cocoon's `burn()`: price-impact limit on the trade's own price, fixed swap parameters, no `flush` from inside its unlock.

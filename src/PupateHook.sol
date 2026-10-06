@@ -15,14 +15,16 @@ import {
 import {CurrencyLibrary} from "v4-core/src/types/Currency.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {ModifyLiquidityParams, SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {ITaxSink} from "./interfaces/ITaxSink.sol";
 
 /// @notice Uniswap v4 hook that taxes the ETH side of every trade in the Pupate launch pool.
 /// @dev The tax is taken inside the swap as ERC-6909 claims on the PoolManager: no ETH moves and no
 /// contract other than the PoolManager is called from a swap callback. `flush` turns the claims into
 /// ETH and hands them to the sink. The hook's address must encode afterInitialize, beforeSwap,
-/// afterSwap, beforeSwapReturnDelta and afterSwapReturnDelta: low 14 bits 0x10CC.
+/// beforeAddLiquidity, afterSwap, beforeSwapReturnDelta and afterSwapReturnDelta: low 14 bits 0x18CC.
+/// Liquidity can be added only to the launch pool and only in the block that opens it, so after the
+/// launch the pool's liquidity can only shrink and nobody can trade by resting liquidity untaxed.
 contract PupateHook is IUnlockCallback {
     using SafeCast for uint256;
 
@@ -32,6 +34,7 @@ contract PupateHook is IUnlockCallback {
     error NotLower();
     error PartialFill();
     error NothingToFlush();
+    error LiquidityClosed();
 
     event LaunchPoolSet(PoolId indexed poolId, uint256 openedAt);
     event Taxed(address indexed sender, bool buy, uint256 tax, uint256 rateBps);
@@ -57,6 +60,8 @@ contract PupateHook is IUnlockCallback {
     uint40 public openedAt;
     /// @notice Standing tax on the ETH side of every buy and sell, in basis points.
     uint16 public taxBps = 600;
+    /// @notice Block in which the launch pool was initialised. Liquidity can be added in that block only.
+    uint40 public openedAtBlock;
     /// @notice The first native-ETH pool initialised on this hook. Only this pool is taxed.
     PoolId public launchPool;
     /// @notice Every wei of tax ever collected.
@@ -85,6 +90,7 @@ contract PupateHook is IUnlockCallback {
 
     function getHookPermissions() public pure returns (Hooks.Permissions memory permissions) {
         permissions.afterInitialize = true;
+        permissions.beforeAddLiquidity = true;
         permissions.beforeSwap = true;
         permissions.afterSwap = true;
         permissions.beforeSwapReturnDelta = true;
@@ -114,9 +120,26 @@ contract PupateHook is IUnlockCallback {
             PoolId id = key.toId();
             launchPool = id;
             openedAt = uint40(block.timestamp);
+            openedAtBlock = uint40(block.number);
             emit LaunchPoolSet(id, block.timestamp);
         }
         return IHooks.afterInitialize.selector;
+    }
+
+    /// @notice `IHooks.beforeAddLiquidity`. Admits liquidity only into the launch pool, and only in
+    /// the block that opened it: the factory opens and seeds the pool in one transaction. Removing
+    /// liquidity is never gated.
+    function beforeAddLiquidity(address, PoolKey calldata key, ModifyLiquidityParams calldata, bytes calldata)
+        external
+        view
+        onlyPoolManager
+        returns (bytes4)
+    {
+        uint256 opened = openedAtBlock;
+        if (opened == 0 || block.number != opened || PoolId.unwrap(key.toId()) != PoolId.unwrap(launchPool)) {
+            revert LiquidityClosed();
+        }
+        return IHooks.beforeAddLiquidity.selector;
     }
 
     /// @notice `IHooks.beforeSwap`. When the trader names the ETH amount, the tax is returned here as a
