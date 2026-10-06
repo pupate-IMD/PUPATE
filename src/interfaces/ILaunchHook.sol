@@ -7,4 +7,5 @@ import {PoolId} from "v4-core/src/types/PoolId.sol";
 interface ILaunchHook {
     function launchPool() external view returns (PoolId);
     function sink() external view returns (address);
+    function openedAt() external view returns (uint40);
 }

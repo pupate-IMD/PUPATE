@@ -17,7 +17,7 @@ import {
     ConsiderationItem,
     CriteriaResolver,
     OfferItem,
-    Order,
+    OrderComponents,
     OrderParameters
 } from "seaport-types/src/lib/ConsiderationStructs.sol";
 import {Decay} from "./cocoon/Decay.sol";
@@ -33,9 +33,10 @@ import {PupateToken} from "./PupateToken.sol";
 /// reference price, lists each seat at a falling price, burns PUPATE with what the seats sell for,
 /// auctions what the seats earn, and lets an operator pair the seats to IMD workers.
 /// @dev ETH leaves this contract only to: Seaport (a seat purchase), the PoolManager (a buyback),
-/// a caller reward of at most 1%, the developer, and the taker of the IMD auction (the ETH lot).
-/// Every function that moves value is callable by anyone and bounded by parameters the owner can
-/// change only within hard-coded limits. The balance always equals the four pots added together.
+/// a caller reward of at most 1%, the developer, an auction taker's own excess, and the taker of
+/// the IMD auction (the ETH lot). Every function that moves value is callable by anyone and
+/// bounded by parameters the owner can change only within hard-coded limits. The balance always
+/// equals the four pots added together; `skim` books ETH that was forced in.
 contract Cocoon is IUnlockCallback {
     using StateLibrary for IPoolManager;
 
@@ -48,6 +49,7 @@ contract Cocoon is IUnlockCallback {
     error OnlyPoolManager();
     error UnexpectedCallback();
     error Reentrancy();
+    error UnexpectedPayment();
     error OutOfBounds();
     error AlreadyWired();
     error NotWired();
@@ -69,6 +71,7 @@ contract Cocoon is IUnlockCallback {
     error NoAuction();
     error NothingToAuction();
     error Underpaid();
+    error NothingToSkim();
     error WrongWallet();
     error Expired();
     error TransferFailed();
@@ -117,7 +120,7 @@ contract Cocoon is IUnlockCallback {
         uint16 listEndX; // and falls to cost * listEndX / 1e4
         uint32 listDecay; // over this long
         uint16 toleranceBps; // buy up to floor * (1e4 + toleranceBps) / 1e4
-        uint16 callerRewardBps; // paid to whoever runs a purchase or a burn
+        uint16 callerRewardBps; // paid to whoever runs a purchase or a burn, on the ETH spent
         uint16 burnImpactBps; // one burn may move the pool price by at most this
         uint16 burnSpacing; // blocks between burns
         uint128 harvestStartWei; // where a harvest auction starts
@@ -140,6 +143,12 @@ contract Cocoon is IUnlockCallback {
         uint40 startedAt;
     }
 
+    struct WorkerApproval {
+        uint232 tokenId;
+        uint16 round;
+        bool approved;
+    }
+
     // ------------------------------------------------------------------ constants
 
     uint256 public constant BPS = 10_000;
@@ -150,9 +159,11 @@ contract Cocoon is IUnlockCallback {
     bytes4 private constant ERC1271_VALID = 0x1626ba7e;
     bytes4 private constant ERC1271_INVALID = 0xffffffff;
     bytes4 private constant ERC721_RECEIVED = 0x150b7a02;
-    /// @dev Transient slots: 1 is the reentrancy lock, 2 is set while a Seaport purchase is in flight.
+    /// @dev Transient slots: 1 the reentrancy lock, 2 set while a Seaport purchase is in flight,
+    /// 3 the ETH Seaport returned during that purchase.
     uint256 private constant LOCK_SLOT = 1;
     uint256 private constant PURCHASE_SLOT = 2;
+    uint256 private constant REFUND_SLOT = 3;
 
     IERC721Minimal public immutable COLLECTION;
     SeaportInterface public immutable SEAPORT;
@@ -183,7 +194,7 @@ contract Cocoon is IUnlockCallback {
     mapping(address token => Auction) public auctions;
     Auction public imdAuction;
 
-    mapping(bytes32 digest => uint256 tokenIdPlusOne) private _workerToken;
+    mapping(bytes32 digest => WorkerApproval) private _workerApprovals;
 
     // ------------------------------------------------------------------ modifiers
 
@@ -193,10 +204,16 @@ contract Cocoon is IUnlockCallback {
     }
 
     modifier nonReentrant() {
-        if (_tload(LOCK_SLOT)) revert Reentrancy();
-        _tstore(LOCK_SLOT, true);
+        if (_tload(LOCK_SLOT) != 0) revert Reentrancy();
+        _tstore(LOCK_SLOT, 1);
         _;
-        _tstore(LOCK_SLOT, false);
+        _tstore(LOCK_SLOT, 0);
+    }
+
+    /// @dev For entry points that must not run while a Seaport purchase is in flight.
+    modifier notBuying() {
+        if (_tload(PURCHASE_SLOT) != 0) revert Reentrancy();
+        _;
     }
 
     constructor(
@@ -243,9 +260,13 @@ contract Cocoon is IUnlockCallback {
     }
 
     /// @dev Outside a purchase, plain ETH is a filled listing or a gift: it buys and burns PUPATE.
-    /// Inside one, it is Seaport's refund, which `buySeat` settles from the balance change.
+    /// Inside one, only Seaport may send ETH, and what it sends is the refund of the price.
     receive() external payable {
-        if (_tload(PURCHASE_SLOT)) return;
+        if (_tload(PURCHASE_SLOT) != 0) {
+            if (msg.sender != address(SEAPORT)) revert UnexpectedPayment();
+            _tstore(REFUND_SLOT, _tload(REFUND_SLOT) + msg.value);
+            return;
+        }
         burnPot += msg.value;
         emit ProceedsReceived(msg.sender, msg.value);
     }
@@ -254,7 +275,7 @@ contract Cocoon is IUnlockCallback {
 
     /// @notice Accept tax: 10% to the developer, 5% to the IMD burn, 85% to the strategy, split
     /// between the seat pot and the burn pot by the current mode.
-    function depositTax() external payable {
+    function depositTax() external payable notBuying {
         uint256 amount = msg.value;
         uint256 dev = amount * DEVELOPER_BPS / BPS;
         uint256 toImd = amount * IMD_BURN_BPS / BPS;
@@ -267,6 +288,15 @@ contract Cocoon is IUnlockCallback {
         seatPot += toSeat;
         burnPot += toBurn;
         emit TaxDeposited(amount, toSeat, toBurn, dev, toImd, m);
+    }
+
+    /// @notice Book ETH that arrived without a call (forced in) as sale proceeds, so the balance
+    /// identity holds again. Anyone may call.
+    function skim() external notBuying {
+        uint256 surplus = address(this).balance - (seatPot + burnPot + developerBalance + imdBurnBalance);
+        if (surplus == 0) revert NothingToSkim();
+        burnPot += surplus;
+        emit ProceedsReceived(address(0), surplus);
     }
 
     /// @notice The mode and the seat pot's share of the strategy share, in basis points.
@@ -286,24 +316,28 @@ contract Cocoon is IUnlockCallback {
     // ------------------------------------------------------------------ buying and listing
 
     /// @notice Fulfil a Seaport listing of one seat for ETH at or under the reference price plus
-    /// tolerance, list the seat, and pay the caller the reward.
+    /// tolerance, list the seat, and pay the caller the reward on what was spent.
     function buySeat(AdvancedOrder calldata order, CriteriaResolver[] calldata resolvers)
         external
         nonReentrant
     {
         (uint256 tokenId, uint256 price) = _checkOrder(order);
-        uint256 reward = price * params.callerRewardBps / BPS;
-        if (seatPot < price + reward) revert PotTooSmall();
+        if (seatPot < price + price * params.callerRewardBps / BPS) revert PotTooSmall();
 
-        uint256 before = address(this).balance;
-        _tstore(PURCHASE_SLOT, true);
+        // Cocoon sends the highest price the order can ask. Seaport returns the part the order did
+        // not need, and `receive` counts only Seaport's ETH during the purchase, so the cost is
+        // exactly what Seaport paid out to others.
+        _tstore(PURCHASE_SLOT, 1);
+        _tstore(REFUND_SLOT, 0);
         bool fulfilled =
             SEAPORT.fulfillAdvancedOrder{value: price}(order, resolvers, bytes32(0), address(this));
-        _tstore(PURCHASE_SLOT, false);
-        if (!fulfilled || !_holds(tokenId)) revert PurchaseFailed();
+        uint256 refund = _tload(REFUND_SLOT);
+        _tstore(PURCHASE_SLOT, 0);
+        _tstore(REFUND_SLOT, 0);
+        if (!fulfilled || refund >= price || !_holds(tokenId)) revert PurchaseFailed();
 
-        // Seaport refunds what the order did not need, so the balance change is the real cost.
-        uint256 spent = before - address(this).balance;
+        uint256 spent = price - refund;
+        uint256 reward = spent * params.callerRewardBps / BPS;
         seatPot -= spent + reward;
         _record(tokenId, spent);
         emit SeatBought(tokenId, spent, msg.sender, reward);
@@ -321,30 +355,34 @@ contract Cocoon is IUnlockCallback {
     }
 
     /// @notice Once a listing has filled, take the seat off the books and cancel its other order.
+    /// Works whether the seat is gone or was sent straight back; `adopt` can then take it in again.
     function settleSeat(uint256 tokenId) external nonReentrant {
         Seat memory s = seats[tokenId];
         if (!s.held) revert NotHeld();
-        if (_holds(tokenId)) revert StillHeld();
+        OrderComponents[] memory orders = SeatListing.components(
+            address(this), address(COLLECTION), tokenId, _terms(s), SEAPORT.getCounter(address(this))
+        );
+        if (_holds(tokenId) && !_anyFilled(orders)) revert StillHeld();
         seats[tokenId].held = false;
         heldCount -= 1;
         heldCost -= s.cost;
-        SEAPORT.cancel(
-            SeatListing.components(
-                address(this), address(COLLECTION), tokenId, _terms(s), SEAPORT.getCounter(address(this))
-            )
-        );
+        SEAPORT.cancel(orders);
         emit SeatSold(tokenId, s.cost);
     }
 
     /// @dev Seats arrive only from the collection and only while a purchase is in flight.
     function onERC721Received(address, address, uint256, bytes calldata) external view returns (bytes4) {
-        if (msg.sender != address(COLLECTION) || !_tload(PURCHASE_SLOT)) revert UnexpectedToken();
+        if (msg.sender != address(COLLECTION) || _tload(PURCHASE_SLOT) == 0) revert UnexpectedToken();
         return ERC721_RECEIVED;
     }
 
+    /// @dev The order must be one seat of the collection for native ETH, in full, paid to others:
+    /// every consideration item is ETH to someone other than Cocoon with a non-zero amount, and the
+    /// array is exactly the original one, so a fulfiller cannot append tips paid from the price.
     function _checkOrder(AdvancedOrder calldata order) private view returns (uint256 tokenId, uint256 price) {
         OrderParameters calldata p = order.parameters;
         if (p.offer.length != 1 || p.consideration.length == 0) revert BadOrder();
+        if (p.consideration.length != p.totalOriginalConsiderationItems) revert BadOrder();
         if (order.numerator != 1 || order.denominator != 1) revert BadOrder();
         if (p.orderType != OrderType.FULL_OPEN && p.orderType != OrderType.FULL_RESTRICTED) {
             revert BadOrder();
@@ -358,7 +396,8 @@ contract Cocoon is IUnlockCallback {
         if (seats[tokenId].held) revert AlreadyHeld();
         for (uint256 i; i < p.consideration.length; i++) {
             ConsiderationItem calldata c = p.consideration[i];
-            if (c.itemType != ItemType.NATIVE) revert BadOrder();
+            if (c.itemType != ItemType.NATIVE || c.recipient == address(this)) revert BadOrder();
+            if (c.startAmount == 0 || c.endAmount == 0) revert BadOrder();
             price += c.startAmount > c.endAmount ? c.startAmount : c.endAmount;
         }
         (uint256 floor, bool fresh) = FLOOR.latest();
@@ -367,7 +406,7 @@ contract Cocoon is IUnlockCallback {
     }
 
     function _record(uint256 tokenId, uint256 cost) private {
-        Params memory p = params;
+        Params storage p = params;
         Seat storage previous = seats[tokenId];
         uint16 round = previous.boughtAt == 0 ? 0 : previous.round + 1;
         Seat memory s = Seat({
@@ -405,13 +444,21 @@ contract Cocoon is IUnlockCallback {
         }
     }
 
+    function _anyFilled(OrderComponents[] memory orders) private view returns (bool) {
+        for (uint256 i; i < orders.length; i++) {
+            (,, uint256 totalFilled,) = SEAPORT.getOrderStatus(SEAPORT.getOrderHash(orders[i]));
+            if (totalFilled != 0) return true;
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------------ burning
 
     /// @notice Spend the burn pot on PUPATE in the launch pool, within the price-impact limit, and
     /// burn what it buys. Pays the caller the reward on the ETH spent.
     function burn() external nonReentrant {
         if (!wired) revert NotWired();
-        Params memory p = params;
+        Params storage p = params;
         if (block.number < lastBurnBlock + p.burnSpacing) revert TooSoon();
         uint256 budget = burnPot;
         // Hold back the reward so the pot covers it however much of the budget the pool takes.
@@ -449,7 +496,7 @@ contract Cocoon is IUnlockCallback {
     /// exactly what it took, and takes the PUPATE.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(POOL_MANAGER)) revert OnlyPoolManager();
-        if (!_tload(LOCK_SLOT)) revert UnexpectedCallback();
+        if (_tload(LOCK_SLOT) == 0) revert UnexpectedCallback();
         (uint256 budget, uint160 limit) = abi.decode(data, (uint256, uint160));
         BalanceDelta delta = POOL_MANAGER.swap(launchKey, SwapParams(true, -int256(budget), limit), "");
         uint256 spent = uint256(uint128(-delta.amount0()));
@@ -461,9 +508,14 @@ contract Cocoon is IUnlockCallback {
 
     // ------------------------------------------------------------------ harvest auctions
 
-    /// @notice Put Cocoon's whole balance of `token` up for a falling-price auction.
+    /// @notice Put Cocoon's whole balance of `token` up for a falling-price auction. Not PUPATE,
+    /// not the collection.
     function startAuction(address token) external {
-        if (token == address(0) || (wired && token == Currency.unwrap(launchKey.currency1))) {
+        if (!wired) revert NotWired();
+        if (
+            token == address(0) || token == address(COLLECTION)
+                || token == Currency.unwrap(launchKey.currency1)
+        ) {
             revert NotForAuction();
         }
         if (auctions[token].lot != 0) revert AuctionRunning();
@@ -525,29 +577,35 @@ contract Cocoon is IUnlockCallback {
 
     // ------------------------------------------------------------------ pairing
 
-    /// @notice Approve IMD's pairing message for a held seat, so `isValidSignature` accepts it.
+    /// @notice Approve IMD's pairing message for a held seat, so `isValidSignature` accepts it. The
+    /// approval is tied to this purchase of the seat and dies when the seat sells.
     /// @dev Send the same message to IMD's pairing endpoint with any signature bytes.
     function authorizeWorker(WorkerAuthorization.Auth calldata a) external returns (bytes32 digest) {
         if (msg.sender != operator) revert NotOperator();
         if (a.wallet != address(this)) revert WrongWallet();
         if (a.expiresAt <= block.timestamp) revert Expired();
-        if (!seats[a.tokenId].held || !_holds(a.tokenId)) revert NotHeld();
+        Seat storage s = seats[a.tokenId];
+        if (!s.held || !_holds(a.tokenId)) revert NotHeld();
         digest = WorkerAuthorization.digest(address(COLLECTION), a);
-        _workerToken[digest] = a.tokenId + 1;
+        if (a.tokenId > type(uint232).max) revert NotHeld();
+        _workerApprovals[digest] = WorkerApproval(uint232(a.tokenId), s.round, true);
         emit WorkerAuthorized(a.tokenId, digest);
     }
 
     function revokeWorker(bytes32 digest) external {
         if (msg.sender != operator) revert NotOperator();
-        delete _workerToken[digest];
+        delete _workerApprovals[digest];
         emit WorkerRevoked(digest);
     }
 
-    /// @notice ERC-1271. Valid only for an approved pairing digest of a seat Cocoon still holds.
+    /// @notice ERC-1271. Valid only for an approved pairing digest of a seat Cocoon still holds
+    /// from the same purchase; never for anything else.
     function isValidSignature(bytes32 hash, bytes calldata) external view returns (bytes4) {
-        uint256 tokenIdPlusOne = _workerToken[hash];
-        if (tokenIdPlusOne == 0) return ERC1271_INVALID;
-        return _holds(tokenIdPlusOne - 1) ? ERC1271_VALID : ERC1271_INVALID;
+        WorkerApproval memory w = _workerApprovals[hash];
+        if (!w.approved) return ERC1271_INVALID;
+        Seat storage s = seats[w.tokenId];
+        if (!s.held || s.round != w.round) return ERC1271_INVALID;
+        return _holds(w.tokenId) ? ERC1271_VALID : ERC1271_INVALID;
     }
 
     // ------------------------------------------------------------------ developer, owner
@@ -586,14 +644,14 @@ contract Cocoon is IUnlockCallback {
         emit ParamsSet(p);
     }
 
-    /// @notice Point Cocoon at the launch pool, once. The pool's hook must name this pool as its
-    /// launch pool and this contract as its sink.
+    /// @notice Point Cocoon at the launch pool, once. The pool's hook must have opened it, name it
+    /// as its launch pool, and name this contract as its sink.
     function wire(PoolKey calldata key) external onlyOwner {
         if (wired) revert AlreadyWired();
         ILaunchHook hook = ILaunchHook(address(key.hooks));
         if (
             !key.currency0.isAddressZero() || Currency.unwrap(key.currency1) == address(0)
-                || PoolId.unwrap(hook.launchPool()) != PoolId.unwrap(key.toId())
+                || hook.openedAt() == 0 || PoolId.unwrap(hook.launchPool()) != PoolId.unwrap(key.toId())
                 || hook.sink() != address(this)
         ) revert WrongPool();
         launchKey = key;
@@ -623,14 +681,16 @@ contract Cocoon is IUnlockCallback {
 
     /// @dev Works for tokens that return nothing as well as for those that return a bool.
     function _safeTransfer(address token, address to, uint256 amount) private {
-        (bool ok, bytes memory data) = token.call(abi.encodeCall(IERC20Minimal.transfer, (to, amount)));
-        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+        _tokenCall(token, abi.encodeCall(IERC20Minimal.transfer, (to, amount)));
     }
 
     function _safeTransferFrom(address token, address from, address to, uint256 amount) private {
-        (bool ok, bytes memory data) =
-            token.call(abi.encodeCall(IERC20Minimal.transferFrom, (from, to, amount)));
-        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+        _tokenCall(token, abi.encodeCall(IERC20Minimal.transferFrom, (from, to, amount)));
+    }
+
+    function _tokenCall(address token, bytes memory data) private {
+        (bool ok, bytes memory ret) = token.call(data);
+        if (!ok || (ret.length != 0 && !abi.decode(ret, (bool)))) revert TransferFailed();
     }
 
     function _sqrt(uint256 x) private pure returns (uint256 y) {
@@ -643,13 +703,13 @@ contract Cocoon is IUnlockCallback {
         }
     }
 
-    function _tload(uint256 slot) private view returns (bool value) {
+    function _tload(uint256 slot) private view returns (uint256 value) {
         assembly ("memory-safe") {
             value := tload(slot)
         }
     }
 
-    function _tstore(uint256 slot, bool value) private {
+    function _tstore(uint256 slot, uint256 value) private {
         assembly ("memory-safe") {
             tstore(slot, value)
         }

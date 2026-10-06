@@ -151,4 +151,4 @@ The fork test runs only when `MAINNET_RPC_URL` is set (`vm.envOr`), forks mainne
 
 ### Task 9: Spec and review
 
-- [ ] Update the spec with the decisions made here (two listing orders, settle-and-cancel, refund handling, auction curve and starts, donated NFTs rejected). Request an independent review of `src/Cocoon.sol` and the libraries as in Plan 2; record it in `docs/REVIEW.md`; fix what it finds.
+- [x] Update the spec with the decisions made here (two listing orders, settle-and-cancel, refund handling, auction curve and starts, donated NFTs rejected). Request an independent review of `src/Cocoon.sol` and the libraries as in Plan 2; record it in `docs/REVIEW.md`; fix what it finds.

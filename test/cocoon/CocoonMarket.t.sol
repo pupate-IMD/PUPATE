@@ -114,7 +114,7 @@ contract CocoonMarketTest is CocoonFixture {
         assertLt(current, 2.88 ether);
         uint256 potBefore = cocoon.seatPot();
         uint256 burnBefore = cocoon.burnPot();
-        uint256 reward = 2.88 ether * 50 / 10_000;
+        uint256 reward = current * 50 / 10_000; // on what was spent, not on the ceiling
 
         _buy(order);
 
