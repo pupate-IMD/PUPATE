@@ -17,7 +17,9 @@ contract FloorFeedTest is Test {
     function setUp() public {
         attester = vm.addr(ATTESTER_KEY);
         vm.warp(T0);
-        feed = new FloorFeed(owner, attester, QUESTION);
+        feed = new FloorFeed(owner, attester);
+        vm.prank(owner);
+        feed.setQuestion(QUESTION);
     }
 
     function _att(uint256 floorWei, uint64 issuedAt)
@@ -238,6 +240,40 @@ contract FloorFeedTest is Test {
         feed.setMaxAge(2 hours);
         vm.expectRevert(FloorFeed.NotOwner.selector);
         feed.transferOwnership(address(1));
+        vm.expectRevert(FloorFeed.NotOwner.selector);
+        feed.setQuestion(keccak256("mine"));
+    }
+
+    function test_rejectsEveryReportBeforeAQuestionIsSet() public {
+        FloorFeed fresh = new FloorFeed(owner, attester);
+        OracleAttestation.Attestation memory a = _att(2 ether, T0);
+        a.questionHash = bytes32(0);
+        bytes memory sig = _sign(a, ATTESTER_KEY, address(fresh));
+        vm.expectRevert(FloorFeed.WrongQuestion.selector);
+        fresh.report(a, sig);
+    }
+
+    function test_questionCannotBeSetToZero() public {
+        vm.prank(owner);
+        vm.expectRevert(FloorFeed.WrongQuestion.selector);
+        feed.setQuestion(bytes32(0));
+    }
+
+    function test_changingTheQuestionRejectsReportsForTheOldOne() public {
+        bytes32 next = keccak256("a better floor question");
+        vm.prank(owner);
+        feed.setQuestion(next);
+
+        OracleAttestation.Attestation memory old = _att(2 ether, T0);
+        bytes memory oldSig = _sign(old, ATTESTER_KEY, address(feed));
+        vm.expectRevert(FloorFeed.WrongQuestion.selector);
+        feed.report(old, oldSig);
+
+        OracleAttestation.Attestation memory fresh = _att(2 ether, T0);
+        fresh.questionHash = next;
+        feed.report(fresh, _sign(fresh, ATTESTER_KEY, address(feed)));
+        (uint256 floorWei,) = feed.latest();
+        assertEq(floorWei, 2 ether);
     }
 
     function test_ownerCanRotateAttester() public {

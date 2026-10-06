@@ -20,16 +20,17 @@ contract FloorFeed {
     event Reported(uint256 floorWei, uint64 issuedAt, uint64 freshUntil);
     event AttesterSet(address attester);
     event MaxAgeSet(uint64 maxAge);
+    event QuestionSet(bytes32 questionHash);
     event OwnershipTransferred(address indexed from, address indexed to);
 
     uint256 public constant MAX_MOVE_BPS = 2500;
     uint64 public constant MIN_MAX_AGE = 1 hours;
     uint64 public constant MAX_MAX_AGE = 24 hours;
 
-    bytes32 public immutable QUESTION_HASH;
-
     address public owner;
     address public attester;
+    /// @notice Hash of the only oracle question whose attestations are accepted. Zero until set.
+    bytes32 public questionHash;
     uint64 public maxAge = 6 hours;
 
     uint256 public floorWei;
@@ -41,18 +42,18 @@ contract FloorFeed {
         _;
     }
 
-    constructor(address owner_, address attester_, bytes32 questionHash_) {
+    constructor(address owner_, address attester_) {
         if (owner_ == address(0) || attester_ == address(0)) revert ZeroAddress();
         owner = owner_;
         attester = attester_;
-        QUESTION_HASH = questionHash_;
     }
 
     /// @notice Store a new floor report. Callable by anyone holding a valid attestation.
     function report(OracleAttestation.Attestation calldata a, bytes calldata sig) external {
         bytes32 sep = OracleAttestation.domainSeparator(block.chainid, address(this));
         if (OracleAttestation.recover(OracleAttestation.digest(sep, a), sig) != attester) revert BadSigner();
-        if (a.questionHash != QUESTION_HASH) revert WrongQuestion();
+        bytes32 pinned = questionHash;
+        if (pinned == bytes32(0) || a.questionHash != pinned) revert WrongQuestion();
         if (a.chainId != block.chainid) revert WrongChain();
         if (a.agreed < a.quorum || a.quorum == 0) revert NoQuorum();
         if (a.issuedAt > block.timestamp || block.timestamp > a.expiresAt) revert Expired();
@@ -91,6 +92,13 @@ contract FloorFeed {
         if (maxAge_ < MIN_MAX_AGE || maxAge_ > MAX_MAX_AGE) revert OutOfBounds();
         maxAge = maxAge_;
         emit MaxAgeSet(maxAge_);
+    }
+
+    /// @notice Pin the oracle question. Its hash is only known once the first request has been made.
+    function setQuestion(bytes32 questionHash_) external onlyOwner {
+        if (questionHash_ == bytes32(0)) revert WrongQuestion();
+        questionHash = questionHash_;
+        emit QuestionSet(questionHash_);
     }
 
     function transferOwnership(address to) external onlyOwner {
