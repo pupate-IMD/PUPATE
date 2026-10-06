@@ -92,13 +92,14 @@ Holds the seat pot, the burn pot, and the seats. Functions are callable by anyon
 
 **Buying.** `buySeat(order)` fulfils a Seaport 1.6 listing when all of these hold:
 
-- the item is a token of the target collection,
-- payment is in ETH,
+- the item is one token of the target collection, in full (no partial fills),
+- every consideration item is native ETH, with a non-zero amount, paid to someone other than Cocoon,
+- the consideration array is exactly the order's original one, so a fulfiller cannot append tips that Seaport would pay from the price,
 - a fresh floor report exists,
-- the price is at most 105% of the floor,
+- the price (the highest the order can ask) is at most 105% of the floor,
 - the seat pot covers the price plus the caller reward.
 
-The caller receives 0.5% of the purchase price from the seat pot.
+The caller receives 0.5% of what was actually spent, from the seat pot.
 
 **Refunds.** Cocoon sends the listing's highest possible price and Seaport returns what the order did not need. During a purchase Cocoon accepts ETH from Seaport only, and counts it as the refund; ETH from anyone else, and any call to `depositTax`, reverts the purchase. The seat's cost is therefore exactly what Seaport paid out to others, and a refund stays in the seat pot. (An earlier design took the cost from the balance change, which let a seller route the payment back into Cocoon and book a seat at almost nothing while collecting the reward.)
 
