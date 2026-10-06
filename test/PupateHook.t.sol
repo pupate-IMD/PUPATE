@@ -387,4 +387,73 @@ contract PupateHookTest is HookFixture {
         vm.expectRevert(PupateHook.ZeroAddress.selector);
         hook.transferOwnership(address(0));
     }
+
+    // ------------------------------------------------------------------ added after review
+
+    function test_exactOutSellThatCannotFillReverts() public {
+        _endLaunch();
+        _buyExactIn(5 ether);
+
+        // More ETH than the pool holds.
+        vm.expectRevert(_hookRevert(IHooks.afterSwap.selector, PupateHook.PartialFill.selector));
+        router.swap(key, SwapParams(false, int256(100 ether), _limit(false)));
+
+        // A price limit that stops the fill early.
+        uint160 tight = uint160(uint256(_sqrtPrice(key)) * 1001 / 1000);
+        vm.expectRevert(_hookRevert(IHooks.afterSwap.selector, PupateHook.PartialFill.selector));
+        router.swap(key, SwapParams(false, int256(0.5 ether), tight));
+    }
+
+    function test_exactOutSellDuringTheLaunchPaysTheStandingRate() public {
+        _swap(sink, key, true, -10 ether);
+        uint256 ethBefore = address(this).balance;
+
+        BalanceDelta delta = _sellExactOut(0.1 ether);
+
+        assertEq(address(this).balance - ethBefore, 0.1 ether);
+        assertEq(delta.amount0(), 0.1 ether);
+        assertEq(_claims(), uint256(0.1 ether) * 600 / 9400);
+        assertEq(hook.buyTaxBps(), 9900, "buys would still pay the launch rate");
+    }
+
+    function test_theSinkIsExemptInEveryMode() public {
+        _swap(sink, key, true, -1 ether);
+        _swap(sink, key, true, int256(1_000_000 ether));
+        _swap(sink, key, false, -int256(1_000_000 ether));
+        _swap(sink, key, false, int256(0.01 ether));
+        assertEq(_claims(), 0);
+        assertEq(hook.totalTax(), 0);
+    }
+
+    function test_launchPoolSetEventNamesThePoolAndTheTime() public {
+        PupateHook fresh = _deployHook(address(sink), owner);
+        PupateToken other = new PupateToken();
+        PoolKey memory native = _ethPool(address(other), address(fresh));
+        vm.warp(T0 + 123);
+        vm.expectEmit(true, false, false, true, address(fresh));
+        emit PupateHook.LaunchPoolSet(native.toId(), T0 + 123);
+        manager.initialize(native, SQRT_PRICE_OPEN);
+    }
+
+    function test_taxedEventReportsSells() public {
+        _endLaunch();
+        _buyExactIn(5 ether);
+        vm.expectEmit(true, false, false, true, address(hook));
+        emit PupateHook.Taxed(address(router), false, uint256(0.1 ether) * 600 / 9400, 600);
+        _sellExactOut(0.1 ether);
+    }
+
+    /// @dev ETH can be forced into any contract. It is delivered to the sink rather than stranded, so
+    /// deliveries can exceed `totalTax`; nothing downstream may assume they are equal.
+    function test_flushAlsoDeliversEthForcedIntoTheHook() public {
+        _endLaunch();
+        _buyExactIn(1 ether);
+        vm.deal(address(hook), 2 ether);
+
+        uint256 flushed = hook.flush();
+
+        assertEq(flushed, 2.06 ether);
+        assertEq(sink.deposited(), 2.06 ether);
+        assertEq(hook.totalTax(), 0.06 ether, "totalTax counts tax only");
+    }
 }

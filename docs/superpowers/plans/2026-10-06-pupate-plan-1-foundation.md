@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-06-pupate-design.md`
 
+> FloorFeed as written in Task 2 was revised in Plan 2 after review: the question is set by the owner, the evidence chain is a constructor argument, and the move cap became a rise limit that always applies. `src/FloorFeed.sol` is current; this plan is the historical record.
+
 This is plan 1 of 4. Later plans, each written after this one's findings are in:
 
 - Plan 2: PupateHook (tax and mode split), patterned on IMD launch 168 (TollgateHook).

@@ -51,6 +51,8 @@ Floor question:
 Open:
 
 - Whether a panel agrees within tolerance on the floor question in practice. Needs one paid request.
+- Whether the attestation's `chainId` is the evidence chain, as its place beside the block window suggests, or the consumer's chain. FloorFeed takes the evidence chain as a constructor argument; a Sepolia FloorFeed reading mainnet sales in the rehearsal settles it.
+- Whether a requester can vary panel size, quorum or validity under the same `questionHash`. FloorFeed enforces minimums on-chain either way (quorum at least 4 and a majority, validity at least the freshness window).
 
 ## 5. Token split and token rules `ANSWERED`
 

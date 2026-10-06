@@ -1,7 +1,7 @@
 # Pupate: design spec
 
 Date: 2026-10-06
-Status: revision 2, awaiting review. Revised after the Phase 0 desk findings in `docs/phase0-findings.md`. The "Changes in revision 2" section at the end lists what moved.
+Status: revision 3. Revision 2 followed the Phase 0 desk findings in `docs/phase0-findings.md`; revision 3 followed the independent review of Plan 2 in `docs/REVIEW.md`. The change lists at the end say what moved.
 
 ## Summary
 
@@ -54,8 +54,8 @@ A Uniswap v4 hook on the launch pool. Not upgradeable. Constructor arguments: th
 
 - **Launch pool.** The first native-ETH pool initialised on the hook becomes the launch pool. Only that pool is taxed. The IMD factory deploys the hook and initialises the pool in one transaction, so no other pool can take that place.
 - **Standing tax.** 6% of the ETH side of every buy and every sell. On a buy that is 6% of the ETH the trader pays; on a sell it is 6% of the ETH the pool pays out. Rounded down.
-- **Launch schedule.** The buy tax starts at 99% when the launch pool opens and falls by one percentage point a minute until it meets the standing tax (93 minutes at 6%). Sells are always at the standing tax.
-- **Collection.** The tax is taken inside the swap as PoolManager claims. No ETH moves, and no contract other than the PoolManager is called, during a swap. `flush()` is callable by anyone: it converts the claims to ETH and hands them to Cocoon.
+- **Launch schedule.** The buy tax starts at 99% when the launch pool opens and falls continuously, one percentage point per minute, until it meets the standing tax (93 minutes at 6%). Sells are always at the standing tax.
+- **Collection.** The tax is taken inside the swap as PoolManager claims. No ETH moves, and no contract other than the PoolManager is called, during a swap. `flush()` is callable by anyone: it converts the claims to ETH and hands the hook's whole ETH balance to Cocoon. ETH forced into the hook reaches Cocoon the same way, so deliveries can exceed the hook's `totalTax`; nothing downstream assumes they are equal.
 - **Cocoon's own swaps are not taxed.** Cocoon swaps only to buy back and burn.
 - **Partial fills.** A swap that names an exact ETH amount and cannot be filled in full reverts, because its tax was computed on the full amount.
 - **Owner.** May lower the standing tax. Nothing can raise it. The owner has no other power.
@@ -66,10 +66,11 @@ Why a launch schedule and not a wallet cap: the token must be plain, and a hook 
 
 Stores the latest reference price of the collection as attested by the IMD oracle. Built and tested in Plan 1.
 
-- `report(attestation, signature)` is callable by anyone. It verifies the oracle's EIP-712 signature (domain `IdentityMD Oracle`, version `2`, bound to FloorFeed's own address) and stores the price and its timestamp.
-- Only attestations for one pinned question are accepted. The question asks for the median price of the collection's on-chain sales over the last 24 hours. The owner sets the question's hash, because the hash is only known once the first request has been made; changing it later goes through the timelock.
-- A report is fresh for 6 hours, or until the attestation's own expiry if that is sooner.
-- While the previous report is fresh, a new one may move the price by at most 25%.
+- `report(attestation, signature)` is callable by anyone. It verifies the oracle's EIP-712 signature (domain `IdentityMD Oracle`, version `2`, bound to FloorFeed's own address and chain) and stores the price and its issue time.
+- Only attestations for one pinned question are accepted. The question asks for the median price of the collection's on-chain sales over the last 24 hours. The owner sets the question's hash, because the hash is only known once the first request has been made; changing it later goes through the timelock. Setting the question clears the stored price, and the first report after that is not rate-limited. Setting the same hash again is the way to clear a bad value.
+- The attestation must name the evidence chain fixed at deployment (mainnet, where the collection lives), carry a quorum of at least 4 that is a majority of its panel, and be valid for at least the freshness window.
+- A report is fresh for 6 hours after it was issued, or until the attestation's own expiry if the owner has since lengthened the window.
+- **Rise limit.** The stored price may rise by at most 25% per 6 hours between two reports, measured between their issue times. The limit applies whether or not the earlier report is still fresh, so a report held back until the previous one lapses gains nothing, and reports in quick succession cannot compound. Falls are not limited, because a lower reference only makes the vault buy less. A genuine jump larger than the limit is reflected once enough time has passed; until then the vault simply does not buy.
 
 This document calls the stored value "the floor". It is a reference price built from recent sales, not the lowest ask, because asks are not on-chain.
 
@@ -102,7 +103,7 @@ The caller receives 0.5% of the purchase price from the seat pot.
 
 **Selling.** When a listing fills, the ETH goes to the burn pot.
 
-**Burning.** `burn()` spends burn-pot ETH on PUPATE in the launch pool and burns what it receives. One call may move the pool price by at most 5%, and calls must be at least 5 blocks apart. Because every other trader pays the tax on both legs, moving the price by that much is not worth sandwiching. The caller receives 0.5% of the ETH spent.
+**Burning.** `burn()` spends burn-pot ETH on PUPATE in the launch pool and burns what it receives. One call may move the pool price by at most 5%, and calls must be at least 5 blocks apart. Because every other trader pays the tax on both legs, moving the price by that much is not worth sandwiching. The caller receives 0.5% of the ETH spent. The limit is applied to the price the trade actually pays, not to the pool's quoted spot price alone: right after the open the spot price sits above all liquidity, and a 1-wei sell can move it to the maximum for free. Cocoon's swap parameters are fixed in code, since its swaps are the only untaxed ones, and Cocoon never calls `flush` from inside its own PoolManager unlock.
 
 **Harvesting.** Seats earn ERC-20 tokens (launch allocations and IMD). `startAuction(token)` opens a descending-price auction for Cocoon's whole balance of that token: the ETH price falls from a high start to zero over 24 hours, and the first buyer takes the balance. Proceeds go to the seat pot. PUPATE is never auctioned; any PUPATE balance is burned.
 
@@ -172,8 +173,8 @@ All site copy is English.
 
 - The timelock owns the hook, FloorFeed and Cocoon.
 - The standing tax can only be lowered.
-- Changeable by the timelock within hard-coded bounds: mode split (30–70%), listing start multiple (1.1x–3x), listing end multiple (1.0x–1.5x), listing decay period (1–60 days), price tolerance above the floor (0–10%), caller rewards (0–1%), report freshness (1–24 hours), burn price-impact limit (1–10%), blocks between burns (1–300), operator address, oracle attester address, oracle question hash.
-- Not changeable by anyone: target collection, token supply, the 85/10/5 split, the launch schedule, the hook's sink, and the rule that pot ETH can only buy seats or buy and burn PUPATE.
+- Changeable by the timelock within hard-coded bounds: mode split (30–70%), listing start multiple (1.1x–3x), listing end multiple (1.0x–1.5x), listing decay period (1–60 days), price tolerance above the floor (0–10%), caller rewards (0–1%), report freshness (1–24 hours), burn price-impact limit (1–10%), blocks between burns (1–300), operator address, oracle attester address, oracle question hash (setting it clears the stored price).
+- Not changeable by anyone: target collection, token supply, the 85/10/5 split, the launch schedule, the hook's sink, the evidence chain the oracle question reads, the rise limit of 25% per 6 hours, and the rule that pot ETH can only buy seats or buy and burn PUPATE.
 
 ## Developer income
 
@@ -205,8 +206,8 @@ If the developer stops paying, the system degrades but does not lock: anyone may
 | Plan | Scope | State |
 |---|---|---|
 | 1 | Repository, FloorFeed, Phase 0 desk findings | Done |
-| 2 | PupateToken, PupateHook | Next |
-| 3 | Cocoon, PupateVesting, timelock | |
+| 2 | PupateToken, PupateHook, independent review | Done |
+| 3 | Cocoon, PupateVesting, timelock | Next |
 | 4 | Launch manifest, Sepolia rehearsal, keeper bot, website | |
 
 The Sepolia rehearsal in Plan 4 is where the remaining Phase 0 questions are settled: whether the swarm's review admits the hook as designed, whether a seat held by a contract can be paired, and whether the oracle panel agrees on the floor question.
@@ -222,13 +223,14 @@ The Sepolia rehearsal in Plan 4 is where the remaining Phase 0 questions are set
   - the standing tax never increases;
   - a seat leaves Cocoon only through a filled listing;
   - the operator cannot move assets;
-  - a stale or out-of-range report never changes the stored floor.
+  - a rejected report never changes the stored floor, and no report raises it faster than the rise limit.
 
 ## Known risks
 
 - **The tax can be avoided in other pools.** The tax lives in the hook of the launch pool. The token is a plain ERC-20, so anyone can open another pool for it and trade there untaxed. IMD6900 does not have this weakness: its token refuses transfers that bypass its pool, which is possible because it was not launched through IMD. The launch pool holds 85% of supply and the site trades through it, which keeps most early volume there, but the leak grows with success. Lowering the standing tax narrows it.
 - **Token scanners will flag the launch.** For the first 93 minutes the buy tax is far above what scanners treat as normal.
-- **Reference-price manipulation.** Wash sales can move a median of recent sales. Limited by the 25% per-report move cap, the price tolerance, and the 30–70% split range. Anyone holding a seat can still sell it to the vault at up to 105% of the reference price.
+- **Reference-price manipulation.** Wash sales can move a median of recent sales. Limited by the rise limit of 25% per 6 hours, which applies whether or not the previous report is fresh, and by the price tolerance and the 30–70% split range. A sustained manipulation can still raise the reference by about 25% every 6 hours for as long as the oracle keeps reporting the inflated figure, and a 24-hour sales window means one burst of wash sales lasts a day. Anyone holding a seat can still sell it to the vault at up to 105% of the reference price.
+- **Trades made by providing liquidity are not taxed.** The hook taxes swaps. Someone who places PUPATE as a narrow liquidity position just above the price and lets buyers fill it has sold without paying the sell tax; someone who rests ETH just under the price at the open has bought without paying the launch tax. Each matched trade is then taxed once, on the taker. Closing this needs a `beforeAddLiquidity` gate that admits liquidity only in the transaction that opens the launch pool, which in turn depends on IMD's factory seeding the pool in that same transaction. Decision pending; see `docs/REVIEW.md`.
 - **Thin seat yield.** Seat earnings are split across all connected seats (about 650 today) and may be small. The design still works without them, as a tax-and-flip strategy.
 - **Seats that do not sell.** After 14 days a seat sits at 1.1x until bought. Capital is tied up if the market falls below that.
 - **Oracle dependency.** If the IMD oracle stops, buying halts and the split falls back to 50/50, with the seat pot accumulating unspent.
@@ -255,3 +257,13 @@ The Sepolia rehearsal in Plan 4 is where the remaining Phase 0 questions are set
 7. FloorFeed's question hash is set by the owner after deployment instead of in the constructor.
 8. New sections: UI/UX concept, running costs, deployment order.
 9. New known risks: tax avoidance through other pools, scanner flags, reference-price manipulation, fixed sink.
+
+## Changes in revision 3
+
+1. FloorFeed's "25% while the previous report is fresh" cap is replaced by a rise limit of 25% per 6 hours that always applies. Falls are not limited.
+2. FloorFeed checks the attestation's evidence chain (fixed at deployment), a minimum and majority quorum, and a minimum validity.
+3. Setting FloorFeed's question clears the stored price.
+4. The launch schedule is described as continuous, as the hook implements it.
+5. `flush` is described as handing over the hook's whole balance.
+6. New known risk: trades made by providing liquidity are not taxed. Decision pending.
+7. Notes for Cocoon's `burn()`: price-impact limit on the trade's own price, fixed swap parameters, no `flush` from inside its unlock.
