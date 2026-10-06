@@ -2,12 +2,14 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { avgCost, buyTax, eth, hm, isLaunch, mode, pct, receiveEstimate } from "@/lib/sim";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { Lead } from "./Hero";
 import { useDispatch, useSim } from "./SimContext";
 
 export function Feed() {
   const s = useSim();
   const dispatch = useDispatch();
+  const { openConnectModal } = useConnectModal();
   const [amount, setAmount] = useState("0.5");
   const [ago, setAgo] = useState(108 * 60);
 
@@ -23,7 +25,7 @@ export function Feed() {
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (!s.wallet) dispatch({ type: "connect" });
+    if (!s.wallet) openConnectModal?.();
     else dispatch({ type: "swap", amount: value });
   }
 
@@ -79,8 +81,8 @@ export function Feed() {
           </button>
           <p className="note">
             {s.wallet
-              ? `Simulated wallet ${s.wallet}. Trades here change the figures on this page and nothing else.`
-              : "Simulated: the first click connects a pretend wallet, the next ones trade against the sample pool."}
+              ? `${s.wallet} is connected. Until the contracts are live, trades here change the figures on this page and nothing else.`
+              : "Connect a wallet with RainbowKit. Until the contracts are live, trades here are simulated against the sample pool."}
           </p>
         </form>
 

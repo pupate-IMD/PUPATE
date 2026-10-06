@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useDispatch, useSim } from "./SimContext";
+import { ConnectWallet } from "./ConnectWallet";
 
 function effectiveDark(): boolean {
   if (typeof document === "undefined") return false;
@@ -11,8 +11,6 @@ function effectiveDark(): boolean {
 }
 
 export function TopBar() {
-  const s = useSim();
-  const dispatch = useDispatch();
   const [dark, setDark] = useState(false);
   useEffect(() => setDark(effectiveDark()), []);
 
@@ -56,18 +54,7 @@ export function TopBar() {
           <button className="iconbtn" onClick={toggleTheme} aria-label={dark ? "Switch to light" : "Switch to dark"}>
             {dark ? "☼" : "☾"}
           </button>
-          <button className="btn" onClick={() => dispatch({ type: "connect" })}>
-            {s.wallet ? (
-              <>
-                <span className="chip jade" style={{ border: 0, padding: 0, height: "auto" }}>
-                  <i className="d" />
-                </span>
-                {s.wallet}
-              </>
-            ) : (
-              "Connect"
-            )}
-          </button>
+          <ConnectWallet />
         </div>
       </div>
     </div>

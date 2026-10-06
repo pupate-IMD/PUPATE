@@ -199,7 +199,7 @@ export type Action =
   | { type: "burnTick" }
   | { type: "startAuction" }
   | { type: "takeAuction" }
-  | { type: "connect" }
+  | { type: "wallet"; address: string | null }
   | { type: "direction"; buying: boolean }
   | { type: "swap"; amount: number }
   | { type: "dismissToast" };
@@ -309,8 +309,12 @@ export function reduce(s: SimState, a: Action): SimState {
       );
     }
 
-    case "connect":
-      return withToast({ ...s, wallet: "0x3f…9c2a" }, "Pretend wallet connected. Nothing can be sent from this page.");
+    case "wallet": {
+      if (a.address === s.wallet) return s;
+      if (!a.address) return { ...s, wallet: null };
+      const short = `${a.address.slice(0, 6)}…${a.address.slice(-4)}`;
+      return withToast({ ...s, wallet: short }, `Wallet ${short} connected. Trades stay simulated until the contracts are live.`);
+    }
 
     case "direction":
       return { ...s, buying: a.buying };

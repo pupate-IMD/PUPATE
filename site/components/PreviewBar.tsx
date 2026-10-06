@@ -29,7 +29,7 @@ export function PreviewBar() {
           <summary>What you can try on this page</summary>
           <ol>
             <li>
-              <b>Connect</b> (a pretend wallet), then <b>Buy</b> or <b>Sell</b> in the swap box: the tax lands in the hook.
+              <b>Connect</b> a real wallet (RainbowKit), then <b>Buy</b> or <b>Sell</b> in the swap box: simulated, the tax lands in the hook.
             </li>
             <li>
               <b>Flush the tax</b>: moves it into the vault, split by the mode shown on the specimen sheet.

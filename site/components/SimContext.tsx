@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useReducer, type Dispatch, type ReactNode } from "react";
+import { useAccount } from "wagmi";
 import { preset, reduce, type Action, type SimState } from "@/lib/sim";
 
 const StateContext = createContext<SimState | null>(null);
@@ -8,6 +9,12 @@ const DispatchContext = createContext<Dispatch<Action> | null>(null);
 
 export function SimProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reduce, "steady", preset);
+  const { address, isConnected } = useAccount();
+
+  // The wallet is real (RainbowKit); the protocol it trades against is still the simulation.
+  useEffect(() => {
+    dispatch({ type: "wallet", address: isConnected && address ? address : null });
+  }, [address, isConnected]);
 
   // The burn's five-block spacing, one block every 1.2 seconds in the preview.
   useEffect(() => {

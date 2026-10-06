@@ -8,10 +8,12 @@ import { PreviewBar } from "@/components/PreviewBar";
 import { SimProvider } from "@/components/SimContext";
 import { Steps } from "@/components/Steps";
 import { TopBar } from "@/components/TopBar";
+import { Web3Provider } from "@/components/Web3Provider";
 
 export default function Page() {
   return (
-    <SimProvider>
+    <Web3Provider>
+      <SimProvider>
       <TopBar />
       <PreviewBar />
       <main>
@@ -31,6 +33,7 @@ export default function Page() {
           <div>Built with the IMD swarm, reviewed independently, hosted on IPFS. Source on GitHub.</div>
         </footer>
       </main>
-    </SimProvider>
+      </SimProvider>
+    </Web3Provider>
   );
 }

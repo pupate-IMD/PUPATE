@@ -91,6 +91,8 @@ h1, h2, h3, p { margin: 0; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border: 1px solid var(--hair); font-size: 10px; letter-spacing: var(--track); text-transform: uppercase; color: var(--dim); background: transparent; }
 .chip.on { border-color: var(--ink); color: var(--ink); }
 .chip .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--jade); display: inline-block; }
+.btn .dim { font-weight: 400; text-transform: none; letter-spacing: 0; }
 .chip.jade { color: var(--jade-ink); border-color: color-mix(in srgb, var(--jade) 55%, transparent); }
 .chip.gold { color: var(--gold-ink); border-color: color-mix(in srgb, var(--gold) 55%, transparent); }
 
