@@ -25,11 +25,12 @@ Treat the deployer fee as zero until shown otherwise.
 
 - Launch 246 (`WorkerWallet.sol`) is an ERC-1271 wallet that holds a seat and lets a rotating worker key sign for it on allowed EIP-712 domains. Launch 440 (SEATLEASE) states the network "accepts ERC-1271 from contract owners".
 - The IMD6900 README says ERC-1271 support for pairing "requires IMD confirmation before reliance".
-- No live pairing by a contract owner was verified.
+- IMD6900's `src/strategies/IMDSeatStrategy.sol` implements the pattern in production code: the operator approves a digest on-chain with `authorizeWorker`, and `isValidSignature` returns valid only for approved digests of seats still held. Its type string is `WorkerAuthorization(bytes32 deviceKey,address wallet,uint256 tokenId,bytes32 nonce,uint64 expiresAt,string relayOrigin)`.
+- No live pairing by a contract owner was verified. None of the 25 largest holders is a contract, and the IMD6900 strategy address could not be matched to a seat owner.
 
 Needs one real pairing attempt on a seat held by a contract.
 
-## 4. Oracle attestations `ANSWERED` for verification, `OPEN` for the floor question
+## 4. Oracle attestations `ANSWERED` for verification, `PARTIAL` for the floor question
 
 Verified:
 
@@ -40,10 +41,16 @@ Verified:
 - A request carries `panelSize` (5 to 100), `quorum`, `toleranceBps`, `validForSeconds` (21600 in the example), `guards.sources`, and `consumer {chainId, verifyingContract}`.
 - Each request costs 0.5 IMD. Six-hourly reports cost 2 IMD a day.
 
+Floor question:
+
+- Lowest asks are not on-chain (Seaport orders are signed off-chain) and OpenSea's API needs a key, so the question has to be built from on-chain sales.
+- Almost every attested request so far is an on-chain read over a block window: Uniswap v4 spot prices as a median over evenly spaced blocks, or event counts for a pool. The panel is practised at this kind of question.
+- A draft question, the median total price of Seaport 1.6 `OrderFulfilled` sales of the collection for ETH or WETH over the window, passed `POST /requests/check` with no blockers. The check normalised it to `evidence: "chain"`, a 24-hour window, panel 5, quorum 4, and suggested tighter wording.
+- The check does not return `questionHash`, and the hash is not derivable from the question text, so FloorFeed cannot take it as a constructor argument. It is set after the first request.
+
 Open:
 
-- A floor-price question needs a public data source that panel members can all read without an API key. OpenSea's API needs a key. Candidates to test: an on-chain question over Seaport `OrderFulfilled` events for the collection in a block window (median sale price), or a keyless marketplace endpoint.
-- Whether a panel agrees within tolerance on such a question.
+- Whether a panel agrees within tolerance on the floor question in practice. Needs one paid request.
 
 ## 5. Token split and token rules `ANSWERED`
 
@@ -70,7 +77,30 @@ So 85% to the pool and 5% to the requester wallet is expressible. The 5% arrives
 - The tax pattern in launch 168: take the fee inside the swap as ERC-6909 claims (`poolManager.mint(hook, 0, fee)`), settle to ETH later with `poolManager.take`. No external call during a swap.
 - Reference toolchain: solc 0.8.26, `cancun`, optimizer 200 runs, `via_ir = false`, `bytecode_hash = "none"`, `cbor_metadata = false`, dependencies vendored. Ours matches.
 
+## The hook tax can be avoided in other pools `ANSWERED`
+
+- The check fixes the token for a `univ4_hook` launch: "Transfers: plain, with no fees, limits, pausing or minting."
+- A hook only sees swaps in pools that use it. Anyone can open another pool for a plain token and trade there untaxed.
+- IMD6900 closes this hole in its token: `src/strategies/BaseStrategy.sol` reverts `InvalidTransfer` unless a transient transfer allowance has been set for the swap. That is only possible because IMD6900 was deployed outside the IMD launchpad.
+- Under IMD's rules there is no technical fix. It is recorded as a known risk in the spec.
+
+## A mainnet launch that pays for a seat (launch 775)
+
+`identity-md-launches/launch-775-ransom-for-seat-1376` is a live mainnet `univ4_hook` launch and the closest precedent to Pupate's hook.
+
+- Manifest: `"constructorArgs": ["$poolManager"]`, permissions `afterInitialize`, `beforeSwap`, `afterSwap`, `beforeSwapReturnDelta`, `afterSwapReturnDelta` (address flags `0x10CC`).
+- "The first native ETH pool initialized with the hook becomes `launchPool`; other pools initialize and trade without hook fees." Its notes ask the factory to deploy and initialise atomically for that reason.
+- 2% hook fee in native ETH beside the 0.3% LP fee, collected as ERC-6909 claims; swap callbacks only mint claims.
+- Before-swap fee modes reject partial fills.
+- It buys IMD through two fixed Uniswap v4 routes: POOL4 (1% LP fee, tick spacing 60, the POOL4 hook) and a plain ETH/IMD pool (1% LP fee, tick spacing 200, no hook), with its own price guards.
+
+## Reference code carries no licence
+
+None of the `identity-md-launches` repositories read here declares a licence. They were read to learn the launch format and the PoolManager conventions; no code was copied. Pupate's contracts are written from scratch against v4-core.
+
 ## Changes the spec needs
+
+Applied in spec revision 2.
 
 1. **Pool fee.** Replace "1.25% under current IMD policy" with the 0.3% LP fee (0.05% or 1% on request).
 2. **Developer income.** The 1% deployer fee is unconfirmed and may not exist. If the developer is to earn from trading, it has to be a stated share of the hook tax. This is a decision for the project owner.
