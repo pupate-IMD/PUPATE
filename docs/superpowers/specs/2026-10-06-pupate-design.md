@@ -201,12 +201,13 @@ If the developer stops paying, the system degrades but does not lock: anyone may
 
 ## Deployment order
 
-1. Deploy the timelock, FloorFeed, Cocoon and PupateVesting.
-2. Launch through IMD: the factory deploys PupateToken and PupateHook (with Cocoon and the timelock as constructor arguments) and opens the launch pool.
-3. Wire Cocoon to the launch pool. Confirm on-chain that the hook's launch pool is the intended one.
-4. Move the developer's 5% into PupateVesting.
-5. Make the first oracle request with FloorFeed as its consumer, set the question hash, submit the first report.
-6. Hand ownership of FloorFeed and Cocoon to the timelock.
+1. Deploy the timelock, FloorFeed and Cocoon (`script/DeployPreLaunch.s.sol`).
+2. Make the first oracle request with FloorFeed as its consumer; keep the question hash and the attestation.
+3. Launch through IMD: the factory deploys PupateToken and PupateHook (with Cocoon and the timelock as constructor arguments) and opens and seeds the launch pool in one transaction. Confirm on-chain that the hook's sink, owner and launch pool are the intended ones.
+4. Wire Cocoon to the launch pool, deploy PupateVesting and move the developer's 5% into it, set the question hash, and hand FloorFeed and Cocoon to the timelock (`script/PostLaunch.s.sol`).
+5. Submit the first report, start the keeper, publish the site, pair the first seat.
+
+Details: `docs/deployment.md`.
 
 ## Plans
 

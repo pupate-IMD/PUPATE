@@ -14,8 +14,13 @@ the token.
 | Contract | What it does |
 |---|---|
 | `PupateToken` | PUPATE: a plain ERC-20 with a fixed supply, burnable by its holders. |
-| `PupateHook` | Uniswap v4 hook. Takes the tax on the ETH side of every trade in the launch pool and flushes it to the vault. |
-| `FloorFeed` | Stores the collection's reference price from IMD oracle attestations. |
+| `PupateHook` | Uniswap v4 hook. Takes the tax on the ETH side of every trade in the launch pool, admits liquidity only in the block the pool opens, and flushes the tax to the vault. |
+| `FloorFeed` | Stores the collection's reference price from IMD oracle attestations, with a rise limit of 25% per 6 hours. |
+| `Cocoon` | The vault. Splits the tax by mode, buys seats on Seaport at or under the floor, lists them, settles sales, burns PUPATE within a price-impact limit, auctions seat earnings and the IMD share, and pairs held seats to IMD workers. |
+| `PupateVesting` | Releases the developer's allocation linearly over 12 months. |
+| `cocoon/SeatListing`, `cocoon/Decay`, `cocoon/WorkerAuthorization` | The Seaport orders per seat, the auction price curve, and IMD's pairing digest. |
+
+Deployment sequence and scripts: `docs/deployment.md`. Launch manifest: `launch.json`.
 
 ## Build
 
