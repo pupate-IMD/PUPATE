@@ -1,7 +1,7 @@
 # Pupate: design spec
 
 Date: 2026-10-06
-Status: revision 3. Revision 2 followed the Phase 0 desk findings in `docs/phase0-findings.md`; revision 3 followed the independent review of Plan 2 in `docs/REVIEW.md`. The change lists at the end say what moved.
+Status: revision 4. Revision 2 followed the Phase 0 desk findings in `docs/phase0-findings.md`; revision 3 followed the independent review of Plan 2 in `docs/REVIEW.md`; revision 4 records the decisions made while building Cocoon. The change lists at the end say what moved.
 
 ## Summary
 
@@ -100,21 +100,27 @@ Holds the seat pot, the burn pot, and the seats. Functions are callable by anyon
 
 The caller receives 0.5% of the purchase price from the seat pot.
 
-**Listing.** On purchase, Cocoon lists the seat on Seaport at a price that starts at 1.5x the purchase price and falls linearly to 1.1x over 14 days, then stays at 1.1x. Cocoon authorises the listing itself; no off-chain key signs it.
+**Refunds.** Cocoon sends the listing's highest possible price and Seaport returns what the order did not need. ETH that arrives during a purchase is not counted as proceeds; the seat's cost is the balance change, so a refund stays in the seat pot.
 
-**Selling.** When a listing fills, the ETH goes to the burn pot.
+**Listing.** On purchase, Cocoon publishes two signature-free Seaport orders for the seat and validates them on-chain: one whose price falls linearly from 1.5x the purchase price to 1.1x over 14 days, and a flat tail at 1.1x that starts when the first ends and runs for ten years. No off-chain key signs anything. The orders carry a per-seat round number, so the orders of an earlier purchase of the same seat can never collide with a later one's. The listing terms are fixed at purchase; a later change of parameters applies to new purchases only.
+
+**Selling.** When a listing fills, the ETH goes to the burn pot. `settleSeat(tokenId)`, callable by anyone, takes a sold seat off the books (`heldCount`, the average cost) and cancels its other order on Seaport, so the seat cannot be sold at a stale price if the vault ever buys it back.
+
+**Adoption.** A seat sent to Cocoon directly is taken onto the books by `adopt(tokenId)`, callable by anyone, at the current floor, and listed like a purchase. Safe transfers that are not part of a purchase are refused, so nothing but the collection can land in the vault by callback.
 
 **Burning.** `burn()` spends burn-pot ETH on PUPATE in the launch pool and burns what it receives. One call may move the pool price by at most 5%, and calls must be at least 5 blocks apart. Because every other trader pays the tax on both legs, moving the price by that much is not worth sandwiching. The caller receives 0.5% of the ETH spent. The limit is applied to the price the trade actually pays, not to the pool's quoted spot price alone: right after the open the spot price sits above all liquidity, and a 1-wei sell can move it to the maximum for free. Cocoon's swap parameters are fixed in code, since its swaps are the only untaxed ones, and Cocoon never calls `flush` from inside its own PoolManager unlock.
 
-**Harvesting.** Seats earn ERC-20 tokens (launch allocations and IMD). `startAuction(token)` opens a descending-price auction for Cocoon's whole balance of that token: the ETH price falls from a high start to zero over 24 hours, and the first buyer takes the balance. Proceeds go to the seat pot. PUPATE is never auctioned; any PUPATE balance is burned.
+**Harvesting.** Seats earn ERC-20 tokens (launch allocations and IMD). `startAuction(token)` opens a falling-price auction for Cocoon's whole balance of that token. The price starts at 1 ETH (a parameter), halves every 2 hours, falls in a straight line inside each half-life, and is zero from 48 hours on. The first taker gets the whole lot, pays the price of that moment, and gets any excess back; the price goes to the seat pot. Tokens that arrive during an auction wait for the next lot. PUPATE is never auctioned; any PUPATE balance is burned by `burnPupate()`.
 
-**IMD burn.** The IMD burn balance is auctioned the other way round: the amount of IMD a taker must deliver falls over 24 hours, the first taker receives the ETH, and the IMD they deliver goes to the dead address. Cocoon does not route through IMD's pools.
+**IMD burn.** The IMD burn balance is auctioned the other way round, on the same curve: the IMD a taker must deliver starts at 20,000 IMD per ETH of the lot (a parameter) and falls; the first taker receives the ETH lot, and the IMD they deliver goes to the dead address. Cocoon does not route through IMD's pools. Start values are fixed when an auction starts; a parameter change does not move a running auction.
 
 **Developer balance.** `claimDeveloper()` pays the accrued balance to the developer address. Only the developer address can change the developer address.
 
 **Pairing.** IMD pairs a device to a seat by checking an EIP-712 `WorkerAuthorization` signed by the seat's holder, and accepts ERC-1271 when the holder is a contract. Cocoon's operator approves a specific authorisation on-chain, and Cocoon's `isValidSignature` returns valid only for approved authorisations of seats it still holds. That is all the operator can do: it cannot transfer seats, move ETH, or change parameters. In this phase the operator is the developer.
 
-**Wiring.** Cocoon is deployed before the launch, so it learns the launch pool afterwards through a one-time `wire` call. Until then `burn()` is disabled.
+**Wiring.** Cocoon is deployed before the launch, so it learns the launch pool afterwards through a one-time `wire` call by the owner. `wire` accepts only a native-ETH pool whose hook names that pool as its launch pool and Cocoon as its sink, so the irreversible step cannot point at the wrong pool. Until then `burn()` and `burnPupate()` are disabled.
+
+**Accounting.** Cocoon's balance always equals its four pots added together: seat pot, burn pot, developer balance and IMD-burn balance. This is checked by a stateful invariant test across random sequences of every action.
 
 ### PupateVesting
 
@@ -208,8 +214,8 @@ If the developer stops paying, the system degrades but does not lock: anyone may
 |---|---|---|
 | 1 | Repository, FloorFeed, Phase 0 desk findings | Done |
 | 2 | PupateToken, PupateHook, independent review | Done |
-| 3 | Cocoon, PupateVesting, timelock | Next |
-| 4 | Launch manifest, Sepolia rehearsal, keeper bot, website | |
+| 3 | Cocoon, PupateVesting, timelock | Built; independent review pending; the mainnet-fork test needs an RPC |
+| 4 | Launch manifest, Sepolia rehearsal, keeper bot, website | Next |
 
 The Sepolia rehearsal in Plan 4 is where the remaining Phase 0 questions are settled: whether the swarm's review admits the hook as designed, whether a seat held by a contract can be paired, and whether the oracle panel agrees on the floor question.
 
@@ -268,3 +274,14 @@ The Sepolia rehearsal in Plan 4 is where the remaining Phase 0 questions are set
 5. `flush` is described as handing over the hook's whole balance.
 6. The hook gates liquidity: it can be added only to the launch pool in the block that opens it. Adopted after the review showed that trades made by resting liquidity escaped the tax.
 7. Notes for Cocoon's `burn()`: price-impact limit on the trade's own price, fixed swap parameters, no `flush` from inside its unlock.
+
+## Changes in revision 4
+
+Decisions made while building Cocoon (Plan 3):
+
+1. Listings are two validated Seaport orders per seat (falling, then a flat tail) with a per-seat round number; `settleSeat` cancels them when the seat sells.
+2. Refunds from Seaport stay in the seat pot; the seat's cost is the balance change.
+3. Seats sent directly to Cocoon are adopted at the floor rather than refused.
+4. The auction curve halves every 2 hours and reaches zero at 48 hours; start values are parameters fixed at the start of each auction.
+5. `wire` verifies the hook's launch pool and sink.
+6. `burn()` holds back the caller reward before swapping, so the pot always covers it, and reverts rather than records a burn when the pool sells nothing within the limit.

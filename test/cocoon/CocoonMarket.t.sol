@@ -103,17 +103,18 @@ contract CocoonMarketTest is CocoonFixture {
     }
 
     function test_buySeatRefundStaysInTheSeatPot() public {
-        // A listing falling from 3.0 to 2.5 ETH over 7 days; the cap is the higher end.
-        AdvancedOrder memory order = _listing(seller, SEAT, 2.5 ether, 12_000, 10_000, 7 days);
+        // A listing falling from 2.88 to 2.4 ETH over 7 days. The vault sends the higher end, which
+        // is what the tolerance is checked against, and gets the difference back.
+        AdvancedOrder memory order = _listing(seller, SEAT, 2.4 ether, 12_000, 10_000, 7 days);
         vm.warp(block.timestamp + 3.5 days);
         _setFloor(2.8 ether); // the earlier report has lapsed by now
         uint256 current = seaport.currentAmount(
-            3 ether, 2.5 ether, order.parameters.startTime, order.parameters.endTime, true
+            2.88 ether, 2.4 ether, order.parameters.startTime, order.parameters.endTime, true
         );
-        assertLt(current, 3 ether);
+        assertLt(current, 2.88 ether);
         uint256 potBefore = cocoon.seatPot();
         uint256 burnBefore = cocoon.burnPot();
-        uint256 reward = 3 ether * 50 / 10_000;
+        uint256 reward = 2.88 ether * 50 / 10_000;
 
         _buy(order);
 
