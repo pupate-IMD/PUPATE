@@ -60,6 +60,13 @@
     font-family: var(--mono); font-size: 0.8125rem; display: flex; gap: 0.75rem; align-items: baseline; flex-wrap: wrap;
   }
   .preview strong { font-weight: 500; }
+  .preview-controls { margin-left: auto; display: flex; gap: 0.25rem; }
+  .chip { background: transparent; border: 1px solid var(--rule); padding: 0.3rem 0.6rem; font-family: var(--mono); font-size: 0.75rem; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--gold-ink); border-color: var(--gold-ink); color: var(--paper); }
+  .theme { background: transparent; border: 1px solid var(--rule); padding: 0.3rem 0.6rem; font-family: var(--mono); font-size: 0.75rem; cursor: pointer; }
+  .mast-right { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
+  section[id] { scroll-margin-top: 1rem; }
+  .empty { border: 1px dashed var(--rule); padding: 1.25rem; color: var(--ink-soft); }
 
   /* Masthead */
   .mast { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; padding-block: 1.5rem 1rem; border-bottom: 1px solid var(--ink); }
@@ -85,7 +92,8 @@
   .conditions > div { padding: 1rem 1rem 1rem 0; }
   .conditions > div + div { border-left: 1px solid var(--rule); padding-left: 1rem; }
   .conditions .label { display: block; color: var(--ink-soft); font-size: 0.9375rem; }
-  .conditions .value { font-size: 1.5rem; font-weight: 500; line-height: 1.2; }
+  .conditions .value { display: block; font-size: 1.5rem; font-weight: 500; line-height: 1.2; }
+  .conditions .tag { display: block; margin-top: 0.3rem; }
   .mode { display: inline-flex; align-items: center; gap: 0.5rem; }
   .mode svg { width: 1.1em; height: 1.1em; }
   .mode.spinning { color: var(--jade-ink); }
@@ -121,7 +129,7 @@
   .field input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-size: 1.75rem; font-weight: 500; padding: 0.2rem 0; color: inherit; }
   .field input:focus { outline: none; }
   .field .row:focus-within { border-bottom-color: var(--jade); }
-  .field .unit { font-family: var(--mono); font-size: 0.875rem; color: var(--ink-soft); }
+  .field .unit { flex: none; white-space: nowrap; font-family: var(--mono); font-size: 0.875rem; color: var(--ink-soft); }
   .swap .out { font-size: 1.375rem; font-weight: 500; }
   .swap .taxline { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--rule); }
   .swap .cta { width: 100%; margin-top: 1rem; padding: 0.8rem; background: var(--ink); color: var(--paper); border: 1px solid var(--ink); cursor: pointer; font-weight: 500; }
@@ -133,6 +141,13 @@
   .specimen { border: 1px solid var(--rule); background: var(--paper-deep); padding: 0.9rem; display: grid; grid-template-rows: auto 1fr; gap: 0.75rem; min-width: 0;
     --shell-o: calc(0.95 - 0.78 * var(--ripe)); --wing-o: calc(0.92 * var(--ripe)); }
   .specimen .pin { display: flex; justify-content: center; padding-block: 0.5rem; }
+  .decay { height: 1px; background: var(--rule); position: relative; margin: 0.1rem 0.25rem 0.5rem; }
+  .decay i { position: absolute; top: -3px; left: calc(var(--ripe) * 100%); width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--ink); }
+  .auction { border: 1px solid var(--rule); border-left: 3px solid var(--gold); padding: 0.9rem 1rem; display: grid; grid-template-columns: 1fr auto; gap: 0.5rem 1rem; align-items: center; }
+  .auction .value { font-size: 1.25rem; font-weight: 500; }
+  .auction .tag { grid-column: 1 / -1; }
+  .auction button { background: transparent; border: 1px solid var(--ink); padding: 0.45rem 0.9rem; cursor: pointer; }
+  .auction button[disabled] { border-color: var(--rule); color: var(--ink-soft); cursor: not-allowed; }
   .specimen svg { width: 64px; height: 96px; color: var(--ink); }
   .specimen dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; font-family: var(--mono); font-size: 0.75rem; line-height: 1.5; }
   .specimen dt { color: var(--ink-soft); }
@@ -154,7 +169,7 @@
   th { font-weight: 500; font-size: 0.9375rem; color: var(--ink-soft); }
   td.num, th.num { text-align: right; padding-right: 0; padding-left: 0.75rem; }
   tfoot td { font-weight: 500; border-bottom: 0; }
-  .shellrow svg { width: 22px; height: 33px; color: var(--ink); vertical-align: middle; }
+  .shellrow svg { width: 26px; height: 39px; color: var(--ink); vertical-align: middle; }
 
   /* Steps anyone can run */
   .steps { display: grid; border-top: 1px solid var(--ink); }
@@ -182,6 +197,8 @@
     .conditions > div + div { border-left: 0; border-top: 1px solid var(--rule); padding-left: 0; }
     .feed-grid { grid-template-columns: 1fr; }
     .step { grid-template-columns: 1fr; }
+    .auction { grid-template-columns: 1fr; }
+    .preview-controls { margin-left: 0; }
   }
   @media (prefers-reduced-motion: no-preference) {
     .swap .toggle button, .meter i { transition: background-color 160ms ease, width 400ms ease; }
@@ -206,7 +223,7 @@
     </symbol>
     <!-- Caterpillar, for Feed. -->
     <symbol id="larva" viewBox="0 0 64 64">
-      <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M8 44c3-9 11-10 16-6s6 12 12 12 8-10 13-14 9 1 9 5"/>
         <path d="M10 40v-6M16 36v-6M24 36v-7M32 46v6M40 46v6M50 36v-7M58 38v-6"/>
         <circle cx="56" cy="36" r="1.2" fill="currentColor"/>
@@ -239,12 +256,19 @@
 <div class="page">
   <div class="preview" role="note">
     <strong>Design preview.</strong>
-    <span>Every figure on this page is a sample. Nothing is deployed and nothing here trades. The live site reads each number from the chain and links it to its source.</span>
+    <span>Every figure is a sample. Nothing is deployed and nothing here trades. The live site reads each number from the chain and links it to its source.</span>
+    <span class="preview-controls" role="group" aria-label="Preview state">
+      <button type="button" class="chip" id="state-steady" aria-pressed="true">Day 23</button>
+      <button type="button" class="chip" id="state-launch" aria-pressed="false">Launch, minute 12</button>
+    </span>
   </div>
 
   <header class="mast">
     <div class="wordmark">Pu<em>pate</em></div>
-    <div class="tag soft">PUPATE on Ethereum<br>pool opened 13 Sep 2026, day 23</div>
+    <div class="mast-right">
+      <div class="tag soft" id="mast-note">PUPATE on Ethereum<br>pool opened 13 Sep 2026, day 23</div>
+      <button type="button" class="theme" id="theme">Switch to light</button>
+    </div>
   </header>
 
   <nav class="cycle" aria-label="Stages">
@@ -262,18 +286,18 @@
     <div>
       <span class="label">Reference price, median of 24h sales</span>
       <span class="value num">2.74 ETH</span>
-      <span class="tag soft">reported 1h 48m ago, fresh for 4h 12m more</span>
+      <span class="tag soft" id="cond-fresh">reported 1h 48m ago, fresh for 4h 12m more</span>
     </div>
     <div>
       <span class="label">Mode</span>
       <span class="value mode spinning"><svg aria-hidden="true"><use href="#ico-spin"/></svg>Spinning</span>
-      <span class="tag soft">floor is under what the vault paid, so 70% of the strategy share buys seats</span>
+      <span class="tag soft" id="cond-mode-sub">floor is under what the vault paid, so 70% of the strategy share buys seats</span>
     </div>
     <div>
       <span class="label">Next cocoon</span>
-      <span class="value num">71%</span>
-      <div class="meter" role="img" aria-label="Seat pot at 71 percent of the reference price"><i style="--w:71%"></i></div>
-      <span class="tag soft">1.95 of 2.74 ETH in the seat pot</span>
+      <span class="value num" id="cond-next">71%</span>
+      <div class="meter" role="img" aria-label="Seat pot against the reference price" id="cond-meter"><i style="--w:71%"></i></div>
+      <span class="tag soft" id="cond-next-sub">1.95 of 2.74 ETH in the seat pot</span>
     </div>
   </section>
 
@@ -286,12 +310,12 @@
       <p class="lede">Every buy and sell in the launch pool pays 6% of its ETH side. Anyone can flush what has been collected into the vault, which splits it 85% to the strategy, 10% to the developer, 5% to buy and burn IMD.</p>
       <div class="feed-grid">
         <dl class="figures">
-          <div><dt>Tax collected since the open</dt><dd class="num">61.2 ETH<small>view on the hook</small></dd></div>
-          <div><dt>To the strategy</dt><dd class="num">52.0 ETH<small>85% of tax</small></dd></div>
-          <div><dt>Seat pot</dt><dd class="num">1.95 ETH<small>buys the next seat at up to 105% of floor</small></dd></div>
-          <div><dt>Burn pot</dt><dd class="num">0.41 ETH<small>spent on PUPATE, 5% price impact per call</small></dd></div>
-          <div><dt>Waiting in the hook</dt><dd class="num">0.08 ETH<small>flush it, no reward</small></dd></div>
-          <div><dt>Buy tax now</dt><dd class="num">6%<small>sell tax 6%</small></dd></div>
+          <div><dt>Tax collected since the open</dt><dd class="num" id="fig-tax">61.2 ETH<small>view on the hook</small></dd></div>
+          <div><dt>To the strategy</dt><dd class="num" id="fig-strategy">52.0 ETH<small>85% of tax</small></dd></div>
+          <div><dt>Seat pot</dt><dd class="num" id="fig-seatpot">1.95 ETH<small>buys the next seat at up to 105% of floor</small></dd></div>
+          <div><dt>Burn pot</dt><dd class="num" id="fig-burnpot">0.41 ETH<small>spent on PUPATE, 5% price impact per call</small></dd></div>
+          <div><dt>Waiting in the hook</dt><dd class="num" id="fig-hook">0.08 ETH<small>flush it, no reward</small></dd></div>
+          <div><dt>Buy tax now</dt><dd class="num" id="fig-buytax">6%<small>sell tax 6%</small></dd></div>
         </dl>
         <form class="swap" id="swap" aria-label="Swap panel">
           <div class="toggle" role="group" aria-label="Direction">
@@ -311,7 +335,7 @@
             <span class="soft">1 ETH = 70,400,000 PUPATE</span>
           </div>
           <button class="cta" type="submit" disabled id="cta">Buy PUPATE</button>
-          <p class="note tag soft">Preview: trading is not connected. At launch, the buy tax starts at 99% and falls one point a minute; this line will count it down.</p>
+          <p class="note tag soft" id="swap-note">Preview: trading is not connected. At launch, the buy tax starts at 99% and falls one point a minute; this line counts it down.</p>
         </form>
       </div>
     </div>
@@ -324,6 +348,8 @@
     </div>
     <div class="content">
       <p class="lede">Each seat the vault buys is listed at 1.5 times its purchase price, falling to 1.1 times over 14 days, and is paired to a worker in the IMD swarm for as long as it is held. A chrysalis clears as its price falls.</p>
+      <div class="empty" id="cocoon-empty" hidden>No seats yet. The first cocoon arrives when the seat pot reaches the reference price; at the current pace that is within the hour.</div>
+      <div id="cocoon-live">
       <div class="scale tag soft">
         <span>6 seats held, bought for 16.69 ETH in all, 2.78 ETH each on average</span>
         <span class="ramp"><svg aria-hidden="true" style="--ripe:0"><use href="#chrysalis"/></svg>day 0, 1.5x<span aria-hidden="true">&nbsp;&rarr;&nbsp;</span><svg aria-hidden="true" style="--ripe:1"><use href="#chrysalis"/></svg>day 14, 1.1x</span>
@@ -332,33 +358,40 @@
         <article class="specimen" style="--ripe:0">
           <div class="seat"><span>Seat 1733</span><span class="status working">working</span></div>
           <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
+          <div class="decay" aria-hidden="true"><i></i></div>
           <dl><dt>bought</dt><dd class="num">2.84 ETH</dd><dt>listed</dt><dd class="num">4.26 ETH</dd><dt>day</dt><dd class="num">0 of 14</dd><dt>jobs accepted</dt><dd class="num">3</dd></dl>
         </article>
         <article class="specimen" style="--ripe:.14">
           <div class="seat"><span>Seat 0882</span><span class="status working">working</span></div>
           <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
+          <div class="decay" aria-hidden="true"><i></i></div>
           <dl><dt>bought</dt><dd class="num">2.76 ETH</dd><dt>listed</dt><dd class="num">3.98 ETH</dd><dt>day</dt><dd class="num">2 of 14</dd><dt>jobs accepted</dt><dd class="num">17</dd></dl>
         </article>
         <article class="specimen" style="--ripe:.43">
           <div class="seat"><span>Seat 1376</span><span class="status working">working</span></div>
           <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
+          <div class="decay" aria-hidden="true"><i></i></div>
           <dl><dt>bought</dt><dd class="num">2.80 ETH</dd><dt>listed</dt><dd class="num">3.72 ETH</dd><dt>day</dt><dd class="num">6 of 14</dd><dt>jobs accepted</dt><dd class="num">41</dd></dl>
         </article>
         <article class="specimen" style="--ripe:.64">
           <div class="seat"><span>Seat 0410</span><span class="status idle">idle, no device</span></div>
           <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
+          <div class="decay" aria-hidden="true"><i></i></div>
           <dl><dt>bought</dt><dd class="num">2.72 ETH</dd><dt>listed</dt><dd class="num">3.38 ETH</dd><dt>day</dt><dd class="num">9 of 14</dd><dt>jobs accepted</dt><dd class="num">0</dd></dl>
         </article>
         <article class="specimen" style="--ripe:.79">
           <div class="seat"><span>Seat 1540</span><span class="status working">working</span></div>
           <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
+          <div class="decay" aria-hidden="true"><i></i></div>
           <dl><dt>bought</dt><dd class="num">2.91 ETH</dd><dt>listed</dt><dd class="num">3.45 ETH</dd><dt>day</dt><dd class="num">11 of 14</dd><dt>jobs accepted</dt><dd class="num">66</dd></dl>
         </article>
         <article class="specimen" style="--ripe:1">
           <div class="seat"><span>Seat 0097</span><span class="status ready">at 1.1x, waiting</span></div>
           <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
+          <div class="decay" aria-hidden="true"><i></i></div>
           <dl><dt>bought</dt><dd class="num">2.66 ETH</dd><dt>listed</dt><dd class="num">2.93 ETH</dd><dt>day</dt><dd class="num">14 of 14</dd><dt>jobs accepted</dt><dd class="num">88</dd></dl>
         </article>
+      </div>
       </div>
       <p class="tag soft">Jobs accepted come from IMD's public seat records. A seat with no paired device earns nothing; the operator pairs one.</p>
     </div>
@@ -371,6 +404,8 @@
     </div>
     <div class="content">
       <p class="lede">When a listing fills, the ETH goes to the burn pot. The burn pot buys PUPATE from the launch pool and destroys it. Tokens a seat earned while it worked are auctioned, and the ETH returns to the seat pot.</p>
+      <div class="empty" id="emerge-empty" hidden>Nothing has emerged yet. A seat sells when a buyer takes its listing; the ETH buys PUPATE and burns it.</div>
+      <div id="emerge-live">
       <div class="ledger-wrap">
         <table>
           <thead><tr><th>Seat</th><th class="num">Bought</th><th class="num">Sold</th><th class="num">Held</th><th class="num">PUPATE burned</th></tr></thead>
@@ -387,6 +422,12 @@
         <div><dt>Seat earnings harvested</dt><dd class="num">0.37 ETH<small>7 tokens auctioned, back to the seat pot</small></dd></div>
         <div><dt>Developer share</dt><dd class="num">6.12 ETH<small>10% of tax, pays oracle reports and seat machines</small></dd></div>
       </dl>
+      <div class="auction">
+        <div><span class="soft" style="font-size:.9375rem">Falling auction, live</span><div class="value num">4,120 FREE1376 <span class="soft">for</span> 0.0210 ETH</div></div>
+        <button type="button" disabled>Take the lot</button>
+        <div class="tag soft">Earned by the seats while they worked. The price falls to zero over 24 hours, 7h 40m left. The first taker gets the whole lot, and the ETH goes to the seat pot.</div>
+      </div>
+      </div>
     </div>
   </section>
 
@@ -427,34 +468,95 @@
 
 <script>
   (function () {
-    var RATE = 70400000;      // sample: PUPATE per ETH at the pool price
-    var TAX = 0.06, LP = 0.003;
-    var buying = true;
-    var amount = document.getElementById('amount');
-    var receive = document.getElementById('receive');
-    var unit = document.getElementById('amount-unit');
-    var label = document.getElementById('amount-label');
-    var cta = document.getElementById('cta');
-    var buyBtn = document.getElementById('buy-btn');
-    var sellBtn = document.getElementById('sell-btn');
+    var root = document.documentElement;
+    var byId = function (id) { return document.getElementById(id); };
 
-    function fmt(n, dp) {
-      return n.toLocaleString('en-US', { maximumFractionDigits: dp, minimumFractionDigits: 0 });
+    // Theme. A #light or #dark hash wins (for preview links), then a remembered choice, then the system.
+    var themeBtn = byId('theme');
+    function systemDark() { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
+    function effectiveDark() { var t = root.getAttribute('data-theme'); return t ? t === 'dark' : systemDark(); }
+    function labelTheme() { themeBtn.textContent = effectiveDark() ? 'Switch to light' : 'Switch to dark'; }
+    function applyTheme(t, remember) {
+      if (t) root.setAttribute('data-theme', t); else root.removeAttribute('data-theme');
+      if (remember) { try { localStorage.setItem('pupate-theme', t || ''); } catch (e) {} }
+      labelTheme();
     }
+    var hash = (location.hash || '').replace('#', '');
+    if (hash === 'light' || hash === 'dark') {
+      applyTheme(hash, false);
+    } else {
+      var saved = null;
+      try { saved = localStorage.getItem('pupate-theme'); } catch (e) {}
+      applyTheme(saved === 'light' || saved === 'dark' ? saved : null, false);
+    }
+    themeBtn.addEventListener('click', function () { applyTheme(effectiveDark() ? 'light' : 'dark', true); });
+    if (window.matchMedia) { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', labelTheme); }
+
+    // Two sample states: day 23 of steady trading, and minute 12 of the launch window.
+    var STATES = {
+      steady: {
+        tax: 0.06, buytax: '6%', taxline: 'Buy tax now 6%. Sell tax 6%.',
+        note: 'Preview: trading is not connected. At launch, the buy tax starts at 99% and falls one point a minute; this line counts it down.',
+        figs: { 'fig-tax': '61.2 ETH', 'fig-strategy': '52.0 ETH', 'fig-seatpot': '1.95 ETH', 'fig-burnpot': '0.41 ETH', 'fig-hook': '0.08 ETH' },
+        next: '71%', nextSub: '1.95 of 2.74 ETH in the seat pot',
+        modeSub: 'floor is under what the vault paid, so 70% of the strategy share buys seats',
+        mast: 'PUPATE on Ethereum<br>pool opened 13 Sep 2026, day 23', launch: false
+      },
+      launch: {
+        tax: 0.87, buytax: '87%', taxline: 'Buy tax now 87%. Reaches 6% in 81 minutes. Sell tax 6%.',
+        note: 'Preview: trading is not connected. The buy tax started at 99% twelve minutes ago and falls one point a minute. Whoever buys early pays for the first seat.',
+        figs: { 'fig-tax': '3.9 ETH', 'fig-strategy': '3.3 ETH', 'fig-seatpot': '2.31 ETH', 'fig-burnpot': '0.99 ETH', 'fig-hook': '0.42 ETH' },
+        next: '84%', nextSub: '2.31 of 2.74 ETH in the seat pot',
+        modeSub: 'no seats held yet, so 70% of the strategy share buys seats',
+        mast: 'PUPATE on Ethereum<br>pool opened 12 minutes ago', launch: true
+      }
+    };
+    var state = STATES.steady;
+    function setFig(id, value) {
+      var el = byId(id), small = el.querySelector('small');
+      el.textContent = value;
+      if (small) el.appendChild(small);
+    }
+    function applyState(name) {
+      state = STATES[name];
+      byId('state-steady').setAttribute('aria-pressed', name === 'steady' ? 'true' : 'false');
+      byId('state-launch').setAttribute('aria-pressed', name === 'launch' ? 'true' : 'false');
+      for (var id in state.figs) setFig(id, state.figs[id]);
+      setFig('fig-buytax', state.buytax);
+      byId('taxline').textContent = state.taxline;
+      byId('swap-note').textContent = state.note;
+      byId('cond-next').textContent = state.next;
+      byId('cond-next-sub').textContent = state.nextSub;
+      byId('cond-mode-sub').textContent = state.modeSub;
+      byId('cond-meter').querySelector('i').style.setProperty('--w', state.next);
+      byId('mast-note').innerHTML = state.mast;
+      byId('cocoon-live').hidden = state.launch;
+      byId('cocoon-empty').hidden = !state.launch;
+      byId('emerge-live').hidden = state.launch;
+      byId('emerge-empty').hidden = !state.launch;
+      update();
+    }
+    byId('state-steady').addEventListener('click', function () { applyState('steady'); });
+    byId('state-launch').addEventListener('click', function () { applyState('launch'); });
+
+    // Swap panel.
+    var RATE = 70400000;      // sample: PUPATE per ETH at the pool price
+    var LP = 0.003;
+    var buying = true;
+    var amount = byId('amount'), receive = byId('receive'), unit = byId('amount-unit');
+    var amountLabel = byId('amount-label'), cta = byId('cta'), buyBtn = byId('buy-btn'), sellBtn = byId('sell-btn');
+    function fmt(n, dp) { return n.toLocaleString('en-US', { maximumFractionDigits: dp, minimumFractionDigits: 0 }); }
     function update() {
       var v = parseFloat(String(amount.value).replace(',', '.'));
       if (!(v > 0)) { receive.textContent = buying ? '0 PUPATE' : '0 ETH'; return; }
-      if (buying) {
-        receive.textContent = fmt(Math.floor(v * (1 - TAX) * (1 - LP) * RATE), 0) + ' PUPATE';
-      } else {
-        receive.textContent = fmt(v / RATE * (1 - LP) * (1 - TAX), 6) + ' ETH';
-      }
+      if (buying) receive.textContent = fmt(Math.floor(v * (1 - state.tax) * (1 - LP) * RATE), 0) + ' PUPATE';
+      else receive.textContent = fmt(v / RATE * (1 - LP) * (1 - 0.06), 6) + ' ETH';
     }
     function setDirection(buy) {
       buying = buy;
       buyBtn.setAttribute('aria-pressed', buy ? 'true' : 'false');
       sellBtn.setAttribute('aria-pressed', buy ? 'false' : 'true');
-      label.textContent = buy ? 'You pay' : 'You sell';
+      amountLabel.textContent = buy ? 'You pay' : 'You sell';
       unit.textContent = buy ? 'ETH' : 'PUPATE';
       cta.textContent = buy ? 'Buy PUPATE' : 'Sell PUPATE';
       amount.value = buy ? '0.5' : '10000000';
@@ -463,8 +565,21 @@
     buyBtn.addEventListener('click', function () { setDirection(true); });
     sellBtn.addEventListener('click', function () { setDirection(false); });
     amount.addEventListener('input', update);
-    document.getElementById('swap').addEventListener('submit', function (e) { e.preventDefault(); });
-    update();
+    byId('swap').addEventListener('submit', function (e) { e.preventDefault(); });
+
+    // The report's age ticks from the sample value, so the freshness line reads like the live one.
+    var fresh = byId('cond-fresh'), reportedAgo = 108 * 60, loadedAt = Date.now();
+    function hm(sec) { var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60); return (h ? h + 'h ' : '') + m + 'm'; }
+    function tick() {
+      var ago = reportedAgo + Math.floor((Date.now() - loadedAt) / 1000), left = 6 * 3600 - ago;
+      fresh.textContent = left > 0
+        ? 'reported ' + hm(ago) + ' ago, fresh for ' + hm(left) + ' more'
+        : 'reported ' + hm(ago) + ' ago, stale: the vault is not buying';
+    }
+    tick();
+    setInterval(tick, 30000);
+
+    applyState('steady');
   })();
 </script>
 </body>
