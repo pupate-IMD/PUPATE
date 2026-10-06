@@ -146,7 +146,9 @@ The bot holds no privileged key. If it stops, anyone else can make the same call
 
 ### Website
 
-A static site at pupate.si, hosted on IPFS, with no backend. It reads the chain through a public RPC and seat work statistics from IMD's public API. It carries its own swap panel, because third-party interfaces may not route through a pool with a custom hook.
+A Next.js application exported as a static site (`output: 'export'`, in `site/`), hosted on IPFS at pupate.si, with no backend. It reads the chain through a public RPC and seat work statistics from IMD's public API. It carries its own swap panel, because third-party interfaces may not route through a pool with a custom hook.
+
+The visual language is IMD's own, so Pupate reads as part of the ecosystem: IBM Plex Mono as the only typeface, paper and ink with a dark variant, 1.5px rules and square corners, small tracked uppercase labels, big bold figures, green as the single accent, a boxed top bar with an inverted active item, a three-panel overview with an action row, a boxed swap with Buy/Sell tabs, key-value rows with hairlines, and a fixed status bar at the bottom.
 
 #### UI/UX concept: the life cycle is the interface
 
