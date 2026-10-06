@@ -12,7 +12,7 @@ bytecode_hash = "none"
 cbor_metadata = false
 ffi = false
 fs_permissions = []
-remappings = ["forge-std/=lib/forge-std/src/"]
+remappings = ["forge-std/=lib/forge-std/src/", "v4-core/=lib/v4-core/", "solmate/=lib/solmate/"]
 
 [profile.default.fuzz]
 runs = 256
