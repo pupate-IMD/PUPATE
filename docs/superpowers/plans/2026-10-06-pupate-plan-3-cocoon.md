@@ -45,7 +45,7 @@
 
 Tests: the digest matches a hand-computed EIP-712 digest and changes with the collection and chain id; `Decay.price` at 0, one half-life, between, and past the cutoff, and is monotone (fuzz); the two orders have the right item types, amounts, times and salts, and `components` matches `orders` field for field.
 
-- [ ] Write tests, see them fail, write the libraries, see them pass, commit `feat: add Cocoon libraries`.
+- [x] Write tests, see them fail, write the libraries, see them pass, commit `feat: add Cocoon libraries`.
 
 ### Task 2: PupateVesting
 
@@ -57,7 +57,7 @@ Tests: the digest matches a hand-computed EIP-712 digest and changes with the co
 
 Tests: nothing before start; half at mid-way; all at the end; tokens added later vest on the same curve; release is idempotent; only the beneficiary changes the beneficiary; zero addresses rejected.
 
-- [ ] TDD as above, commit `feat: add PupateVesting`.
+- [x] TDD as above, commit `feat: add PupateVesting`.
 
 ### Task 3: Cocoon core
 
@@ -77,7 +77,7 @@ Tests: nothing before start; half at mid-way; all at the end; tokens added later
 
 Tests: split arithmetic in each mode (fresh/stale feed, no seats, floor below and above the average), rounding leaves no wei unaccounted, developer claim and rotation, parameter bounds, owner-only and once-only `wire`, plain ETH goes to the burn pot, the balance identity after a random sequence (fuzz).
 
-- [ ] TDD as above, commit `feat: add Cocoon pots, mode and tax split`.
+- [x] TDD as above, commit `feat: add Cocoon pots, mode and tax split`.
 
 ### Task 4: Buying, listing and settling
 
@@ -94,7 +94,7 @@ Tests: split arithmetic in each mode (fresh/stale feed, no seats, floor below an
 
 Tests: a listing at the floor is bought and listed (two validated orders with the right prices); the caller gets 0.5%; refunds stay in the seat pot (Review Focus 1); rejections for each check (wrong collection, ERC20 consideration, criteria order, partial order, stale feed, price above tolerance, pot too small); a third party buys our listing through the mock at the descending price, the ETH lands in the burn pot, `settleSeat` fixes `heldCount`/`heldCost` and cancels the orders (Review Focus 2 and 3); an unsolicited NFT transfer is rejected; reentrancy from the mock into `buySeat` is rejected.
 
-- [ ] TDD as above, commit `feat: Cocoon buys, lists and settles seats`.
+- [x] TDD as above, commit `feat: Cocoon buys, lists and settles seats`.
 
 ### Task 5: Burning
 
@@ -109,7 +109,7 @@ Tests: a listing at the floor is bought and listed (two validated orders with th
 
 Tests, on a real PoolManager with PupateHook whose sink is Cocoon: a burn spends the pot, moves the price by at most the limit, burns the tokens, pays the reward and is untaxed; a partial fill leaves the rest in the pot; the spacing is enforced; the spot-above-liquidity case reverts with nothing bought (Review Focus 4); a stranger's sandwich around a burn loses money net of the tax (property test with the Trader).
 
-- [ ] TDD as above, commit `feat: Cocoon burns PUPATE within a price-impact limit`.
+- [x] TDD as above, commit `feat: Cocoon burns PUPATE within a price-impact limit`.
 
 ### Task 6: Auctions
 
@@ -123,7 +123,7 @@ Tests, on a real PoolManager with PupateHook whose sink is Cocoon: a burn spends
 
 Tests: price curve at several times; the taker gets the lot and the excess back; a second start while running reverts; PUPATE cannot be auctioned; tokens received after a start go to the next lot; the IMD auction burns the demanded amount and pays the lot; the balance identity holds through both.
 
-- [ ] TDD as above, commit `feat: Cocoon auctions seat earnings and the IMD share`.
+- [x] TDD as above, commit `feat: Cocoon auctions seat earnings and the IMD share`.
 
 ### Task 7: Pairing
 
@@ -136,7 +136,7 @@ Tests: price curve at several times; the taker gets the lot and the excess back;
 
 Tests: digest matches the library; wrong wallet, expired, unheld seat rejected; approval dies with the seat (Review Focus 5); revoke works; an arbitrary digest is invalid; only the operator may call.
 
-- [ ] TDD as above, commit `feat: Cocoon pairs held seats to IMD workers`.
+- [x] TDD as above, commit `feat: Cocoon pairs held seats to IMD workers`.
 
 ### Task 8: Invariants and the fork test
 
@@ -147,7 +147,7 @@ The handler deposits tax, trades, flushes, buys listings on the mock market, let
 
 The fork test runs only when `MAINNET_RPC_URL` is set (`vm.envOr`), forks mainnet, deploys FloorFeed and Cocoon against the real Seaport and collection, impersonates a holder to create a real Seaport listing, buys it through `buySeat`, checks the two validated orders with `getOrderStatus`, fulfills the descending order as a third party, and settles. It is the gate for Plan 4.
 
-- [ ] Write, run, commit `test: Cocoon invariants and mainnet-fork Seaport test`.
+- [x] Write, run, commit `test: Cocoon invariants and mainnet-fork Seaport test`.
 
 ### Task 9: Spec and review
 

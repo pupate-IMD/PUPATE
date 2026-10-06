@@ -18,6 +18,7 @@ contract SeatListingTest is Test {
         t.endX = 11_000;
         t.decay = 14 days;
         t.boughtAt = T;
+        t.round = 0;
     }
 
     function test_prices() public pure {
@@ -51,7 +52,7 @@ contract SeatListingTest is Test {
         assertEq(p.startTime, T);
         assertEq(p.endTime, T + 14 days);
         assertEq(p.zoneHash, bytes32(0));
-        assertEq(p.salt, uint256(keccak256(abi.encode(TOKEN, T, uint256(0)))));
+        assertEq(p.salt, uint256(keccak256(abi.encode(TOKEN, uint16(0), uint256(0)))));
         assertEq(p.conduitKey, bytes32(0));
         assertEq(p.totalOriginalConsiderationItems, 1);
         assertEq(o[0].signature.length, 0);
@@ -65,7 +66,7 @@ contract SeatListingTest is Test {
         assertEq(p.consideration[0].endAmount, 3.08 ether);
         assertEq(p.startTime, T + 14 days);
         assertEq(p.endTime, T + 14 days + 3650 days);
-        assertEq(p.salt, uint256(keccak256(abi.encode(TOKEN, T, uint256(1)))));
+        assertEq(p.salt, uint256(keccak256(abi.encode(TOKEN, uint16(0), uint256(1)))));
         assertEq(p.offer[0].identifierOrCriteria, TOKEN);
         assertEq(uint8(p.orderType), uint8(OrderType.FULL_OPEN));
         assertEq(o[1].signature.length, 0);
@@ -93,7 +94,7 @@ contract SeatListingTest is Test {
 
     function test_differentPurchasesOfTheSameSeatGetDifferentSalts() public pure {
         SeatListing.Terms memory later = _terms();
-        later.boughtAt = T + 1;
+        later.round = 1;
         Order[] memory a = SeatListing.orders(OFFERER, COLLECTION, TOKEN, _terms());
         Order[] memory b = SeatListing.orders(OFFERER, COLLECTION, TOKEN, later);
         assertTrue(a[0].parameters.salt != b[0].parameters.salt);

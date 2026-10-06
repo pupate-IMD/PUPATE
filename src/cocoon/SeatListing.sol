@@ -20,6 +20,7 @@ library SeatListing {
         uint16 endX;
         uint32 decay;
         uint40 boughtAt;
+        uint16 round; // how many times the offerer has bought this seat before
     }
 
     uint256 internal constant BPS = 10_000;
@@ -33,8 +34,10 @@ library SeatListing {
         return t.cost * t.endX / BPS;
     }
 
-    function salt(uint256 tokenId, uint40 boughtAt, uint256 index) internal pure returns (uint256) {
-        return uint256(keccak256(abi.encode(tokenId, boughtAt, index)));
+    /// @dev Distinct per seat, per purchase of that seat, and per order, so the orders of an earlier
+    /// purchase (cancelled when the seat sold) can never collide with a later one's.
+    function salt(uint256 tokenId, uint16 round, uint256 index) internal pure returns (uint256) {
+        return uint256(keccak256(abi.encode(tokenId, round, index)));
     }
 
     /// @param index 0 for the falling order, 1 for the flat tail.
@@ -75,7 +78,7 @@ library SeatListing {
             startTime: startTime,
             endTime: endTime,
             zoneHash: bytes32(0),
-            salt: salt(tokenId, t.boughtAt, index),
+            salt: salt(tokenId, t.round, index),
             conduitKey: bytes32(0),
             totalOriginalConsiderationItems: 1
         });
