@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
       "pino-pretty",
       "lokijs",
       "encoding",
+      "@react-native-async-storage/async-storage",
     ];
     config.resolve = config.resolve ?? {};
     config.resolve.alias = { ...(config.resolve.alias ?? {}), ...Object.fromEntries(stubs.map((s) => [s, false])) };
