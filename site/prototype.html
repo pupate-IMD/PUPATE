@@ -184,6 +184,7 @@
   .notes p { padding-left: 1.75rem; position: relative; }
   .notes p::before { counter-increment: note; content: counter(note) "."; position: absolute; left: 0; font-family: var(--mono); font-size: 0.8125rem; color: var(--ink-soft); top: 0.2em; }
 
+  .toast { position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); max-width: 40rem; margin-inline: auto; background: var(--ink); color: var(--paper); padding: 0.75rem 1rem; border-left: 3px solid var(--gold); z-index: 10; }
   footer { padding-top: 2rem; display: grid; gap: 1rem; color: var(--ink-soft); font-size: 0.9375rem; }
   footer .tag { word-break: break-all; }
 
@@ -256,10 +257,11 @@
 <div class="page">
   <div class="preview" role="note">
     <strong>Design preview.</strong>
-    <span>Every figure is a sample. Nothing is deployed and nothing here trades. The live site reads each number from the chain and links it to its source.</span>
+    <span>Every figure is a sample and every button simulates the contracts inside this page. Nothing is deployed and nothing is sent. The live site reads each number from the chain and links it to its source.</span>
     <span class="preview-controls" role="group" aria-label="Preview state">
       <button type="button" class="chip" id="state-steady" aria-pressed="true">Day 23</button>
       <button type="button" class="chip" id="state-launch" aria-pressed="false">Launch, minute 12</button>
+      <button type="button" class="chip" id="advance">Advance a day</button>
     </span>
   </div>
 
@@ -285,12 +287,12 @@
   <section class="conditions" aria-label="Conditions">
     <div>
       <span class="label">Reference price, median of 24h sales</span>
-      <span class="value num">2.74 ETH</span>
+      <span class="value num" id="cond-floor">2.74 ETH</span>
       <span class="tag soft" id="cond-fresh">reported 1h 48m ago, fresh for 4h 12m more</span>
     </div>
     <div>
       <span class="label">Mode</span>
-      <span class="value mode spinning"><svg aria-hidden="true"><use href="#ico-spin"/></svg>Spinning</span>
+      <span class="value mode spinning" id="cond-mode"><svg aria-hidden="true"><use href="#ico-spin"/></svg>Spinning</span>
       <span class="tag soft" id="cond-mode-sub">floor is under what the vault paid, so 70% of the strategy share buys seats</span>
     </div>
     <div>
@@ -334,7 +336,7 @@
             <span id="taxline">Buy tax now 6%. Sell tax 6%.</span>
             <span class="soft">1 ETH = 70,400,000 PUPATE</span>
           </div>
-          <button class="cta" type="submit" disabled id="cta">Buy PUPATE</button>
+          <button class="cta" type="submit" id="cta">Connect wallet</button>
           <p class="note tag soft" id="swap-note">Preview: trading is not connected. At launch, the buy tax starts at 99% and falls one point a minute; this line counts it down.</p>
         </form>
       </div>
@@ -351,47 +353,10 @@
       <div class="empty" id="cocoon-empty" hidden>No seats yet. The first cocoon arrives when the seat pot reaches the reference price; at the current pace that is within the hour.</div>
       <div id="cocoon-live">
       <div class="scale tag soft">
-        <span>6 seats held, bought for 16.69 ETH in all, 2.78 ETH each on average</span>
+        <span id="held-line">6 seats held, bought for 16.69 ETH in all, 2.78 ETH each on average</span>
         <span class="ramp"><svg aria-hidden="true" style="--ripe:0"><use href="#chrysalis"/></svg>day 0, 1.5x<span aria-hidden="true">&nbsp;&rarr;&nbsp;</span><svg aria-hidden="true" style="--ripe:1"><use href="#chrysalis"/></svg>day 14, 1.1x</span>
       </div>
-      <div class="drawer">
-        <article class="specimen" style="--ripe:0">
-          <div class="seat"><span>Seat 1733</span><span class="status working">working</span></div>
-          <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
-          <div class="decay" aria-hidden="true"><i></i></div>
-          <dl><dt>bought</dt><dd class="num">2.84 ETH</dd><dt>listed</dt><dd class="num">4.26 ETH</dd><dt>day</dt><dd class="num">0 of 14</dd><dt>jobs accepted</dt><dd class="num">3</dd></dl>
-        </article>
-        <article class="specimen" style="--ripe:.14">
-          <div class="seat"><span>Seat 0882</span><span class="status working">working</span></div>
-          <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
-          <div class="decay" aria-hidden="true"><i></i></div>
-          <dl><dt>bought</dt><dd class="num">2.76 ETH</dd><dt>listed</dt><dd class="num">3.98 ETH</dd><dt>day</dt><dd class="num">2 of 14</dd><dt>jobs accepted</dt><dd class="num">17</dd></dl>
-        </article>
-        <article class="specimen" style="--ripe:.43">
-          <div class="seat"><span>Seat 1376</span><span class="status working">working</span></div>
-          <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
-          <div class="decay" aria-hidden="true"><i></i></div>
-          <dl><dt>bought</dt><dd class="num">2.80 ETH</dd><dt>listed</dt><dd class="num">3.72 ETH</dd><dt>day</dt><dd class="num">6 of 14</dd><dt>jobs accepted</dt><dd class="num">41</dd></dl>
-        </article>
-        <article class="specimen" style="--ripe:.64">
-          <div class="seat"><span>Seat 0410</span><span class="status idle">idle, no device</span></div>
-          <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
-          <div class="decay" aria-hidden="true"><i></i></div>
-          <dl><dt>bought</dt><dd class="num">2.72 ETH</dd><dt>listed</dt><dd class="num">3.38 ETH</dd><dt>day</dt><dd class="num">9 of 14</dd><dt>jobs accepted</dt><dd class="num">0</dd></dl>
-        </article>
-        <article class="specimen" style="--ripe:.79">
-          <div class="seat"><span>Seat 1540</span><span class="status working">working</span></div>
-          <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
-          <div class="decay" aria-hidden="true"><i></i></div>
-          <dl><dt>bought</dt><dd class="num">2.91 ETH</dd><dt>listed</dt><dd class="num">3.45 ETH</dd><dt>day</dt><dd class="num">11 of 14</dd><dt>jobs accepted</dt><dd class="num">66</dd></dl>
-        </article>
-        <article class="specimen" style="--ripe:1">
-          <div class="seat"><span>Seat 0097</span><span class="status ready">at 1.1x, waiting</span></div>
-          <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
-          <div class="decay" aria-hidden="true"><i></i></div>
-          <dl><dt>bought</dt><dd class="num">2.66 ETH</dd><dt>listed</dt><dd class="num">2.93 ETH</dd><dt>day</dt><dd class="num">14 of 14</dd><dt>jobs accepted</dt><dd class="num">88</dd></dl>
-        </article>
-      </div>
+      <div class="drawer" id="drawer"></div>
       </div>
       <p class="tag soft">Jobs accepted come from IMD's public seat records. A seat with no paired device earns nothing; the operator pairs one.</p>
     </div>
@@ -409,23 +374,19 @@
       <div class="ledger-wrap">
         <table>
           <thead><tr><th>Seat</th><th class="num">Bought</th><th class="num">Sold</th><th class="num">Held</th><th class="num">PUPATE burned</th></tr></thead>
-          <tbody>
-            <tr class="shellrow"><td><svg aria-hidden="true"><use href="#shell"/></svg> 0231</td><td class="num">2.58 ETH</td><td class="num">3.41 ETH</td><td class="num">5 days</td><td class="num">4,310,000</td></tr>
-            <tr class="shellrow"><td><svg aria-hidden="true"><use href="#shell"/></svg> 1105</td><td class="num">2.70 ETH</td><td class="num">3.24 ETH</td><td class="num">8 days</td><td class="num">4,210,000</td></tr>
-            <tr class="shellrow"><td><svg aria-hidden="true"><use href="#shell"/></svg> 0644</td><td class="num">2.61 ETH</td><td class="num">3.09 ETH</td><td class="num">10 days</td><td class="num">3,960,000</td></tr>
-          </tbody>
-          <tfoot><tr><td colspan="4">Burned so far, 1.25% of supply</td><td class="num">12,480,000</td></tr></tfoot>
+          <tbody id="ledger"></tbody>
+          <tfoot><tr><td colspan="4" id="burned-label">Burned so far, 1.25% of supply</td><td class="num" id="burned-total">12,480,000</td></tr></tfoot>
         </table>
       </div>
       <dl class="figures">
-        <div><dt>IMD bought and burned</dt><dd class="num">312 IMD<small>5% of tax, sold by falling auction</small></dd></div>
-        <div><dt>Seat earnings harvested</dt><dd class="num">0.37 ETH<small>7 tokens auctioned, back to the seat pot</small></dd></div>
-        <div><dt>Developer share</dt><dd class="num">6.12 ETH<small>10% of tax, pays oracle reports and seat machines</small></dd></div>
+        <div><dt>IMD bought and burned</dt><dd class="num" id="fig-imd">312 IMD<small>5% of tax, sold by falling auction</small></dd></div>
+        <div><dt>Seat earnings harvested</dt><dd class="num" id="fig-harvest">0.37 ETH<small>7 tokens auctioned, back to the seat pot</small></dd></div>
+        <div><dt>Developer share</dt><dd class="num" id="fig-dev">6.12 ETH<small>10% of tax, pays oracle reports and seat machines</small></dd></div>
       </dl>
-      <div class="auction">
-        <div><span class="soft" style="font-size:.9375rem">Falling auction, live</span><div class="value num">4,120 FREE1376 <span class="soft">for</span> 0.0210 ETH</div></div>
-        <button type="button" disabled>Take the lot</button>
-        <div class="tag soft">Earned by the seats while they worked. The price falls to zero over 24 hours, 7h 40m left. The first taker gets the whole lot, and the ETH goes to the seat pot.</div>
+      <div class="auction" id="auction">
+        <div><span class="soft" style="font-size:.9375rem">Falling auction, live</span><div class="value num" id="auction-value">4,120 FREE1376 <span class="soft">for</span> 0.0210 ETH</div></div>
+        <button type="button" id="auction-take">Take the lot</button>
+        <div class="tag soft" id="auction-sub">Earned by the seats while they worked.</div>
       </div>
       </div>
     </div>
@@ -438,10 +399,11 @@
     <div class="content">
       <p class="lede">Nobody operates Pupate. Each step is a public function; a bot runs them, and if it stops, anyone else can.</p>
       <div class="steps">
-        <div class="step"><div><b>Flush the tax</b><br><span class="soft">Moves 0.08 ETH from the hook to the vault. No reward.</span></div><button type="button" disabled>Run</button></div>
-        <div class="step"><div><b>Buy a seat</b><br><span class="soft">Fills the cheapest listing at or under 105% of the reference price. Reward 0.5% of the price. Not available: the seat pot is at 71%.</span></div><button type="button" disabled>Run</button></div>
-        <div class="step"><div><b>Burn</b><br><span class="soft">Spends up to 5% price impact of the burn pot on PUPATE and destroys it. Reward 0.5% of the ETH spent. Available in 3 blocks.</span></div><button type="button" disabled>Run</button></div>
-        <div class="step"><div><b>Start an auction</b><br><span class="soft">Opens a falling-price auction for a token the seats earned. No reward; the buyer gets the discount.</span></div><button type="button" disabled>Run</button></div>
+        <div class="step" id="step-flush"><div><b>Flush the tax</b><br><span class="soft"></span></div><button type="button">Run</button></div>
+        <div class="step" id="step-buy"><div><b>Buy a seat</b><br><span class="soft"></span></div><button type="button">Run</button></div>
+        <div class="step" id="step-burn"><div><b>Burn</b><br><span class="soft"></span></div><button type="button">Run</button></div>
+        <div class="step" id="step-auction"><div><b>Start an auction</b><br><span class="soft"></span></div><button type="button">Run</button></div>
+      </div>
       </div>
     </div>
   </section>
@@ -466,121 +428,15 @@
   </footer>
 </div>
 
-<script>
-  (function () {
-    var root = document.documentElement;
-    var byId = function (id) { return document.getElementById(id); };
-
-    // Theme. A #light or #dark hash wins (for preview links), then a remembered choice, then the system.
-    var themeBtn = byId('theme');
-    function systemDark() { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
-    function effectiveDark() { var t = root.getAttribute('data-theme'); return t ? t === 'dark' : systemDark(); }
-    function labelTheme() { themeBtn.textContent = effectiveDark() ? 'Switch to light' : 'Switch to dark'; }
-    function applyTheme(t, remember) {
-      if (t) root.setAttribute('data-theme', t); else root.removeAttribute('data-theme');
-      if (remember) { try { localStorage.setItem('pupate-theme', t || ''); } catch (e) {} }
-      labelTheme();
-    }
-    var hash = (location.hash || '').replace('#', '');
-    if (hash === 'light' || hash === 'dark') {
-      applyTheme(hash, false);
-    } else {
-      var saved = null;
-      try { saved = localStorage.getItem('pupate-theme'); } catch (e) {}
-      applyTheme(saved === 'light' || saved === 'dark' ? saved : null, false);
-    }
-    themeBtn.addEventListener('click', function () { applyTheme(effectiveDark() ? 'light' : 'dark', true); });
-    if (window.matchMedia) { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', labelTheme); }
-
-    // Two sample states: day 23 of steady trading, and minute 12 of the launch window.
-    var STATES = {
-      steady: {
-        tax: 0.06, buytax: '6%', taxline: 'Buy tax now 6%. Sell tax 6%.',
-        note: 'Preview: trading is not connected. At launch, the buy tax starts at 99% and falls one point a minute; this line counts it down.',
-        figs: { 'fig-tax': '61.2 ETH', 'fig-strategy': '52.0 ETH', 'fig-seatpot': '1.95 ETH', 'fig-burnpot': '0.41 ETH', 'fig-hook': '0.08 ETH' },
-        next: '71%', nextSub: '1.95 of 2.74 ETH in the seat pot',
-        modeSub: 'floor is under what the vault paid, so 70% of the strategy share buys seats',
-        mast: 'PUPATE on Ethereum<br>pool opened 13 Sep 2026, day 23', launch: false
-      },
-      launch: {
-        tax: 0.87, buytax: '87%', taxline: 'Buy tax now 87%. Reaches 6% in 81 minutes. Sell tax 6%.',
-        note: 'Preview: trading is not connected. The buy tax started at 99% twelve minutes ago and falls one point a minute. Whoever buys early pays for the first seat.',
-        figs: { 'fig-tax': '3.9 ETH', 'fig-strategy': '3.3 ETH', 'fig-seatpot': '2.31 ETH', 'fig-burnpot': '0.99 ETH', 'fig-hook': '0.42 ETH' },
-        next: '84%', nextSub: '2.31 of 2.74 ETH in the seat pot',
-        modeSub: 'no seats held yet, so 70% of the strategy share buys seats',
-        mast: 'PUPATE on Ethereum<br>pool opened 12 minutes ago', launch: true
-      }
-    };
-    var state = STATES.steady;
-    function setFig(id, value) {
-      var el = byId(id), small = el.querySelector('small');
-      el.textContent = value;
-      if (small) el.appendChild(small);
-    }
-    function applyState(name) {
-      state = STATES[name];
-      byId('state-steady').setAttribute('aria-pressed', name === 'steady' ? 'true' : 'false');
-      byId('state-launch').setAttribute('aria-pressed', name === 'launch' ? 'true' : 'false');
-      for (var id in state.figs) setFig(id, state.figs[id]);
-      setFig('fig-buytax', state.buytax);
-      byId('taxline').textContent = state.taxline;
-      byId('swap-note').textContent = state.note;
-      byId('cond-next').textContent = state.next;
-      byId('cond-next-sub').textContent = state.nextSub;
-      byId('cond-mode-sub').textContent = state.modeSub;
-      byId('cond-meter').querySelector('i').style.setProperty('--w', state.next);
-      byId('mast-note').innerHTML = state.mast;
-      byId('cocoon-live').hidden = state.launch;
-      byId('cocoon-empty').hidden = !state.launch;
-      byId('emerge-live').hidden = state.launch;
-      byId('emerge-empty').hidden = !state.launch;
-      update();
-    }
-    byId('state-steady').addEventListener('click', function () { applyState('steady'); });
-    byId('state-launch').addEventListener('click', function () { applyState('launch'); });
-
-    // Swap panel.
-    var RATE = 70400000;      // sample: PUPATE per ETH at the pool price
-    var LP = 0.003;
-    var buying = true;
-    var amount = byId('amount'), receive = byId('receive'), unit = byId('amount-unit');
-    var amountLabel = byId('amount-label'), cta = byId('cta'), buyBtn = byId('buy-btn'), sellBtn = byId('sell-btn');
-    function fmt(n, dp) { return n.toLocaleString('en-US', { maximumFractionDigits: dp, minimumFractionDigits: 0 }); }
-    function update() {
-      var v = parseFloat(String(amount.value).replace(',', '.'));
-      if (!(v > 0)) { receive.textContent = buying ? '0 PUPATE' : '0 ETH'; return; }
-      if (buying) receive.textContent = fmt(Math.floor(v * (1 - state.tax) * (1 - LP) * RATE), 0) + ' PUPATE';
-      else receive.textContent = fmt(v / RATE * (1 - LP) * (1 - 0.06), 6) + ' ETH';
-    }
-    function setDirection(buy) {
-      buying = buy;
-      buyBtn.setAttribute('aria-pressed', buy ? 'true' : 'false');
-      sellBtn.setAttribute('aria-pressed', buy ? 'false' : 'true');
-      amountLabel.textContent = buy ? 'You pay' : 'You sell';
-      unit.textContent = buy ? 'ETH' : 'PUPATE';
-      cta.textContent = buy ? 'Buy PUPATE' : 'Sell PUPATE';
-      amount.value = buy ? '0.5' : '10000000';
-      update();
-    }
-    buyBtn.addEventListener('click', function () { setDirection(true); });
-    sellBtn.addEventListener('click', function () { setDirection(false); });
-    amount.addEventListener('input', update);
-    byId('swap').addEventListener('submit', function (e) { e.preventDefault(); });
-
-    // The report's age ticks from the sample value, so the freshness line reads like the live one.
-    var fresh = byId('cond-fresh'), reportedAgo = 108 * 60, loadedAt = Date.now();
-    function hm(sec) { var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60); return (h ? h + 'h ' : '') + m + 'm'; }
-    function tick() {
-      var ago = reportedAgo + Math.floor((Date.now() - loadedAt) / 1000), left = 6 * 3600 - ago;
-      fresh.textContent = left > 0
-        ? 'reported ' + hm(ago) + ' ago, fresh for ' + hm(left) + ' more'
-        : 'reported ' + hm(ago) + ' ago, stale: the vault is not buying';
-    }
-    tick();
-    setInterval(tick, 30000);
-
-    applyState('steady');
-  })();
-</script>
+<template id="specimen-tpl">
+  <article class="specimen" style="--ripe:0">
+    <div class="seat"><span class="seat-id"></span><span class="status working"></span></div>
+    <div class="pin"><svg aria-hidden="true"><use href="#chrysalis"/></svg></div>
+    <div class="decay" aria-hidden="true"><i></i></div>
+    <dl><dt>bought</dt><dd class="num v-bought"></dd><dt>listed</dt><dd class="num v-listed"></dd><dt>day</dt><dd class="num v-day"></dd><dt>jobs accepted</dt><dd class="num v-jobs"></dd></dl>
+  </article>
+</template>
+<div class="toast tag" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="sim.js"></script>
 </body>
 </html>
