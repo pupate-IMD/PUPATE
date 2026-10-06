@@ -11,8 +11,9 @@ export function ConnectWallet({ className = "btn" }: { className?: string }) {
         const ready = mounted;
         const connected = ready && account && chain;
         if (!ready) {
+          // Visible but inert until the wallet layer has mounted, so the bar never looks empty.
           return (
-            <button className={className} aria-hidden="true" disabled style={{ opacity: 0 }}>
+            <button className={className} disabled aria-disabled="true">
               Connect
             </button>
           );

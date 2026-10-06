@@ -13,7 +13,7 @@ Copy `.env.example` to `.env.local`:
 
 | Variable | Purpose |
 |---|---|
-| `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect project id from cloud.reown.com (free). Injected wallets such as MetaMask and Rabby work without it; WalletConnect wallets need it. |
+| `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect project id from cloud.reown.com (free). Injected wallets such as MetaMask and Rabby work without it; WalletConnect wallets need it. Without it the console shows "Origin … not found on Allowlist", which is harmless until then. Add `pupate.si` and `localhost:3000` to the project's allowlist. |
 | `NEXT_PUBLIC_CHAIN` | `mainnet` (default) or `sepolia`; puts that chain first in the wallet's chain list. |
 
 ## What is real and what is not
