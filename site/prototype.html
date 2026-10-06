@@ -61,6 +61,9 @@
   }
   .preview strong { font-weight: 500; }
   .preview-controls { margin-left: auto; display: flex; gap: 0.25rem; }
+  details.guide { border: 1px dashed var(--gold); border-top: 0; padding: 0.5rem 0.75rem 0.6rem; font-size: 0.9375rem; }
+  .guide summary { cursor: pointer; font-family: var(--mono); font-size: 0.8125rem; color: var(--gold-ink); }
+  .guide ol { margin: 0.5rem 0 0 1.25rem; padding: 0; display: grid; gap: 0.3rem; max-width: 68ch; }
   .chip { background: transparent; border: 1px solid var(--rule); padding: 0.3rem 0.6rem; font-family: var(--mono); font-size: 0.75rem; cursor: pointer; }
   .chip[aria-pressed="true"] { background: var(--gold-ink); border-color: var(--gold-ink); color: var(--paper); }
   .theme { background: transparent; border: 1px solid var(--rule); padding: 0.3rem 0.6rem; font-family: var(--mono); font-size: 0.75rem; cursor: pointer; }
@@ -264,6 +267,19 @@
       <button type="button" class="chip" id="advance">Advance a day</button>
     </span>
   </div>
+  <details class="guide">
+    <summary>What you can try on this page</summary>
+    <ol>
+      <li><b>Connect wallet</b> in the Feed panel (a pretend wallet), then <b>Buy</b> or <b>Sell</b>: the tax lands in "Waiting in the hook".</li>
+      <li><b>Flush the tax</b>: moves it into the vault, split by the mode shown in Conditions.</li>
+      <li><b>Buy a seat</b>: enabled once the seat pot covers the reference price plus the reward; a new chrysalis appears at day 0.</li>
+      <li><b>Burn</b>: spends the burn pot up to the price-impact limit, then waits five blocks.</li>
+      <li><b>Take the lot</b> and <b>Start an auction</b>: one harvest auction cycle.</li>
+      <li><b>Advance a day</b>: listings fall, chrysalises clear, the auction decays, and seats sell now and then.</li>
+      <li><b>Launch, minute 12</b>: the opening window with its 99% buy tax falling; the same control then advances 30 minutes.</li>
+      <li><b>Switch to light</b> or dark in the masthead.</li>
+    </ol>
+  </details>
 
   <header class="mast">
     <div class="wordmark">Pu<em>pate</em></div>
