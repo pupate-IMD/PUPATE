@@ -609,7 +609,8 @@ contract PoolRouter is IUnlockCallback {
             } else {
                 manager.sync(currency);
                 require(
-                    IERC20Like(Currency.unwrap(currency)).transferFrom(payer, address(manager), owed), "pay failed"
+                    IERC20Like(Currency.unwrap(currency)).transferFrom(payer, address(manager), owed),
+                    "pay failed"
                 );
                 manager.settle();
             }
@@ -697,7 +698,8 @@ abstract contract PoolSetup is Test {
     }
 
     function _ethPool(address quote, address hooks) internal pure returns (PoolKey memory) {
-        return PoolKey(CurrencyLibrary.ADDRESS_ZERO, Currency.wrap(quote), LP_FEE, TICK_SPACING, IHooks(hooks));
+        return
+            PoolKey(CurrencyLibrary.ADDRESS_ZERO, Currency.wrap(quote), LP_FEE, TICK_SPACING, IHooks(hooks));
     }
 
     function _open(PoolKey memory poolKey, uint256 tokens) internal {
@@ -894,9 +896,13 @@ abstract contract HookFixture is PoolSetup {
             keccak256(abi.encodePacked(type(PupateHook).creationCode, abi.encode(manager, sink_, owner_)));
         for (uint256 salt; salt < 1_000_000; ++salt) {
             address predicted = address(
-                uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), bytes32(salt), initHash))))
+                uint160(
+                    uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), bytes32(salt), initHash)))
+                )
             );
-            if (uint160(predicted) & Hooks.ALL_HOOK_MASK != HOOK_FLAGS || predicted.code.length != 0) continue;
+            if (uint160(predicted) & Hooks.ALL_HOOK_MASK != HOOK_FLAGS || predicted.code.length != 0) {
+                continue;
+            }
             deployed = new PupateHook{salt: bytes32(salt)}(manager, sink_, owner_);
             assertEq(address(deployed), predicted, "CREATE2 prediction");
             return deployed;
@@ -1027,7 +1033,8 @@ contract PupateHookTest is HookFixture {
         PupateHook fresh = _deployHook(address(sink), owner);
         PupateToken a = new PupateToken();
         PupateToken b = new PupateToken();
-        (address low, address high) = address(a) < address(b) ? (address(a), address(b)) : (address(b), address(a));
+        (address low, address high) =
+            address(a) < address(b) ? (address(a), address(b)) : (address(b), address(a));
         manager.initialize(
             PoolKey(Currency.wrap(low), Currency.wrap(high), LP_FEE, TICK_SPACING, IHooks(address(fresh))),
             SQRT_PRICE_OPEN
@@ -1136,9 +1143,10 @@ contract PupateHookTest is HookFixture {
         assertEq(tax, (paid - tax) * 600 / 9400);
     }
 
-    function testFuzz_buyExactIn_traderPaysWhatTheyNamedAtAnyPointOfTheSchedule(uint256 ethIn, uint256 elapsed)
-        public
-    {
+    function testFuzz_buyExactIn_traderPaysWhatTheyNamedAtAnyPointOfTheSchedule(
+        uint256 ethIn,
+        uint256 elapsed
+    ) public {
         ethIn = bound(ethIn, 1e9, 1_000 ether);
         vm.warp(T0 + bound(elapsed, 0, 3 hours));
         uint256 rate = hook.buyTaxBps();
@@ -1355,7 +1363,11 @@ import {IUnlockCallback} from "v4-core/src/interfaces/callback/IUnlockCallback.s
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {SafeCast} from "v4-core/src/libraries/SafeCast.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
-import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "v4-core/src/types/BeforeSwapDelta.sol";
+import {
+    BeforeSwapDelta,
+    BeforeSwapDeltaLibrary,
+    toBeforeSwapDelta
+} from "v4-core/src/types/BeforeSwapDelta.sol";
 import {CurrencyLibrary} from "v4-core/src/types/Currency.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
@@ -1606,7 +1618,7 @@ git commit -m "feat: add PupateHook with standing tax and launch schedule"
 
 **Interfaces:**
 - Consumes: `HookFixture`, `PupateHook`, `PoolRouter`.
-- Produces: `contract Trader` (invariant handler) with `buyExactIn`, `buyExactOut`, `sellExactIn`, `sellExactOut`, `flush`, `wait`, `lowerTax`, and `uint256 public previousTax`.
+- Produces: `contract Trader` (invariant handler) with `buyExactIn`, `buyExactOut`, `sellExactIn`, `sellExactOut`, `flush`, `wait`, `lowerTax`, `uint256 public previousTax` and `uint256 public swapsDone`.
 
 - [ ] **Step 1: Write the handler**
 
@@ -1637,6 +1649,7 @@ contract Trader is StdUtils {
     PoolKey private key;
 
     uint256 public previousTax;
+    uint256 public swapsDone;
 
     constructor(PoolRouter router_, PupateHook hook_, PoolKey memory key_, address owner_) {
         router = router_;
@@ -1693,7 +1706,9 @@ contract Trader is StdUtils {
     function _trySwap(bool zeroForOne, int256 amountSpecified) private {
         uint160 limit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
         uint256 value = zeroForOne ? address(this).balance : 0;
-        try router.swap{value: value}(key, SwapParams(zeroForOne, amountSpecified, limit)) {} catch {}
+        try router.swap{value: value}(key, SwapParams(zeroForOne, amountSpecified, limit)) {
+            ++swapsDone;
+        } catch {}
     }
 }
 ```
@@ -1722,6 +1737,19 @@ contract PupateHookInvariantTest is HookFixture {
         targetContract(address(trader));
     }
 
+    /// @dev A handler whose actions all fail quietly would make every invariant below hold for nothing.
+    function test_theHandlerActuallyTrades() public {
+        trader.buyExactIn(1 ether);
+        trader.buyExactOut(1_000_000 ether);
+        trader.sellExactIn(1_000_000 ether);
+        trader.sellExactOut(1e12);
+        assertEq(trader.swapsDone(), 4);
+        assertGt(hook.totalTax(), 0);
+
+        trader.flush();
+        assertEq(sink.deposited(), hook.totalTax());
+    }
+
     function invariant_everyWeiOfTaxIsHeldAsClaimsOrDeliveredToTheSink() public view {
         assertEq(manager.balanceOf(address(hook), 0) + sink.deposited(), hook.totalTax());
     }
@@ -1739,7 +1767,7 @@ contract PupateHookInvariantTest is HookFixture {
 - [ ] **Step 3: Run the invariants**
 
 Run: `forge test --match-contract PupateHookInvariantTest`
-Expected: 3 passed, each over 48 runs of 48 calls, with no reverts reported.
+Expected: 4 passed. The three invariants each run 48 times over 48 calls; `test_theHandlerActuallyTrades` proves the handler's swaps succeed, so the invariants are not holding for nothing.
 
 - [ ] **Step 4: Run everything and commit**
 
