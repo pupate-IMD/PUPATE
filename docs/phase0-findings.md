@@ -95,6 +95,7 @@ So 85% to the pool and 5% to the requester wallet is expressible. The 5% arrives
 - 2% hook fee in native ETH beside the 0.3% LP fee, collected as ERC-6909 claims; swap callbacks only mint claims.
 - Before-swap fee modes reject partial fills.
 - It buys IMD through two fixed Uniswap v4 routes: POOL4 (1% LP fee, tick spacing 60, the POOL4 hook) and a plain ETH/IMD pool (1% LP fee, tick spacing 200, no hook), with its own price guards.
+- Its deployment transaction `0x9eeabe6776c0747c37a4d3646083abd04d21a023fdfdbe325d33c52aa5011ad2` (block 26130900, from the launch wallet `0xcecc…a551` to the factory `0x12c63b581d07093f6126bc02263c58f7eadaa96f`) deploys the hook, the token and a `MerkleDistributor`, and the PoolManager emits `Initialize` and `ModifyLiquidity` for the pool in that same transaction with the factory as sender. So the factory deploys, opens and seeds the pool atomically, as the launch's notes asked.
 
 ## Reference code carries no licence
 
