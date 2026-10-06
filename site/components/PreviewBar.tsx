@@ -29,10 +29,10 @@ export function PreviewBar() {
           <summary>What you can try on this page</summary>
           <ol>
             <li>
-              <b>Connect</b> (a pretend wallet), then <b>Buy</b> or <b>Sell</b> in the swap box: the tax lands in "waiting in the hook".
+              <b>Connect</b> (a pretend wallet), then <b>Buy</b> or <b>Sell</b> in the swap box: the tax lands in the hook.
             </li>
             <li>
-              <b>Flush the tax</b>: moves it into the vault, split by the mode shown in Conditions.
+              <b>Flush the tax</b>: moves it into the vault, split by the mode shown on the specimen sheet.
             </li>
             <li>
               <b>Buy a seat</b>: enabled once the seat pot covers the reference price plus the reward; a new chrysalis appears at day 0.

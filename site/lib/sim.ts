@@ -55,6 +55,13 @@ export interface SimState {
   wallet: string | null;
   buying: boolean;
   toast: { id: number; text: string } | null;
+  log: LogEntry[];
+}
+
+export interface LogEntry {
+  id: number;
+  when: string;
+  text: string;
 }
 
 const seat = (id: number, cost: number, day: number, jobs: number, status: SeatStatus): Seat => ({
@@ -66,7 +73,7 @@ const seat = (id: number, cost: number, day: number, jobs: number, status: SeatS
 });
 
 export function preset(name: "steady" | "launch"): SimState {
-  const base = { wallet: null, buying: true, toast: null, burnCooldown: 0 };
+  const base = { wallet: null, buying: true, toast: null, burnCooldown: 0, log: [] as LogEntry[] };
   if (name === "launch") {
     return {
       ...base,
@@ -198,7 +205,11 @@ export type Action =
   | { type: "dismissToast" };
 
 let toastId = 0;
-const withToast = (s: SimState, text: string): SimState => ({ ...s, toast: { id: ++toastId, text } });
+const stamp = (s: SimState) => (isLaunch(s) ? `min ${s.launchMinute}` : `day ${s.day}`);
+const withToast = (s: SimState, text: string): SimState => {
+  const id = ++toastId;
+  return { ...s, toast: { id, text }, log: [{ id, when: stamp(s), text }, ...s.log].slice(0, 8) };
+};
 
 export function reduce(s: SimState, a: Action): SimState {
   switch (a.type) {

@@ -20,7 +20,7 @@ export function Steps() {
       id: "buy",
       title: "Buy a seat",
       can: canBuySeat(s),
-      when: `Fills the cheapest listing at or under 105% of the reference price (${eth(s.floor)} now). Reward 0.5% of the price.`,
+      when: `Fills the cheapest listing at or under 105% of the reference price (${eth(s.floor)} now). Reward 0.5% of what is spent.`,
       why: `Not available: the seat pot is at ${pct(progress)} of a seat.`,
       act: () => dispatch({ type: "buySeat" }),
     },
@@ -44,6 +44,7 @@ export function Steps() {
   return (
     <section className="wrap section" id="steps" aria-label="Steps anyone can run">
       <header>
+        <span className="n">IV</span>
         <h2>Anyone can run a step</h2>
         <p>Nobody operates Pupate. Each step is a public function; a bot runs them, and if it stops, anyone else can.</p>
       </header>
@@ -51,11 +52,11 @@ export function Steps() {
         {rows.map((r) => (
           <div className="step" key={r.id}>
             <div>
-              <b>{r.title}</b>
+              <div className="t serif">{r.title}</div>
               <div className="s num">{r.can ? r.when : r.why}</div>
             </div>
             <button className="btn" onClick={r.act} disabled={!r.can}>
-              Run →
+              Run <span className="arrow">→</span>
             </button>
           </div>
         ))}

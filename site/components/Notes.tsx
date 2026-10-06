@@ -2,6 +2,7 @@ export function Notes() {
   return (
     <section className="wrap section" id="notes" aria-label="How it holds together">
       <header>
+        <span className="n">V</span>
         <h2>How it holds together</h2>
       </header>
       <div className="notes">

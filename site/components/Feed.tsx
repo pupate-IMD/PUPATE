@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { avgCost, buyTax, eth, hm, isLaunch, mode, nextSeatPrice, pct, receiveEstimate } from "@/lib/sim";
+import { avgCost, buyTax, eth, hm, isLaunch, mode, pct, receiveEstimate } from "@/lib/sim";
+import { Lead } from "./Hero";
 import { useDispatch, useSim } from "./SimContext";
 
 export function Feed() {
@@ -14,12 +15,10 @@ export function Feed() {
     const t = setInterval(() => setAgo((a) => a + 30), 30_000);
     return () => clearInterval(t);
   }, []);
-
   useEffect(() => setAmount(s.buying ? "0.5" : "10000000"), [s.buying]);
 
   const m = mode(s);
   const left = 6 * 3600 - ago;
-  const progress = Math.min(s.seatPot / nextSeatPrice(s), 1);
   const value = parseFloat(amount.replace(",", "."));
 
   function submit(e: FormEvent) {
@@ -29,113 +28,82 @@ export function Feed() {
   }
 
   return (
-    <section className="wrap two" id="feed" aria-label="Feed">
-      <form className="swap" onSubmit={submit}>
-        <div className="head">
-          <span>$PUPATE</span>
-          <span className="faint">launch pool · ETH/PUPATE · hook 0x18CC</span>
-        </div>
-        <div className="tabs" role="group" aria-label="Direction">
-          <button type="button" aria-pressed={s.buying} onClick={() => dispatch({ type: "direction", buying: true })}>
-            Buy
-          </button>
-          <button type="button" aria-pressed={!s.buying} onClick={() => dispatch({ type: "direction", buying: false })}>
-            Sell
-          </button>
-        </div>
-        <div className="field">
-          <label className="label" htmlFor="amount">
-            {s.buying ? "You pay" : "You sell"}
-          </label>
-          <div className="row">
-            <input id="amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoComplete="off" />
-            <span className="unit">{s.buying ? "ETH" : "PUPATE"}</span>
-          </div>
-        </div>
-        <div className="field">
-          <span className="label">You receive, after tax and the 0.3% pool fee</span>
-          <div className="row">
-            <span className="out num">{receiveEstimate(s, value)}</span>
-          </div>
-        </div>
-        <div className="taxline">
-          <span className="num">
-            {isLaunch(s)
-              ? `Buy tax now ${pct(buyTax(s))}. Reaches 6% in ${93 - s.launchMinute} minutes. Sell tax 6%.`
-              : "Buy tax now 6%. Sell tax 6%."}
-          </span>
-          <span className="dim num">1 ETH = 70,400,000 PUPATE</span>
-        </div>
-        <button className="cta" type="submit">
-          {s.wallet ? (s.buying ? "Buy PUPATE" : "Sell PUPATE") : "Connect wallet"}
-        </button>
-        <p className="note">
-          {s.wallet
-            ? `Simulated wallet ${s.wallet}. Trades here change the figures on this page and nothing else.`
-            : "Simulated: the first click connects a pretend wallet, the next ones trade against the sample pool."}
+    <section className="wrap section" id="feed" aria-label="Feed">
+      <header>
+        <span className="n">I</span>
+        <h2>Feed</h2>
+        <p>
+          Every buy and sell in the launch pool pays 6% of its ETH side. Anyone can flush what has been collected into the
+          vault, which splits it 85% to the strategy, 10% to the developer, 5% to buy and burn IMD.
         </p>
-      </form>
+      </header>
+      <div className="two">
+        <form className="panel swap" onSubmit={submit}>
+          <div className="head">
+            <span className="serif">Trade in the launch pool</span>
+            <span className="label">ETH / PUPATE</span>
+          </div>
+          <div className="tabs" role="group" aria-label="Direction">
+            <button type="button" aria-pressed={s.buying} onClick={() => dispatch({ type: "direction", buying: true })}>
+              Buy
+            </button>
+            <button type="button" aria-pressed={!s.buying} onClick={() => dispatch({ type: "direction", buying: false })}>
+              Sell
+            </button>
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="amount">
+              {s.buying ? "You pay" : "You sell"}
+            </label>
+            <div className="row">
+              <input id="amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoComplete="off" />
+              <span className="unit">{s.buying ? "ETH" : "PUPATE"}</span>
+            </div>
+          </div>
+          <div className="field">
+            <span className="label">You receive, after tax and the 0.3% pool fee</span>
+            <div className="row">
+              <span className="out num">{receiveEstimate(s, value)}</span>
+            </div>
+          </div>
+          <div className="taxline">
+            <span className="num">
+              {isLaunch(s)
+                ? `Buy tax now ${pct(buyTax(s))}. Reaches 6% in ${93 - s.launchMinute} minutes. Sell tax 6%.`
+                : "Buy tax now 6%. Sell tax 6%."}
+            </span>
+            <span className="dim num">1 ETH = 70,400,000 PUPATE</span>
+          </div>
+          <button className="go" type="submit">
+            {s.wallet ? (s.buying ? "Buy PUPATE" : "Sell PUPATE") : "Connect wallet"}
+          </button>
+          <p className="note">
+            {s.wallet
+              ? `Simulated wallet ${s.wallet}. Trades here change the figures on this page and nothing else.`
+              : "Simulated: the first click connects a pretend wallet, the next ones trade against the sample pool."}
+          </p>
+        </form>
 
-      <div>
-        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Conditions</h2>
-        <div className="kv">
-          <div className="r">
-            <span className="k">Reference price</span>
-            <span className="v num">
-              {eth(s.floor)} <span className="dim">median of 24h sales, from the IMD oracle</span>
-            </span>
+        <div className="conditions">
+          <h3>Conditions</h3>
+          <div className={`mode ${m.name.toLowerCase()}`} style={{ marginBottom: 6 }}>
+            <i className="d" aria-hidden="true" />
+            {m.name}
           </div>
-          <div className="r">
-            <span className="k">Report</span>
-            <span className="v num">
-              {left > 0 ? (
-                <>
-                  {hm(ago)} ago <span className="dim">· fresh for {hm(left)} more</span>
-                </>
-              ) : (
-                <>
-                  {hm(ago)} ago <span className="dim">· stale: the vault is not buying</span>
-                </>
-              )}
-            </span>
-          </div>
-          <div className="r">
-            <span className="k">Mode</span>
-            <span className="v">
-              <span className={`mode ${m.name.toLowerCase()}`}>
-                <i className="dot" aria-hidden="true" />
-                {m.name}
-              </span>
-              <div className="dim">{m.why}</div>
-            </span>
-          </div>
-          <div className="r">
-            <span className="k">Next cocoon</span>
-            <span className="v num">
-              {pct(progress)} <span className="dim">· {eth(s.seatPot)} of {eth(s.floor)} in the seat pot</span>
-              <div className="meter" role="img" aria-label="Seat pot against the reference price">
-                <i style={{ ["--w" as string]: `${(progress * 100).toFixed(1)}%` }} />
-              </div>
-            </span>
-          </div>
-          <div className="r">
-            <span className="k">Waiting in the hook</span>
-            <span className="v num">
-              {eth(s.hookWaiting)} <span className="dim">· flush it, no reward</span>
-            </span>
-          </div>
-          <div className="r">
-            <span className="k">Burn pot</span>
-            <span className="v num">
-              {eth(s.burnPot)} <span className="dim">· spent on PUPATE, 5% price impact per call</span>
-            </span>
-          </div>
-          <div className="r">
-            <span className="k">Average seat cost</span>
-            <span className="v num">
-              {s.seats.length ? eth(avgCost(s)) : "—"} <span className="dim">· {s.seats.length} held</span>
-            </span>
-          </div>
+          <p className="dim" style={{ marginBottom: 12, maxWidth: "52ch" }}>
+            {m.why}.
+          </p>
+          <Lead k="Reference price" v={eth(s.floor)} note="median of 24h sales, from the IMD oracle" />
+          <Lead
+            k="Report"
+            v={`${hm(Math.max(ago, 0))} ago`}
+            note={left > 0 ? `fresh for ${hm(left)} more` : "stale: the vault is not buying"}
+          />
+          <Lead k="Waiting in the hook" v={eth(s.hookWaiting)} note="flush it, no reward" />
+          <Lead k="Seat pot" v={eth(s.seatPot)} note={`buys the next seat at up to 105% of ${eth(s.floor)}`} />
+          <Lead k="Burn pot" v={eth(s.burnPot)} note="spent on PUPATE, 5% price impact per call" />
+          <Lead k="Average seat cost" v={s.seats.length ? eth(avgCost(s)) : "—"} note={`${s.seats.length} held`} />
+          <Lead k="Developer share" v={eth(s.dev)} note="10% of tax, pays oracle reports and seat machines" />
         </div>
       </div>
     </section>
