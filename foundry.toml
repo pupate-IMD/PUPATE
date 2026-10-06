@@ -12,7 +12,13 @@ bytecode_hash = "none"
 cbor_metadata = false
 ffi = false
 fs_permissions = []
-remappings = ["forge-std/=lib/forge-std/src/", "v4-core/=lib/v4-core/", "solmate/=lib/solmate/"]
+remappings = [
+  "forge-std/=lib/forge-std/src/",
+  "v4-core/=lib/v4-core/",
+  "solmate/=lib/solmate/",
+  "seaport-types/=lib/seaport-types/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]
 
 [profile.default.fuzz]
 runs = 256
