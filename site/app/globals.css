@@ -208,6 +208,7 @@ footer { margin-top: 44px; padding-block: 24px; border-top: var(--hair); color: 
   .actions button, .actions a { border-right: 0; border-bottom: var(--rule); }
   .actions > :last-child { border-bottom: 0; }
   .two { grid-template-columns: 1fr; gap: 24px; }
+  .taxline { flex-direction: column; gap: 4px; }
   .kv .r { grid-template-columns: 1fr; gap: 2px; }
   .nav { display: none; }
   .step { grid-template-columns: 1fr; }
