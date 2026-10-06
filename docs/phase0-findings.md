@@ -1,0 +1,80 @@
+# Phase 0 desk findings
+
+Date: 2026-10-06. Everything here came from free, read-only calls. Nothing was paid or deployed.
+
+Status key: `ANSWERED` (evidence in hand), `PARTIAL` (strong indication, not proven), `OPEN` (needs a paid or on-chain test).
+
+## 1. Does IMD admit a hook that takes a 6% tax? `PARTIAL`
+
+- Launch 168 (`identity-md-launches/launch-168-release-tollgate-symbol-toll`) is a `univ4_hook` launch whose hook charges 2% in native ETH on every buy and sell (`BUY_FEE_BPS = 200`, `SELL_FEE_BPS = 200` in `src/TollgateHook.sol`).
+- Launch 551 describes a hook that charges 4% on swaps, settled in ETH, sent to a fixed address.
+- `POST https://api.imd.fun/requests/check` with a `launch.open` body describing a 6% ETH fee returned no blocker about the fee. Its only blockers were `bad_path_count` on the request shape ("expected between 1 and 16 allowed paths"), which is about how the body lists writable paths, not about the design.
+- The latest mainnet `univ4_hook` policy (version 19) has no field that limits a hook's own fee.
+
+Not proven until a launch is actually admitted and reviewed. Review by the swarm can still park a launch.
+
+## 2. The deployer fee `OPEN`, and the spec's number is wrong
+
+- The check states: "Pool fee: 0.3% to liquidity providers (0.05% or 1% if you ask). It cannot be zero." Policy fee tiers are `[500, 3000, 10000]`.
+- The spec says 1.25% with 1% to the paying wallet. That figure came from a summary of the docs and is not what the check or the policy say.
+- Policy `owners.lpPosition` is `0xcecc29b037f5064fcdf45a5c318f132ef76aa551` (the IMD launch wallet). So the LP position, and with it the pool fee, is held by IMD. Whether any of it is passed on to the requester is not stated anywhere I could read.
+
+Treat the deployer fee as zero until shown otherwise.
+
+## 3. Can a contract-owned seat be paired? `PARTIAL`
+
+- Launch 246 (`WorkerWallet.sol`) is an ERC-1271 wallet that holds a seat and lets a rotating worker key sign for it on allowed EIP-712 domains. Launch 440 (SEATLEASE) states the network "accepts ERC-1271 from contract owners".
+- The IMD6900 README says ERC-1271 support for pairing "requires IMD confirmation before reliance".
+- No live pairing by a contract owner was verified.
+
+Needs one real pairing attempt on a seat held by a contract.
+
+## 4. Oracle attestations `ANSWERED` for verification, `OPEN` for the floor question
+
+Verified:
+
+- Our EIP-712 encoding recovers the live oracle signer `0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982` from a real attestation (`test/OracleAttestation.t.sol`).
+- Domain: name `IdentityMD Oracle`, version `2`, `chainId`, `verifyingContract` = the consumer named in the request. An attestation is bound to one consuming contract.
+- The `uint256` answer type is signed as `uint8` value `3`.
+- `questionHash` is the same for two separate requests asking the same question, so it can be pinned at deployment. It is not `keccak256` or `sha256` of the question text alone; take it from the API response of the first request.
+- A request carries `panelSize` (5 to 100), `quorum`, `toleranceBps`, `validForSeconds` (21600 in the example), `guards.sources`, and `consumer {chainId, verifyingContract}`.
+- Each request costs 0.5 IMD. Six-hourly reports cost 2 IMD a day.
+
+Open:
+
+- A floor-price question needs a public data source that panel members can all read without an API key. OpenSea's API needs a key. Candidates to test: an on-chain question over Seaport `OrderFulfilled` events for the collection in a block window (median sale price), or a keyless marketplace endpoint.
+- Whether a panel agrees within tolerance on such a question.
+
+## 5. Token split and token rules `ANSWERED`
+
+From the check:
+
+- "Split: 10% to the swarm, the other 90% is yours: 80% into the pool unless you choose otherwise, the rest to your wallet."
+- "Supply: 1,000,000,000 with 18 decimals, minted once."
+- "Transfers: plain, with no fees, limits, pausing or minting."
+- "Pool: paired with ETH, opening at a 20 ETH market cap" (Sepolia). Mainnet policy: 10 ETH default, 100 ETH maximum.
+
+So 85% to the pool and 5% to the requester wallet is expressible. The 5% arrives in the wallet unvested; vesting is ours to add by sending it to a vesting contract.
+
+## 6. Collection `ANSWERED`, Seaport path `OPEN`
+
+- `0x0000eC93127BAA929E58E97dd0095A2BFb38ec1D` on Ethereum mainnet: `name()` = `identity.md`, `symbol()` = `IDMD`, `totalSupply()` = `2000`.
+- Buying and listing through Seaport 1.6 is untested; it needs a mainnet-fork test in Plan 3.
+
+## Launch format (new information)
+
+- A launch is described by `launch.json` at the repository root: `kind`, `hook {contract, constructorArgs, permissions}`, `token {contract, name, symbol, decimals}`, `pool {pairedCurrency, fee, tickSpacing, initialPrice}`, `notes`.
+- The token contract has a zero-argument constructor and mints the whole supply to `msg.sender` (the factory).
+- In launch 168 the hook's only constructor argument is the PoolManager address. Hook permissions live in the low 14 bits of its address, so it is deployed by CREATE2 with a mined salt.
+- Launch 697 (`evm_project`) lists extra contracts in a `contracts` array with `$owner`, `$token` and `$contract:Name` placeholders. Whether a `univ4_hook` manifest accepts the same array is not known.
+- The tax pattern in launch 168: take the fee inside the swap as ERC-6909 claims (`poolManager.mint(hook, 0, fee)`), settle to ETH later with `poolManager.take`. No external call during a swap.
+- Reference toolchain: solc 0.8.26, `cancun`, optimizer 200 runs, `via_ir = false`, `bytecode_hash = "none"`, `cbor_metadata = false`, dependencies vendored. Ours matches.
+
+## Changes the spec needs
+
+1. **Pool fee.** Replace "1.25% under current IMD policy" with the 0.3% LP fee (0.05% or 1% on request).
+2. **Developer income.** The 1% deployer fee is unconfirmed and may not exist. If the developer is to earn from trading, it has to be a stated share of the hook tax. This is a decision for the project owner.
+3. **Launch wallet cap.** The token must be a plain ERC-20, so the "1% per wallet in the first 10 minutes" rule has to live in the hook as a per-swap buy cap, not in the token.
+4. **Wiring.** The hook probably cannot take Cocoon's address as a constructor argument. Plan for a one-time `wire` call, as launch 697 does, or confirm that the manifest accepts `$contract:` placeholders for hooks.
+5. **Oracle cost.** Add the running cost of reports (0.5 IMD each) and say who pays it. A permissionless keeper will not pay it for free, so the caller reward or the vault has to cover it.
+6. **Floor source.** The floor question needs a keyless, reproducible source; the spec currently assumes one exists.
