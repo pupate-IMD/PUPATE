@@ -46,11 +46,11 @@
 
   /* logo */
   #logo .center { position: absolute; inset: 0; display: grid; place-items: center; }
-  #logo .mark { width: 420px; height: 630px; }
+  #logo .mark { height: 560px; width: auto; }
 
   /* banner: one lockup, centred, clear of the bottom-left avatar */
   #banner .lockup { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 44px; }
-  #banner .mark { width: 190px; height: 285px; }
+  #banner .mark { height: 300px; width: auto; }
   #banner .words { display: grid; gap: 14px; }
   #banner .word { font-family: var(--serif); font-size: 128px; line-height: .9; letter-spacing: -.01em; }
   #banner .rule { height: 1px; background: var(--hair); }
@@ -61,31 +61,22 @@
   #og .pad { position: absolute; inset: 72px; display: grid; grid-template-columns: 1fr auto; align-content: space-between; gap: 20px 40px; }
   #og .top { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: baseline; font-size: 20px; }
   #og .head { align-self: center; font-family: var(--serif); font-size: 62px; line-height: 1.08; max-width: 15ch; }
-  #og .mark { width: 210px; height: 315px; align-self: center; }
+  #og .mark { height: 330px; width: auto; align-self: center; }
   #og .bottom { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; font-size: 22px; letter-spacing: .1em; }
 </style>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="mark" viewBox="0 0 64 96">
-    <path d="M32 2v9" stroke="#e9e6da" stroke-width="3" fill="none" />
-    <path d="M32 11C16 18 11 38 14 58c3 17 10 30 18 35 8-5 15-18 18-35 3-20-2-40-18-47z" fill="none" stroke="#e9e6da" stroke-width="3" />
-    <path d="M32 30c-9 10-13 24-8 44 4-6 7-13 8-20 1 7 4 14 8 20 5-20 1-34-8-44z" fill="#3ec28f" />
-    <path d="M20 29c4-2 20-2 24 0" stroke="#d9a94b" stroke-width="2.6" fill="none" stroke-linecap="round" />
-  </symbol>
-</svg>
-
 <div class="stage" id="logo">
   <div class="swarm" data-n="26" data-seed="7"></div>
   <div class="frame" style="--m:54px"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
-  <div class="center"><svg class="mark"><use href="#mark" /></svg></div>
+  <div class="center"><img class="mark" src="mark.png" alt="" /></div>
 </div>
 
 <div class="stage" id="banner">
   <div class="swarm" data-n="46" data-seed="3"></div>
   <div class="frame" style="--m:30px"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
   <div class="lockup">
-    <svg class="mark"><use href="#mark" /></svg>
+    <img class="mark" src="mark.png" alt="" />
     <div class="words">
       <div class="word">Pu<span class="ital">pate</span></div>
       <div class="rule"></div>
@@ -101,7 +92,7 @@
   <div class="pad">
     <div class="top"><span class="label">Pupate · Identity MD strategy</span><span class="label gold">Built on IMD</span></div>
     <div class="head serif">A tax on every trade buys <span class="ital">Identity MD seats</span>, and burns PUPATE.</div>
-    <svg class="mark"><use href="#mark" /></svg>
+    <img class="mark" src="mark.png" alt="" />
     <div class="bottom"><span class="label" style="font-size:22px">pupate.si</span><span class="chip">Not live yet</span></div>
   </div>
 </div>
