@@ -51,6 +51,9 @@ contract CocoonInvariantTest is CocoonFixture {
         handler.harvest(10 ether, 1 ether);
         handler.imdCycle();
         assertGt(cocoon.burnPot() + cocoon.seatPot(), 0);
+        // The sold seat left Cocoon and its listing shows filled; no stray ETH exit was booked.
+        assertTrue(handler.listingWasFilled(1000), "the seat left through a filled listing");
+        assertEq(handler.ghost_leak(), 0);
     }
 
     function invariant_theBalanceIsExactlyTheFourPots() public view {
@@ -76,6 +79,26 @@ contract CocoonInvariantTest is CocoonFixture {
         }
         assertEq(cocoon.heldCount(), count);
         assertEq(cocoon.heldCost(), cost);
+    }
+
+    /// @dev ETH leaves Cocoon only through one of its sanctioned spending entry points: a Seaport
+    /// seat purchase (and the caller reward on it), a PUPATE burn (and its caller reward), a
+    /// developer claim or the IMD auction. No other action may reduce Cocoon's balance; the handler
+    /// books any drop outside those paths as a leak.
+    function invariant_ethLeavesCocoonOnlyThroughSanctionedPaths() public view {
+        assertEq(handler.ghost_leak(), 0);
+    }
+
+    /// @dev A seat leaves Cocoon only through a filled Seaport listing, never by a direct transfer
+    /// out: any recorded seat Cocoon no longer owns must have one of its listings filled.
+    function invariant_aSeatLeavesCocoonOnlyThroughAFilledListing() public view {
+        uint256 n = handler.recordedCount();
+        for (uint256 i; i < n; i++) {
+            uint256 tokenId = handler.recorded(i);
+            if (collection.ownerOf(tokenId) != address(cocoon)) {
+                assertTrue(handler.listingWasFilled(tokenId), "a seat left without a filled listing");
+            }
+        }
     }
 
     function invariant_cocoonNeverKeepsPupate() public view {

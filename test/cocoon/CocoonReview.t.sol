@@ -272,6 +272,51 @@ contract CocoonReviewTest is CocoonFixture {
         assertEq(cocoon.isValidSignature(digest, ""), bytes4(0xffffffff), "a new round needs a new approval");
     }
 
+    // ------------------------------------------------------------------ operator cannot move value
+
+    function test_theOperatorCannotMoveValueSeatsOrParameters() public {
+        _validate(_params(seller, SEAT, 2.8 ether));
+        _buy(_params(seller, SEAT, 2.8 ether));
+        uint256 potBefore = cocoon.seatPot();
+        uint256 balBefore = address(cocoon).balance;
+        imd.mint(address(cocoon), 1000 ether); // some tokens the operator must not be able to move
+        uint256 imdBefore = imd.balanceOf(address(cocoon));
+
+        Cocoon.Params memory p = cocoon.getParams();
+        vm.startPrank(operator);
+
+        // The operator holds no owner power: no parameter, role or wiring change.
+        vm.expectRevert(Cocoon.NotOwner.selector);
+        cocoon.setParams(p);
+        vm.expectRevert(Cocoon.NotOwner.selector);
+        cocoon.setOperator(operator);
+        vm.expectRevert(Cocoon.NotOwner.selector);
+        cocoon.transferOwnership(operator);
+        vm.expectRevert(Cocoon.NotOwner.selector);
+        cocoon.wire(key);
+
+        // The only thing the operator may do is bless a pairing, which moves nothing.
+        WorkerAuthorization.Auth memory a;
+        a.deviceKey = keccak256("device");
+        a.wallet = address(cocoon);
+        a.tokenId = SEAT;
+        a.nonce = keccak256("nonce");
+        a.expiresAt = uint64(block.timestamp + 1 hours);
+        a.relayOrigin = "https://api.imd.fun";
+        bytes32 digest = cocoon.authorizeWorker(a);
+        vm.stopPrank();
+
+        // The seat, the ETH and the tokens are exactly as before.
+        assertEq(collection.ownerOf(SEAT), address(cocoon), "the seat did not move");
+        assertEq(cocoon.seatPot(), potBefore, "the seat pot is untouched");
+        assertEq(address(cocoon).balance, balBefore, "no ETH left");
+        assertEq(imd.balanceOf(address(cocoon)), imdBefore, "no tokens left");
+
+        // The approval validates only its own pairing digest, never a would-be Seaport approval.
+        assertEq(cocoon.isValidSignature(digest, ""), bytes4(0x1626ba7e));
+        assertEq(cocoon.isValidSignature(keccak256("a seaport order hash"), ""), bytes4(0xffffffff));
+    }
+
     // ------------------------------------------------------------------ finding 6: a seat sent back before settle
 
     function test_aSeatSentBackBeforeSettleCanBeSettledAndAdopted() public {

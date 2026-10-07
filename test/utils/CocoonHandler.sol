@@ -51,6 +51,11 @@ contract CocoonHandler is StdUtils {
     uint256 private nextSeat = 1000;
     uint64 private lastIssuedAt;
 
+    /// @dev Any wei Cocoon's balance loses during an action that is not one of its sanctioned
+    /// ETH-spending entry points (a seat purchase, a burn, a developer claim or the IMD auction).
+    /// Must stay zero: ETH must never leave Cocoon through any other path.
+    uint256 public ghost_leak;
+
     constructor(Setup memory setup) {
         s = setup;
         setup.collection.setApprovalForAll(address(setup.seaport), true);
@@ -58,22 +63,30 @@ contract CocoonHandler is StdUtils {
 
     receive() external payable {}
 
+    /// @dev Marks an action that must never reduce Cocoon's ETH balance. Books any drop as a leak.
+    modifier noEthExit() {
+        uint256 before = address(s.cocoon).balance;
+        _;
+        uint256 remaining = address(s.cocoon).balance;
+        if (remaining < before) ghost_leak += before - remaining;
+    }
+
     function recordedCount() external view returns (uint256) {
         return recorded.length;
     }
 
     // ------------------------------------------------------------------ actions
 
-    function deposit(uint96 amount) external {
+    function deposit(uint96 amount) external noEthExit {
         s.cocoon.depositTax{value: bound(amount, 0, 20 ether)}();
     }
 
-    function donate(uint96 amount) external {
+    function donate(uint96 amount) external noEthExit {
         (bool ok,) = address(s.cocoon).call{value: bound(amount, 0, 5 ether)}("");
         ok;
     }
 
-    function trade(bool buy, uint96 amount) external {
+    function trade(bool buy, uint96 amount) external noEthExit {
         int256 specified =
             buy ? -int256(bound(amount, 1e9, 20 ether)) : -int256(bound(amount, 1 ether, 2_000_000 ether));
         uint160 limit = buy ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
@@ -83,16 +96,16 @@ contract CocoonHandler is StdUtils {
             catch {}
     }
 
-    function flush() external {
+    function flush() external noEthExit {
         try s.hook.flush() {} catch {}
     }
 
-    function warp(uint32 by) external {
+    function warp(uint32 by) external noEthExit {
         vm.warp(block.timestamp + bound(by, 1, 2 days));
         vm.roll(block.number + 1 + bound(by, 0, 100));
     }
 
-    function reportFloor(uint96 floorWei) external {
+    function reportFloor(uint96 floorWei) external noEthExit {
         uint256 floor = bound(floorWei, 0.5 ether, 10 ether);
         if (block.timestamp <= lastIssuedAt) vm.warp(lastIssuedAt + 1);
         OracleAttestation.Attestation memory a;
@@ -147,7 +160,7 @@ contract CocoonHandler is StdUtils {
     }
 
     /// @dev A buyer takes one of our listings at its current price, and the handler settles it.
-    function sellOurs(uint256 pick) external {
+    function sellOurs(uint256 pick) external noEthExit {
         if (recorded.length == 0) return;
         uint256 tokenId = recorded[bound(pick, 0, recorded.length - 1)];
         (OrderParameters memory p, bool live) = _ourLiveOrder(tokenId);
@@ -172,7 +185,7 @@ contract CocoonHandler is StdUtils {
         try s.cocoon.claimDeveloper() {} catch {}
     }
 
-    function harvest(uint96 mintAmount, uint96 payment) external {
+    function harvest(uint96 mintAmount, uint96 payment) external noEthExit {
         s.earned.mint(address(s.cocoon), bound(mintAmount, 1, 1000 ether));
         try s.cocoon.startAuction(address(s.earned)) {} catch {}
         uint256 price;
@@ -200,6 +213,21 @@ contract CocoonHandler is StdUtils {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /// @dev Whether either of Cocoon's two listings for `tokenId` has been filled on Seaport. A seat
+    /// may leave Cocoon only this way, so a seat Cocoon no longer holds must show a filled listing.
+    function listingWasFilled(uint256 tokenId) external view returns (bool) {
+        (uint128 cost, uint40 boughtAt, uint16 startX, uint16 endX, uint32 decay,, uint16 round) =
+            s.cocoon.seats(tokenId);
+        Order[] memory orders = SeatListing.orders(
+            address(s.cocoon),
+            address(s.collection),
+            tokenId,
+            SeatListing.Terms(cost, startX, endX, decay, boughtAt, round)
+        );
+        return s.seaport.filled(s.seaport.hashOf(orders[0].parameters))
+            || s.seaport.filled(s.seaport.hashOf(orders[1].parameters));
+    }
 
     /// @dev The order of ours that is live right now for `tokenId`: the falling one during the
     /// decay, the flat tail after it. `live` is false when the seat is not held or no window is open.

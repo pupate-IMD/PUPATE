@@ -504,4 +504,45 @@ contract FloorFeedTest is Test {
         feed.transferOwnership(address(0));
         vm.stopPrank();
     }
+
+    // ------------------------------------------------------------------ hardening: a rejected report changes nothing
+
+    /// Whatever the reason a report is rejected, the stored price and issue time must be left exactly
+    /// as the last good report left them, so the vault keeps reading the last trusted floor.
+    function test_aRejectedReportNeverChangesTheStoredValue() public {
+        _report(2 ether, T0);
+        uint256 floor0 = 2 ether;
+        uint64 issued0 = T0;
+        _assertStored(floor0, issued0);
+
+        // Bad signer.
+        OracleAttestation.Attestation memory a = _att(2.2 ether, T0 + 1 hours);
+        bytes memory wrongSig = _sign(a, 0xB0B, address(feed));
+        vm.expectRevert(FloorFeed.BadSigner.selector);
+        feed.report(a, wrongSig);
+        _assertStored(floor0, issued0);
+
+        // Wrong question.
+        a = _att(2.2 ether, T0 + 1 hours);
+        a.questionHash = keccak256("some other question");
+        _expectRejected(a, FloorFeed.WrongQuestion.selector);
+        _assertStored(floor0, issued0);
+
+        // Too large a rise (10 ETH in an hour against a ~0.08 ETH budget).
+        vm.warp(T0 + 1 hours); // so the report is not read before it is issued
+        a = _att(10 ether, T0 + 1 hours);
+        _expectRejected(a, FloorFeed.MoveTooLarge.selector);
+        _assertStored(floor0, issued0);
+
+        // Stale: issued within the window but only read long after it lapsed.
+        vm.warp(T0 + 10 hours);
+        a = _att(2.2 ether, T0 + 2 hours); // now (T0+10h) > issuedAt+maxAge (T0+8h)
+        _expectRejected(a, FloorFeed.Expired.selector);
+        _assertStored(floor0, issued0);
+    }
+
+    function _assertStored(uint256 floor0, uint64 issued0) internal view {
+        assertEq(feed.floorWei(), floor0, "stored floor unchanged");
+        assertEq(feed.issuedAt(), issued0, "stored issue time unchanged");
+    }
 }
