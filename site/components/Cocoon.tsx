@@ -1,6 +1,7 @@
 "use client";
 
 import { avgCost, eth, listPrice, pad4, ripeness } from "@/lib/sim";
+import Link from "next/link";
 import { Chrysalis } from "./Chrysalis";
 import { Lead } from "./Hero";
 import { useSim } from "./SimContext";
@@ -36,7 +37,9 @@ export function Cocoon() {
               return (
                 <article className="panel card" key={x.id} style={{ ["--ripe" as string]: r.toFixed(2) }}>
                   <div className="top">
-                    <span className="id">Seat {pad4(x.id)}</span>
+                    <Link className="id" href={`/seat/?id=${x.id}`}>
+                      Seat {pad4(x.id)}
+                    </Link>
                     <span className={`chip ${atFloor ? "gold" : x.status === "working" ? "jade" : ""}`}>
                       <i className="d" aria-hidden="true" />
                       {atFloor ? "at 1.1×" : x.status === "working" ? "working" : "idle"}
@@ -54,6 +57,9 @@ export function Cocoon() {
                     <Lead k="day" v={`${Math.min(x.day, 14)} of 14`} />
                     <Lead k="jobs accepted" v={String(x.jobs)} />
                   </div>
+                  <Link className="more label" href={`/seat/?id=${x.id}`}>
+                    Open the sheet →
+                  </Link>
                 </article>
               );
             })}

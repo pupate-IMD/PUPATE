@@ -1,39 +1,35 @@
 import { Cocoon } from "@/components/Cocoon";
+import { Contracts } from "@/components/Contracts";
 import { Emerge } from "@/components/Emerge";
 import { Feed } from "@/components/Feed";
 import { FieldLog } from "@/components/FieldLog";
+import { Flow } from "@/components/Flow";
 import { Hero } from "@/components/Hero";
+import { Launch } from "@/components/Launch";
 import { Notes } from "@/components/Notes";
 import { PreviewBar } from "@/components/PreviewBar";
-import { SimProvider } from "@/components/SimContext";
+import { Record } from "@/components/Record";
 import { Steps } from "@/components/Steps";
 import { TopBar } from "@/components/TopBar";
-import { Web3Provider } from "@/components/Web3Provider";
 
 export default function Page() {
   return (
-    <Web3Provider>
-      <SimProvider>
+    <>
       <TopBar />
       <PreviewBar />
       <main>
+        <Launch />
         <Hero />
         <FieldLog />
+        <Flow />
         <Feed />
         <Cocoon />
         <Emerge />
         <Steps />
+        <Record />
         <Notes />
-        <footer className="wrap">
-          <div className="serif">Pupate</div>
-          <div>
-            Contracts: to be deployed through the IMD launchpad. Token, hook, FloorFeed, Cocoon and the timelock will be listed
-            here with verified source.
-          </div>
-          <div>Built with the IMD swarm, reviewed independently, hosted on IPFS. Source on GitHub.</div>
-        </footer>
+        <Contracts />
       </main>
-      </SimProvider>
-    </Web3Provider>
+    </>
   );
 }

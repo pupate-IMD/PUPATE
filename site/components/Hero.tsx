@@ -2,6 +2,7 @@
 
 import { avgCost, buyTax, canBuySeat, canFlush, eth, int, mode, nextSeatPrice, pct, ripeness } from "@/lib/sim";
 import { Chrysalis } from "./Chrysalis";
+import { Flash } from "./Flash";
 import { useDispatch, useSim } from "./SimContext";
 
 export function Hero() {
@@ -96,7 +97,7 @@ export function Lead({ k, v, note }: { k: string; v: string; note?: string }) {
       <span className="k">{k}</span>
       <span className="dots" aria-hidden="true" />
       <span className="v num">
-        {v}
+        <Flash>{v}</Flash>
         {note ? <span className="dim"> · {note}</span> : null}
       </span>
     </div>

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Instrument_Serif } from "next/font/google";
 import type { ReactNode } from "react";
+import { Providers } from "@/components/Providers";
 import "./globals.css";
 
 // Two voices: a serif for what is said (headings, big figures), a monospace for what is measured
@@ -40,7 +41,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

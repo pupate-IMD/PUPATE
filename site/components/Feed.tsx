@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { avgCost, buyTax, eth, hm, isLaunch, mode, pct, receiveEstimate } from "@/lib/sim";
+import { avgCost, breakdown, buyTax, eth, hm, isLaunch, LAUNCH_MINUTES, mode, pct, receiveEstimate } from "@/lib/sim";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { Lead } from "./Hero";
 import { useDispatch, useSim } from "./SimContext";
@@ -22,6 +22,8 @@ export function Feed() {
   const m = mode(s);
   const left = 6 * 3600 - ago;
   const value = parseFloat(amount.replace(",", "."));
+  const b = breakdown(s, value);
+  const dp = b && b.tax < 0.01 ? 5 : 4;
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -71,11 +73,28 @@ export function Feed() {
           <div className="taxline">
             <span className="num">
               {isLaunch(s)
-                ? `Buy tax now ${pct(buyTax(s))}. Reaches 6% in ${93 - s.launchMinute} minutes. Sell tax 6%.`
+                ? `Buy tax now ${pct(buyTax(s))}. Reaches 6% in ${LAUNCH_MINUTES - s.launchMinute} minutes. Sell tax 6%.`
                 : "Buy tax now 6%. Sell tax 6%."}
             </span>
             <span className="dim num">1 ETH = 70,400,000 PUPATE</span>
           </div>
+          {b && (
+            <div className="calc" aria-label="Where the ETH side of this trade goes">
+              <div className="label">Where the {eth(b.eth, dp)} goes</div>
+              <div className="bar" role="img" aria-label={`${pct(1 - b.rate)} to the pool, ${pct(b.rate)} tax`}>
+                <i className="pool" style={{ flexGrow: b.toPool }} />
+                <i className="seats" style={{ flexGrow: b.toSeats }} />
+                <i className="burn" style={{ flexGrow: b.toBurn }} />
+                <i className="rest" style={{ flexGrow: b.toDeveloper + b.toImd }} />
+              </div>
+              <Lead k={s.buying ? "Into the pool, for your PUPATE" : "Out of the pool, to you"} v={eth(b.toPool, dp)} />
+              <Lead k={`Tax, ${pct(b.rate)}`} v={eth(b.tax, dp)} />
+              <Lead k="· buys seats" v={eth(b.toSeats, dp)} />
+              <Lead k="· burns PUPATE" v={eth(b.toBurn, dp)} />
+              <Lead k="· developer" v={eth(b.toDeveloper, dp)} />
+              <Lead k="· burns IMD" v={eth(b.toImd, dp)} />
+            </div>
+          )}
           <button className="go" type="submit">
             {s.wallet ? (s.buying ? "Buy PUPATE" : "Sell PUPATE") : "Connect wallet"}
           </button>

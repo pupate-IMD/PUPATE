@@ -1,7 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ConnectWallet } from "./ConnectWallet";
+
+const SECTIONS = [
+  { id: "flow", label: "Flow" },
+  { id: "feed", label: "Feed" },
+  { id: "cocoon", label: "Cocoon" },
+  { id: "emerge", label: "Emerge" },
+  { id: "steps", label: "Steps" },
+  { id: "record", label: "Record" },
+];
 
 function effectiveDark(): boolean {
   if (typeof document === "undefined") return false;
@@ -12,7 +22,23 @@ function effectiveDark(): boolean {
 
 export function TopBar() {
   const [dark, setDark] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState<string | null>(null);
   useEffect(() => setDark(effectiveDark()), []);
+
+  // Mark the section that is in view.
+  useEffect(() => {
+    const els = SECTIONS.map((s) => document.getElementById(s.id)).filter((e): e is HTMLElement => !!e);
+    if (!els.length) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) setActive(e.target.id);
+      },
+      { rootMargin: "-30% 0px -60% 0px" },
+    );
+    els.forEach((e) => io.observe(e));
+    return () => io.disconnect();
+  }, []);
 
   function toggleTheme() {
     const next = dark ? "light" : "dark";
@@ -26,7 +52,7 @@ export function TopBar() {
   return (
     <div className="topbar">
       <div className="wrap">
-        <a className="wordmark" href="#top" aria-label="Pupate home">
+        <Link className="wordmark" href="/" aria-label="Pupate home">
           <svg viewBox="0 0 64 96" aria-hidden="true">
             <path d="M32 2v9" stroke="currentColor" strokeWidth="3" fill="none" />
             <path
@@ -40,12 +66,19 @@ export function TopBar() {
           <span>
             Pu<em>pate</em>
           </span>
-        </a>
-        <nav className="nav" aria-label="Sections">
-          <a href="#feed">Feed</a>
-          <a href="#cocoon">Cocoon</a>
-          <a href="#emerge">Emerge</a>
-          <a href="#steps">Steps</a>
+        </Link>
+        <nav className={`nav ${open ? "open" : ""}`} aria-label="Sections">
+          {SECTIONS.map((s) => (
+            <Link
+              key={s.id}
+              href={`/#${s.id}`}
+              className={active === s.id ? "active" : undefined}
+              aria-current={active === s.id ? "true" : undefined}
+              onClick={() => setOpen(false)}
+            >
+              {s.label}
+            </Link>
+          ))}
           <a href="https://imd.fun/docs/" target="_blank" rel="noreferrer">
             Built on IMD
           </a>
@@ -55,6 +88,9 @@ export function TopBar() {
             {dark ? "☼" : "☾"}
           </button>
           <ConnectWallet />
+          <button className="iconbtn menu" onClick={() => setOpen(!open)} aria-label="Menu" aria-expanded={open}>
+            {open ? "×" : "≡"}
+          </button>
         </div>
       </div>
     </div>

@@ -49,6 +49,9 @@ export function PreviewBar() {
             <li>
               <b>Launch, minute 12</b>: the opening window with its buy tax falling from 99%.
             </li>
+            <li>
+              <b>Open the sheet</b> on any chrysalis: its own page, with the listing curve and a buy button.
+            </li>
           </ol>
         </details>
       </div>
