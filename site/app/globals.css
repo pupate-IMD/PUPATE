@@ -243,7 +243,8 @@ footer .serif { color: var(--ink); font-size: 16px; }
   .nav.open { display: flex; }
   .nav a { padding: 10px 0; border-bottom: 1px solid var(--hair); }
   .iconbtn.menu { display: grid; }
-  .flow .lane { flex-direction: column; align-items: stretch; }
+  .flow .lane { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .flow .node, .flow .split, .flow .lane-name { flex: 0 0 auto; }
   .flow .arrow { transform: rotate(90deg); align-self: center; }
   .launch-panel, .seat-grid, .charts { grid-template-columns: 1fr; }
   .addr { grid-template-columns: 1fr; gap: 2px; }
@@ -338,3 +339,12 @@ footer .serif { color: var(--ink); font-size: 16px; }
 .addr { display: grid; grid-template-columns: 190px 1fr auto; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--hair); }
 .addr .a { overflow-wrap: anywhere; min-width: 0; }
 .addr a.a:hover { color: var(--jade-ink); }
+
+/* Narrow screens: the sections added above stack. Kept last so it wins over their base rules. */
+@media (max-width: 860px) {
+  .flow .lane { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .flow .node, .flow .split, .flow .lane-name { flex: 0 0 auto; }
+  .flow .arrow { transform: rotate(90deg); align-self: center; }
+  .launch-panel, .seat-grid, .charts { grid-template-columns: 1fr; }
+  .addr { grid-template-columns: 1fr; gap: 2px; }
+}
