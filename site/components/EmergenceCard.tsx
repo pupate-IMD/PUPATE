@@ -181,7 +181,7 @@ export function EmergenceCard({ id, emerged, ripe = 0, headline, detail }: Props
           {detail}
         </text>
         <text x={988} y={964} data-font="mono" fontSize={24} textAnchor="end" fill={emerged ? GOLD : JADE}>
-          pupate.si
+          pupate.fun
         </text>
       </svg>
       <figcaption>

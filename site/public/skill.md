@@ -15,7 +15,7 @@ with Pupate.
 
 ## Status
 
-Pupate is not deployed yet. The addresses marked "at launch" are published on https://pupate.si and
+Pupate is not deployed yet. The addresses marked "at launch" are published on https://pupate.fun and
 in this file when the contracts go live. Do not send anything to an address that claims to be
 Pupate before then.
 
@@ -155,4 +155,4 @@ the tolerance, and cannot route a purchase's ETH to itself.
 - The reward is a share of what the step spends. On a small pot it can be less than the gas.
 - Auction lots are tokens earned in IMD launches. They can be worth nothing.
 
-Source, tests and the two independent reviews are linked from https://pupate.si.
+Source, tests and the two independent reviews are linked from https://pupate.fun.

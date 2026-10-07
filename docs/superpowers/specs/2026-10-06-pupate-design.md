@@ -9,7 +9,7 @@ Pupate is a strategy token on Ethereum mainnet, launched through the IMD launchp
 
 - Name: Pupate
 - Ticker: PUPATE
-- Domain: pupate.si
+- Domain: pupate.fun
 - Target collection: identity.md (IDMD), `0x0000eC93127BAA929E58E97dd0095A2BFb38ec1D`, 2,000 tokens. Confirmed on-chain.
 
 ## Goals
@@ -146,7 +146,7 @@ The bot holds no privileged key. If it stops, anyone else can make the same call
 
 ### Website
 
-A Next.js application exported as a static site (`output: 'export'`, in `site/`), hosted on IPFS at pupate.si, with no backend. Wallets connect through RainbowKit on wagmi and viem, with the modal themed from the page's own tokens. It reads the chain through a public RPC and seat work statistics from IMD's public API. It carries its own swap panel, because third-party interfaces may not route through a pool with a custom hook.
+A Next.js application exported as a static site (`output: 'export'`, in `site/`), hosted on IPFS at pupate.fun, with no backend. Wallets connect through RainbowKit on wagmi and viem, with the modal themed from the page's own tokens. It reads the chain through a public RPC and seat work statistics from IMD's public API. It carries its own swap panel, because third-party interfaces may not route through a pool with a custom hook.
 
 The visual language is IMD's own, so Pupate reads as part of the ecosystem: IBM Plex Mono as the only typeface, paper and ink with a dark variant, 1.5px rules and square corners, small tracked uppercase labels, big bold figures, green as the single accent, a boxed top bar with an inverted active item, a three-panel overview with an action row, a boxed swap with Buy/Sell tabs, key-value rows with hairlines, and a fixed status bar at the bottom.
 
@@ -256,7 +256,7 @@ The Sepolia rehearsal in Plan 4 is where the remaining Phase 0 questions are set
 
 - An Ethereum wallet with ETH for gas and IMD for paid actions (0.5 IMD each).
 - A GitHub account for the contract repository.
-- The pupate.si domain.
+- The pupate.fun domain.
 - One machine and a Claude or Codex subscription to run the first seat.
 
 ## Changes in revision 2

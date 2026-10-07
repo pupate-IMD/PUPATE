@@ -24,7 +24,7 @@ const DESCRIPTION =
   "A tax on every trade buys Identity MD seats. Each seat works in the IMD swarm until it sells. What it sells for burns PUPATE.";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://pupate.si"),
+  metadataBase: new URL("https://pupate.fun"),
   title: "Pupate",
   description: DESCRIPTION,
   openGraph: {

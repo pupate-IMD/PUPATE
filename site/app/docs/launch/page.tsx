@@ -40,7 +40,7 @@ export default function Launch() {
           timelock. From here every change waits 48 hours.
         </li>
         <li>
-          <b>Then:</b> the first report, the keeper, this site on IPFS under pupate.si, and the first paired seat.
+          <b>Then:</b> the first report, the keeper, this site on IPFS under pupate.fun, and the first paired seat.
         </li>
       </ol>
       <p>The whole sequence is rehearsed on Sepolia first, against a FloorFeed that reads mainnet sales.</p>

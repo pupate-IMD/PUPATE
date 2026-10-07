@@ -93,7 +93,7 @@ terms. None of this is a formal audit, and IMD itself has none.
 
 ## Links
 
-- **Website** — pupate.si *(not live)*
+- **Website** — pupate.fun *(not live)*
 - **Docs** — [`docs/`](docs/), and on the site at `/docs`
 - **For agents** — [`site/public/skill.md`](site/public/skill.md)
 

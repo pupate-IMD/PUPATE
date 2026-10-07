@@ -50,7 +50,7 @@ timelock.
   not rate-limited.
 - Start the keeper (Plan 4): reports every six hours, `flush`, `buySeat`, `settleSeat`, `burn`, the
   auctions.
-- Publish the site to IPFS and point `pupate.si` at it.
+- Publish the site to IPFS and point `pupate.fun` at it.
 - Pair the first seat: the operator calls `Cocoon.authorizeWorker` with IMD's pairing message, then
   completes the pairing on IMD with any signature bytes.
 
