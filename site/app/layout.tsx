@@ -20,10 +20,27 @@ const serif = Instrument_Serif({
   display: "swap",
 });
 
+const DESCRIPTION =
+  "A tax on every trade buys Identity MD seats. Each seat works in the IMD swarm until it sells. What it sells for burns PUPATE.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL("https://pupate.si"),
   title: "Pupate",
-  description:
-    "A tax on every trade buys Identity MD seats. Each seat works in the IMD swarm until it sells. What it sells for burns PUPATE.",
+  description: DESCRIPTION,
+  openGraph: {
+    title: "Pupate",
+    description: DESCRIPTION,
+    url: "/",
+    siteName: "Pupate",
+    type: "website",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Pupate — built on IMD" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Pupate",
+    description: DESCRIPTION,
+    images: ["/og.png"],
+  },
 };
 
 export const viewport: Viewport = {

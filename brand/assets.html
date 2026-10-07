@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0b1410; --ink: #e9e6da; --dim: #9aa89f; --faint: #66746b;
+    --hair: #223029; --jade: #3ec28f; --jade-ink: #8fe0bf; --gold: #d9a94b;
+    --serif: "Instrument Serif", Georgia, serif;
+    --mono: "IBM Plex Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #333; }
+  .stage {
+    position: relative; overflow: hidden; background: var(--bg); color: var(--ink);
+    font-family: var(--mono); margin: 20px;
+    background-image:
+      repeating-linear-gradient(0deg, transparent 0 39px, rgba(34,48,41,.55) 39px 40px),
+      repeating-linear-gradient(90deg, transparent 0 39px, rgba(34,48,41,.55) 39px 40px),
+      radial-gradient(130% 130% at 50% 40%, #0d1813 0%, #0b1410 55%, #070f0b 100%);
+  }
+  #logo { width: 1024px; height: 1024px; }
+  #banner { width: 1500px; height: 500px; }
+  #og { width: 1200px; height: 630px; }
+
+  /* corner ticks like the site's technical-drawing panel */
+  .frame { position: absolute; inset: var(--m, 40px); border: 1px solid var(--hair); pointer-events: none; }
+  .frame i { position: absolute; width: 22px; height: 22px; }
+  .frame .tl { top: -1px; left: -1px; border-top: 3px solid var(--ink); border-left: 3px solid var(--ink); }
+  .frame .tr { top: -1px; right: -1px; border-top: 3px solid var(--ink); border-right: 3px solid var(--ink); }
+  .frame .bl { bottom: -1px; left: -1px; border-bottom: 3px solid var(--ink); border-left: 3px solid var(--ink); }
+  .frame .br { bottom: -1px; right: -1px; border-bottom: 3px solid var(--ink); border-right: 3px solid var(--ink); }
+
+  .mark { display: block; }
+  .dot { position: absolute; border-radius: 50%; background: var(--jade); pointer-events: none; }
+
+  .serif { font-family: var(--serif); font-weight: 400; }
+  .ital { font-style: italic; color: var(--jade-ink); }
+  .label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .18em; color: var(--dim); }
+  .gold { color: var(--gold); }
+  .chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--gold); color: var(--gold); padding: 6px 12px; text-transform: uppercase; letter-spacing: .14em; }
+  .chip .d { width: 8px; height: 8px; background: var(--gold); border-radius: 50%; }
+
+  /* logo */
+  #logo .center { position: absolute; inset: 0; display: grid; place-items: center; }
+  #logo .mark { width: 420px; height: 630px; }
+
+  /* banner: one lockup, centred, clear of the bottom-left avatar */
+  #banner .lockup { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 44px; }
+  #banner .mark { width: 190px; height: 285px; }
+  #banner .words { display: grid; gap: 14px; }
+  #banner .word { font-family: var(--serif); font-size: 128px; line-height: .9; letter-spacing: -.01em; }
+  #banner .rule { height: 1px; background: var(--hair); }
+  #banner .tag { font-size: 21px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
+  #banner .foot { position: absolute; right: 56px; bottom: 44px; text-align: right; font-size: 18px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+
+  /* og: text left, mark right */
+  #og .pad { position: absolute; inset: 72px; display: grid; grid-template-columns: 1fr auto; align-content: space-between; gap: 20px 40px; }
+  #og .top { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: baseline; font-size: 20px; }
+  #og .head { align-self: center; font-family: var(--serif); font-size: 62px; line-height: 1.08; max-width: 15ch; }
+  #og .mark { width: 210px; height: 315px; align-self: center; }
+  #og .bottom { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; font-size: 22px; letter-spacing: .1em; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 64 96">
+    <path d="M32 2v9" stroke="#e9e6da" stroke-width="3" fill="none" />
+    <path d="M32 11C16 18 11 38 14 58c3 17 10 30 18 35 8-5 15-18 18-35 3-20-2-40-18-47z" fill="none" stroke="#e9e6da" stroke-width="3" />
+    <path d="M32 30c-9 10-13 24-8 44 4-6 7-13 8-20 1 7 4 14 8 20 5-20 1-34-8-44z" fill="#3ec28f" />
+    <path d="M20 29c4-2 20-2 24 0" stroke="#d9a94b" stroke-width="2.6" fill="none" stroke-linecap="round" />
+  </symbol>
+</svg>
+
+<div class="stage" id="logo">
+  <div class="swarm" data-n="26" data-seed="7"></div>
+  <div class="frame" style="--m:54px"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
+  <div class="center"><svg class="mark"><use href="#mark" /></svg></div>
+</div>
+
+<div class="stage" id="banner">
+  <div class="swarm" data-n="46" data-seed="3"></div>
+  <div class="frame" style="--m:30px"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
+  <div class="lockup">
+    <svg class="mark"><use href="#mark" /></svg>
+    <div class="words">
+      <div class="word">Pu<span class="ital">pate</span></div>
+      <div class="rule"></div>
+      <div class="tag">A tax on every trade buys Identity&nbsp;MD seats</div>
+    </div>
+  </div>
+  <div class="foot"><span class="gold">BUILT ON IMD</span> &nbsp;·&nbsp; NOT LIVE</div>
+</div>
+
+<div class="stage" id="og">
+  <div class="swarm" data-n="40" data-seed="5"></div>
+  <div class="frame" style="--m:40px"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
+  <div class="pad">
+    <div class="top"><span class="label">Pupate · Identity MD strategy</span><span class="label gold">Built on IMD</span></div>
+    <div class="head serif">A tax on every trade buys <span class="ital">Identity MD seats</span>, and burns PUPATE.</div>
+    <svg class="mark"><use href="#mark" /></svg>
+    <div class="bottom"><span class="label" style="font-size:22px">pupate.si</span><span class="chip">Not live yet</span></div>
+  </div>
+</div>
+
+<script>
+  // A small seeded scatter of jade points: the swarm, kept faint so it never fights the mark.
+  function rng(seed) { let a = (seed * 2654435761) >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  for (const s of document.querySelectorAll(".swarm")) {
+    const n = +s.dataset.n, r = rng(+s.dataset.seed), box = s.parentElement.getBoundingClientRect();
+    for (let i = 0; i < n; i++) {
+      const d = document.createElement("div");
+      d.className = "dot";
+      const size = 2 + r() * 3.5;
+      d.style.width = d.style.height = size.toFixed(1) + "px";
+      d.style.left = (r() * 100).toFixed(2) + "%";
+      d.style.top = (r() * 100).toFixed(2) + "%";
+      d.style.opacity = (0.12 + r() * 0.33).toFixed(2);
+      s.appendChild(d);
+    }
+  }
+  window.__assetsReady = false;
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { requestAnimationFrame(() => { window.__assetsReady = true; }); });
+</script>
+</body>
+</html>
