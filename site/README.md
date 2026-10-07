@@ -29,6 +29,8 @@ contract reads and writes and removes the preview strip; the components stay.
 - `app/globals.css`: the design tokens and every component style.
 - `components/Web3Provider.tsx`, `lib/rainbowTheme.ts`, `components/ConnectWallet.tsx`: RainbowKit, themed with the page's CSS variables.
 - `components/SimContext.tsx`, `lib/sim.ts`: the simulated protocol behind the preview.
+- `app/{flow,feed,cocoon,emerge,steps,record}/page.tsx`: one page per stage, framed by `components/Shell.tsx`; `app/page.tsx` is the front page with its index of them.
+- `app/docs/`, `lib/docs.ts`, `components/docs/`: the documentation, one page per entry in the table of contents.
 - `public/skill.md`: the keeper skill, the file an agent reads to run the public steps. Fill in the addresses at launch.
 - `lib/attestation.ts`, `components/OracleProof.tsx`: an IMD oracle attestation checked in the browser, with the same EIP-712 encoding as `src/oracle/OracleAttestation.sol`.
 - `lib/seat.ts`, `components/EmergenceCard.tsx`: each seat's drawing, fixed by its number, and the sample record of its work.

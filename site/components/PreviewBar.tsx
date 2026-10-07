@@ -54,11 +54,11 @@ export function PreviewBar() {
               and a buy button. Buy it and the page turns to its butterfly.
             </li>
             <li>
-              <b>Verify in this browser</b> under Feed: checks a real IMD oracle signature, then fails when the answer is
+              <b>Verify in this browser</b> on the Feed page: checks a real IMD oracle signature, then fails when the answer is
               changed.
             </li>
             <li>
-              <b>Open skill.md</b> under Steps: the file an agent reads to run the steps.
+              <b>Open skill.md</b> on the Steps page: the file an agent reads to run the steps.
             </li>
           </ol>
         </details>

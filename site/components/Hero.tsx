@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { avgCost, buyTax, canBuySeat, canFlush, eth, int, mode, nextSeatPrice, pct, ripeness } from "@/lib/sim";
 import { Chrysalis } from "./Chrysalis";
 import { Flash } from "./Flash";
@@ -30,9 +31,9 @@ export function Hero() {
             price, and every step can be run by anyone.
           </p>
           <div className="cta">
-            <a className="btn primary" href="#feed">
+            <Link className="btn primary" href="/feed/">
               Trade <span className="arrow">→</span>
-            </a>
+            </Link>
             <button className="btn" onClick={() => dispatch({ type: "flush" })} disabled={!canFlush(s)}>
               Flush {canFlush(s) ? eth(s.hookWaiting) : "the tax"}
             </button>
@@ -71,21 +72,21 @@ export function Hero() {
       </section>
 
       <nav className="rail" aria-label="Stages">
-        <a href="#feed">
+        <Link href="/feed/">
           <span className="n">I</span>
           <span className="serif">Feed</span>
           <span className="s">Trading pays the tax into the vault.</span>
-        </a>
-        <a href="#cocoon">
+        </Link>
+        <Link href="/cocoon/">
           <span className="n">II</span>
           <span className="serif">Cocoon</span>
           <span className="s">Seats work in the swarm while they are listed.</span>
-        </a>
-        <a href="#emerge">
+        </Link>
+        <Link href="/emerge/">
           <span className="n">III</span>
           <span className="serif">Emerge</span>
           <span className="s">Sold seats buy back and burn the token.</span>
-        </a>
+        </Link>
       </nav>
     </div>
   );

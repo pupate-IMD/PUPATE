@@ -1,20 +1,17 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
-import { Contracts } from "@/components/Contracts";
-import { PreviewBar } from "@/components/PreviewBar";
 import { SeatSheet } from "@/components/SeatSheet";
-import { TopBar } from "@/components/TopBar";
+import { DocLink, Shell } from "@/components/Shell";
+
+export const metadata: Metadata = { title: "Seat · Pupate" };
 
 export default function SeatPage() {
   return (
-    <>
-      <TopBar />
-      <PreviewBar />
-      <main>
-        <Suspense fallback={<div className="wrap section dim">Loading the sheet…</div>}>
-          <SeatSheet />
-        </Suspense>
-        <Contracts />
-      </main>
-    </>
+    <Shell>
+      <Suspense fallback={<div className="wrap section dim">Loading the sheet…</div>}>
+        <SeatSheet />
+      </Suspense>
+      <DocLink slug="seats" />
+    </Shell>
   );
 }

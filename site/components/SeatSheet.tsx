@@ -53,7 +53,7 @@ export function SeatSheet() {
               <a className="btn" href={`https://opensea.io/assets/ethereum/${COLLECTION}/${sale.id}`} target="_blank" rel="noreferrer">
                 View on OpenSea
               </a>
-              <Link className="btn" href="/#emerge">
+              <Link className="btn" href="/emerge/">
                 All sales
               </Link>
             </div>
@@ -72,7 +72,7 @@ export function SeatSheet() {
         </header>
         <div className="empty">
           The vault does not hold this seat.{" "}
-          <Link href="/#cocoon" className="jade">
+          <Link href="/cocoon/" className="jade">
             Back to the cocoon →
           </Link>
         </div>
@@ -141,7 +141,7 @@ export function SeatSheet() {
             <a className="btn" href="https://explorer.imd.fun/agents" target="_blank" rel="noreferrer">
               IMD agents
             </a>
-            <Link className="btn" href="/#cocoon">
+            <Link className="btn" href="/cocoon/">
               All seats
             </Link>
           </div>
