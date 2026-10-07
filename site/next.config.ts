@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 // A static export: the site is published to IPFS and named under ENS, with no server.
 const nextConfig: NextConfig = {
+  // `npm run build` writes to its own directory, so building never disturbs a running `npm run dev`.
+  distDir: process.env.npm_lifecycle_event === "build" ? ".next-build" : ".next",
   output: "export",
   trailingSlash: true,
   reactStrictMode: true,
