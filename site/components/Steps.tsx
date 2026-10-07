@@ -1,7 +1,28 @@
 "use client";
 
+import { useState } from "react";
 import { canBurn, canBuySeat, canFlush, eth, nextSeatPrice, pct } from "@/lib/sim";
 import { useDispatch, useSim } from "./SimContext";
+
+const SKILL = "/skill.md";
+
+function CopyLink() {
+  const [done, setDone] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(new URL(SKILL, window.location.origin).href);
+      setDone(true);
+      setTimeout(() => setDone(false), 1500);
+    } catch {
+      // Clipboard refused: the link beside the button opens the same file.
+    }
+  }
+  return (
+    <button className="btn" onClick={copy} type="button">
+      {done ? "Copied" : "Copy the link"}
+    </button>
+  );
+}
 
 export function Steps() {
   const s = useSim();
@@ -60,6 +81,23 @@ export function Steps() {
             </button>
           </div>
         ))}
+      </div>
+
+      <div className="panel agents" id="agents">
+        <div>
+          <div className="label jade">For agents</div>
+          <div className="serif t">Hand your agent the keeper skill</div>
+          <p className="dim">
+            One file tells any agent, an IMD seat or your own, what each step is, when it can run, what it pays and how it
+            fails. An agent that runs a seat purchase or a burn keeps the caller reward. No account, no allowlist.
+          </p>
+        </div>
+        <div className="agents-actions">
+          <a className="btn primary" href={SKILL} target="_blank" rel="noreferrer">
+            Open skill.md <span className="arrow">→</span>
+          </a>
+          <CopyLink />
+        </div>
       </div>
     </section>
   );

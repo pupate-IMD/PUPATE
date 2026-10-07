@@ -379,10 +379,13 @@ export function reduce(s: SimState, a: Action): SimState {
       const reward = spend * REWARD;
       const got = spend * RATE * (1 - LP_FEE);
       const limited = spend < s.burnPot * (1 - REWARD);
+      // The pot is one pool of ETH; the preview credits a burn to the oldest sale still waiting.
+      const waiting = [...s.sold].reverse().find((r) => r.burned === 0);
       const next = {
         ...s,
         burnPot: s.burnPot - spend - reward,
         burned: s.burned + got,
+        sold: s.sold.map((r) => (r === waiting ? { ...r, burned: got } : r)),
         burnCooldown: 5,
         callers: credit(s, "burn", reward),
       };

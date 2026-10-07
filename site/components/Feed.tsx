@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { avgCost, breakdown, buyTax, eth, hm, isLaunch, LAUNCH_MINUTES, mode, pct, receiveEstimate } from "@/lib/sim";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { Lead } from "./Hero";
+import { OracleProof } from "./OracleProof";
 import { useDispatch, useSim } from "./SimContext";
 
 export function Feed() {
@@ -115,6 +116,9 @@ export function Feed() {
             {m.why}.
           </p>
           <Lead k="Reference price" v={eth(s.floor)} note="median of 24h sales, from the IMD oracle" />
+          <a className="label jade" href="#proof" style={{ justifySelf: "end" }}>
+            Check the oracle yourself ↓
+          </a>
           <Lead
             k="Report"
             v={`${hm(Math.max(ago, 0))} ago`}
@@ -127,6 +131,7 @@ export function Feed() {
           <Lead k="Developer share" v={eth(s.dev)} note="10% of tax, pays oracle reports and seat machines" />
         </div>
       </div>
+      <OracleProof />
     </section>
   );
 }

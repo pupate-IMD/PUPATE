@@ -348,3 +348,39 @@ footer .serif { color: var(--ink); font-size: 16px; }
   .launch-panel, .seat-grid, .charts { grid-template-columns: 1fr; }
   .addr { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* --- oracle proof */
+.proof { margin-top: 12px; }
+.proof-grid { display: grid; grid-template-columns: 400px 1fr; gap: 40px; align-items: start; }
+.proof-grid > * { min-width: 0; }
+.proof-sheet { padding: 14px 16px 10px; display: grid; }
+.proof-sheet .lead { padding: 5px 0; }
+.proof-run { display: grid; gap: 14px; }
+.proof-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.verdict { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 22px; line-height: 1.15; padding: 10px 14px; border-left: 3px solid var(--jade); }
+.verdict.bad { border-left-color: var(--alarm); }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; border-top: 1px solid var(--hair); }
+.checks li { display: grid; grid-template-columns: 18px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--hair); font-size: 12px; overflow-wrap: anywhere; }
+.verdict .mark, .checks .mark { color: var(--jade-ink); font-weight: 500; }
+.verdict.bad .mark, .checks .bad .mark { color: var(--alarm); }
+
+/* --- keeper skill */
+.agents { display: grid; grid-template-columns: 1fr auto; gap: 16px 28px; align-items: center; padding: 18px 20px; margin-top: 24px; }
+.agents .t { font-size: 24px; line-height: 1.1; margin: 4px 0 6px; }
+.agents p { max-width: 64ch; }
+.agents-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* --- emergence card */
+.ecard { margin: 0; display: grid; gap: 10px; min-width: 0; }
+.ecard svg { display: block; width: 100%; height: auto; border: 1px solid var(--hair); }
+.ecard [data-font="serif"] { font-family: var(--serif); }
+.ecard [data-font="mono"] { font-family: var(--mono); }
+.ecard figcaption { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; }
+.ecard-row { max-width: 440px; }
+.seat-grid.emerged { grid-template-columns: minmax(0, 440px) 1fr; }
+.seat-link:hover { color: var(--jade-ink); }
+
+@media (max-width: 860px) {
+  .proof-grid, .agents, .seat-grid.emerged { grid-template-columns: 1fr; }
+  .proof-grid { gap: 20px; }
+}

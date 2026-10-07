@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { auctionPrice, eth, int, pad4 } from "@/lib/sim";
 import { useDispatch, useSim } from "./SimContext";
 
@@ -14,7 +15,8 @@ export function Emerge() {
         <h2>Emerge</h2>
         <p>
           When a listing fills, the ETH goes to the burn pot, which buys PUPATE from the launch pool and destroys it. Tokens
-          a seat earned while it worked are auctioned, and the ETH returns to the seat pot.
+          a seat earned while it worked are auctioned, and the ETH returns to the seat pot. Each sold seat keeps a page
+          with its butterfly.
         </p>
       </header>
       {s.sold.length === 0 && !s.auction ? (
@@ -36,7 +38,9 @@ export function Emerge() {
                 {s.sold.map((r) => (
                   <tr key={`${r.id}-${r.sold}`}>
                     <td>
-                      <span className="serif">{pad4(r.id)}</span>
+                      <Link className="serif seat-link" href={`/seat/?id=${r.id}`}>
+                        {pad4(r.id)}
+                      </Link>
                     </td>
                     <td className="num">{eth(r.bought)}</td>
                     <td className="num">{eth(r.sold)}</td>

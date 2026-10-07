@@ -50,7 +50,15 @@ export function PreviewBar() {
               <b>Launch, minute 12</b>: the opening window with its buy tax falling from 99%.
             </li>
             <li>
-              <b>Open the sheet</b> on any chrysalis: its own page, with the listing curve and a buy button.
+              <b>Open the sheet</b> on any chrysalis: its own page, with the listing curve, its work in the swarm, its card
+              and a buy button. Buy it and the page turns to its butterfly.
+            </li>
+            <li>
+              <b>Verify in this browser</b> under Feed: checks a real IMD oracle signature, then fails when the answer is
+              changed.
+            </li>
+            <li>
+              <b>Open skill.md</b> under Steps: the file an agent reads to run the steps.
             </li>
           </ol>
         </details>
