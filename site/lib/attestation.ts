@@ -108,7 +108,7 @@ export async function verify(s: Signed): Promise<Check[]> {
   const a = s.attestation;
   let signer: Address | null = null;
   try {
-    signer = await recoverSigner(s);
+    signer = Number.isInteger(a.answerType) ? await recoverSigner(s) : null;
   } catch {
     signer = null;
   }
@@ -120,7 +120,11 @@ export async function verify(s: Signed): Promise<Check[]> {
     {
       name: "Signed by the IMD oracle",
       pass: signed,
-      detail: signer ? `recovered ${signer}` : "the signature does not parse",
+      detail: signer
+        ? `recovered ${signer}`
+        : Number.isInteger(a.answerType)
+          ? "the signature does not parse"
+          : "the answer type is not one this check knows",
     },
     {
       name: "Quorum is a majority of at least 4",
@@ -143,6 +147,81 @@ export async function verify(s: Signed): Promise<Check[]> {
       detail: shaped ? `answer ${hexToBigInt(a.answer).toLocaleString("en-US")}` : "not a uint256 answer",
     },
   ];
+}
+
+// ------------------------------------------------------------------ live attestations
+
+export const IMD_API = "https://api.imd.fun";
+
+/// IMD's envelope: EIP-712 typed data plus the signature. The API allows browser reads (CORS *).
+interface Envelope {
+  requestId: string;
+  domain: { name: string; version: string; chainId: number; verifyingContract: Address };
+  message: Record<string, string | number>;
+  signature: Hex;
+  signer?: Address;
+  attestedAt?: string;
+}
+
+const asBig = (v: string | number | undefined) => (typeof v === "number" ? BigInt(v) : BigInt(v ?? "0"));
+const asHex = (v: string | number | undefined) => String(v ?? "0x") as Hex;
+/// The oracle signs a uint8 per answer kind (3 for uint256, confirmed against a live signature);
+/// the API may send the number, a numeric string, or a label. Labels other than uint256 are
+/// resolved by trial: the code that recovers the attester is the code that was signed.
+const asAnswerType = (v: string | number | undefined): number =>
+  typeof v === "number" ? v : /^\d+$/.test(String(v ?? "")) ? Number(v) : v === "uint256" ? ANSWER_TYPE_UINT256 : NaN;
+
+async function resolveAnswerType(signed: Signed): Promise<number> {
+  if (Number.isInteger(signed.attestation.answerType)) return signed.attestation.answerType;
+  for (let code = 0; code < 32; code++) {
+    try {
+      const who = await recoverSigner({ ...signed, attestation: { ...signed.attestation, answerType: code } });
+      if (isAddressEqual(who, ORACLE_SIGNER)) return code;
+    } catch {
+      // not this one
+    }
+  }
+  return NaN;
+}
+
+/// One request's attestation, fetched from IMD and shaped for `verify`.
+export async function fetchAttestation(requestId: string): Promise<Signed> {
+  const res = await fetch(`${IMD_API}/oracle/requests/${encodeURIComponent(requestId.trim())}/attestation`, { cache: "no-store" });
+  if (!res.ok) throw new Error(res.status === 404 ? "no attestation for that request id" : `IMD answered ${res.status}`);
+  const env = (await res.json()) as Envelope;
+  const m = env.message;
+  const signed: Signed = {
+    consumer: env.domain.verifyingContract,
+    consumerChainId: Number(env.domain.chainId),
+    signature: env.signature,
+    attestation: {
+      requestId: asHex(m.requestId),
+      chainId: asBig(m.chainId),
+      questionHash: asHex(m.questionHash),
+      answerType: asAnswerType(m.answerType),
+      answer: asHex(m.answer),
+      figure: asBig(m.figure),
+      fromBlock: asBig(m.fromBlock),
+      toBlock: asBig(m.toBlock),
+      blockHash: asHex(m.blockHash),
+      panelJobId: asHex(m.panelJobId),
+      panelSize: Number(m.panelSize),
+      quorum: Number(m.quorum),
+      agreed: Number(m.agreed),
+      issuedAt: asBig(m.issuedAt),
+      expiresAt: asBig(m.expiresAt),
+    },
+  };
+  signed.attestation.answerType = await resolveAnswerType(signed);
+  return signed;
+}
+
+/// The id of the newest attested request IMD lists, any consumer; null when none is listed.
+export async function fetchLatestAttestedId(): Promise<string | null> {
+  const res = await fetch(`${IMD_API}/oracle/requests?limit=25`, { cache: "no-store" });
+  if (!res.ok) return null;
+  const body = (await res.json()) as { requests?: { id: string; status: string }[] };
+  return body.requests?.find((r) => r.status === "attested")?.id ?? null;
 }
 
 /// The same attestation with its answer raised by one, the signature untouched.
