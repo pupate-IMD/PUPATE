@@ -5,9 +5,13 @@
   "description": "Pupate's off-chain tools: the IMD paid-action client (oracle requests, the launch) and the keeper that runs Cocoon's public steps.",
   "type": "module",
   "engines": { "node": ">=22" },
-  "bin": { "imd": "bin/imd.mjs" },
+  "bin": { "imd": "bin/imd.mjs", "pupate-keeper": "bin/keeper.mjs" },
   "scripts": {
-    "check:floor": "node bin/imd.mjs check oracle.request questions/floor.check.json"
+    "check:floor": "node bin/imd.mjs check oracle.request questions/floor.check.json",
+    "keeper:status": "node bin/keeper.mjs --status",
+    "keeper:once": "node bin/keeper.mjs --once",
+    "keeper:loop": "node bin/keeper.mjs --loop",
+    "test:fork": "node test/fork.mjs"
   },
   "dependencies": {
     "@x402/core": "2.27.0",

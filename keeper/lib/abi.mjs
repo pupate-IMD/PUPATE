@@ -1,0 +1,221 @@
+// The slices of each contract the keeper reads and calls, in viem's human-readable form. Names are
+// identical to site/lib/abi.ts and src/; the Foundry tests are the source of truth for signatures.
+// Custom errors are listed so a simulated revert decodes to its name.
+import { parseAbi } from 'viem';
+
+export const erc20Abi = parseAbi([
+  'function balanceOf(address) view returns (uint256)',
+  'function totalSupply() view returns (uint256)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function decimals() view returns (uint8)',
+  'function symbol() view returns (string)',
+]);
+
+export const erc721Abi = parseAbi([
+  'function ownerOf(uint256 tokenId) view returns (address)',
+  'function isApprovedForAll(address owner, address operator) view returns (bool)',
+  'function setApprovalForAll(address operator, bool approved)',
+  'function transferFrom(address from, address to, uint256 tokenId)',
+]);
+
+export const permit2Abi = parseAbi([
+  'function allowance(address owner, address token, address spender) view returns (uint160 amount, uint48 expiration, uint48 nonce)',
+  'function approve(address token, address spender, uint160 amount, uint48 expiration)',
+]);
+
+export const universalRouterAbi = parseAbi(['function execute(bytes commands, bytes[] inputs, uint256 deadline) payable']);
+
+/// The PoolManager's ERC-6909 claims: the hook's uncollected tax is its balance of currency id 0 (ETH).
+export const poolManagerAbi = parseAbi(['function balanceOf(address owner, uint256 id) view returns (uint256)']);
+
+export const hookAbi = parseAbi([
+  'function buyTaxBps() view returns (uint256)',
+  'function taxBps() view returns (uint16)',
+  'function openedAt() view returns (uint40)',
+  'function openedAtBlock() view returns (uint40)',
+  'function totalTax() view returns (uint256)',
+  'function sink() view returns (address)',
+  'function owner() view returns (address)',
+  'function flush() returns (uint256 amount)',
+  'event Taxed(address indexed sender, bool buy, uint256 tax, uint256 rateBps)',
+  'event Flushed(uint256 amount)',
+  'event TaxLowered(uint256 taxBps)',
+  'error ZeroAddress()',
+  'error OnlyPoolManager()',
+  'error NotOwner()',
+  'error NotLower()',
+  'error PartialFill()',
+  'error NothingToFlush()',
+  'error LiquidityClosed()',
+]);
+
+export const feedAbi = parseAbi([
+  'struct Attestation { bytes32 requestId; uint256 chainId; bytes32 questionHash; uint8 answerType; bytes answer; uint256 figure; uint64 fromBlock; uint64 toBlock; bytes32 blockHash; bytes32 panelJobId; uint16 panelSize; uint16 quorum; uint16 agreed; uint64 issuedAt; uint64 expiresAt; }',
+  'function latest() view returns (uint256 floorWei, bool fresh)',
+  'function floorWei() view returns (uint256)',
+  'function issuedAt() view returns (uint64)',
+  'function expiresAt() view returns (uint64)',
+  'function maxAge() view returns (uint64)',
+  'function attester() view returns (address)',
+  'function questionHash() view returns (bytes32)',
+  'function EVIDENCE_CHAIN_ID() view returns (uint256)',
+  'function report(Attestation a, bytes sig)',
+  'event Reported(uint256 floorWei, uint64 issuedAt, uint64 freshUntil)',
+  'error NotOwner()',
+  'error ZeroAddress()',
+  'error OutOfBounds()',
+  'error BadSigner()',
+  'error WrongQuestion()',
+  'error WrongChain()',
+  'error NoQuorum()',
+  'error ShortLived()',
+  'error Expired()',
+  'error NotNewer()',
+  'error BadAnswer()',
+  'error MoveTooLarge()',
+  'error BadSignatureLength()',
+  'error BadSignatureS()',
+]);
+
+/// Seaport 1.6 structs, shared by the Seaport slice and Cocoon's buySeat.
+const seaportStructs = [
+  'struct OfferItem { uint8 itemType; address token; uint256 identifierOrCriteria; uint256 startAmount; uint256 endAmount; }',
+  'struct ConsiderationItem { uint8 itemType; address token; uint256 identifierOrCriteria; uint256 startAmount; uint256 endAmount; address recipient; }',
+  'struct OrderParameters { address offerer; address zone; OfferItem[] offer; ConsiderationItem[] consideration; uint8 orderType; uint256 startTime; uint256 endTime; bytes32 zoneHash; uint256 salt; bytes32 conduitKey; uint256 totalOriginalConsiderationItems; }',
+  'struct Order { OrderParameters parameters; bytes signature; }',
+  'struct AdvancedOrder { OrderParameters parameters; uint120 numerator; uint120 denominator; bytes signature; bytes extraData; }',
+  'struct CriteriaResolver { uint256 orderIndex; uint8 side; uint256 index; uint256 identifier; bytes32[] criteriaProof; }',
+  'struct OrderComponents { address offerer; address zone; OfferItem[] offer; ConsiderationItem[] consideration; uint8 orderType; uint256 startTime; uint256 endTime; bytes32 zoneHash; uint256 salt; bytes32 conduitKey; uint256 counter; }',
+];
+
+/// The Seaport errors most likely to surface through a simulated buySeat or fulfilment.
+const seaportErrors = [
+  'error OrderAlreadyFilled(bytes32 orderHash)',
+  'error OrderIsCancelled(bytes32 orderHash)',
+  'error OrderPartiallyFilled(bytes32 orderHash)',
+  'error InvalidTime(uint256 startTime, uint256 endTime)',
+  'error InvalidRestrictedOrder(bytes32 orderHash)',
+  'error InvalidContractOrder(bytes32 orderHash)',
+  'error InvalidSigner()',
+  'error InvalidSignature()',
+  'error BadSignatureV(uint8 v)',
+  'error BadContractSignature()',
+  'error InsufficientNativeTokensSupplied()',
+  'error InvalidMsgValue(uint256 value)',
+  'error NativeTokenTransferGenericFailure(address account, uint256 amount)',
+  'error ConsiderationNotMet(uint256 orderIndex, uint256 considerationIndex, uint256 shortfallAmount)',
+  'error TokenTransferGenericFailure(address token, address from, address to, uint256 identifier, uint256 amount)',
+  'error InvalidERC721TransferAmount(uint256 amount)',
+  'error MissingOriginalConsiderationItems()',
+  'error PartialFillsNotEnabledForOrder()',
+  'error BadFraction()',
+  'error InvalidNativeOfferItem()',
+  'error UnusedItemParameters()',
+  'error NoSpecifiedOrdersAvailable()',
+  'error CannotCancelOrder()',
+  'error InvalidCanceller()',
+  'error NoReentrantCalls()',
+];
+
+export const seaportAbi = parseAbi([
+  ...seaportStructs,
+  'function validate(Order[] orders) returns (bool validated)',
+  'function cancel(OrderComponents[] orders) returns (bool cancelled)',
+  'function fulfillAdvancedOrder(AdvancedOrder advancedOrder, CriteriaResolver[] criteriaResolvers, bytes32 fulfillerConduitKey, address recipient) payable returns (bool fulfilled)',
+  'function getOrderStatus(bytes32 orderHash) view returns (bool isValidated, bool isCancelled, uint256 totalFilled, uint256 totalSize)',
+  'function getOrderHash(OrderComponents order) view returns (bytes32 orderHash)',
+  'function getCounter(address offerer) view returns (uint256 counter)',
+  'event OrderValidated(bytes32 orderHash, OrderParameters orderParameters)',
+  ...seaportErrors,
+]);
+
+export const cocoonAbi = parseAbi([
+  ...seaportStructs,
+  'struct Params { uint16 accumulateSeatBps; uint16 listStartX; uint16 listEndX; uint32 listDecay; uint16 toleranceBps; uint16 callerRewardBps; uint16 burnImpactBps; uint16 burnSpacing; uint128 harvestStartWei; uint128 imdStartPerEth; }',
+  'function seatPot() view returns (uint256)',
+  'function burnPot() view returns (uint256)',
+  'function developerBalance() view returns (uint256)',
+  'function imdBurnBalance() view returns (uint256)',
+  'function heldCount() view returns (uint256)',
+  'function heldCost() view returns (uint256)',
+  'function lastBurnBlock() view returns (uint256)',
+  'function wired() view returns (bool)',
+  'function developer() view returns (address)',
+  'function operator() view returns (address)',
+  'function owner() view returns (address)',
+  'function COLLECTION() view returns (address)',
+  'function SEAPORT() view returns (address)',
+  'function FLOOR() view returns (address)',
+  'function IMD() view returns (address)',
+  'function launchKey() view returns (address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks)',
+  'function mode() view returns (uint8 mode, uint256 seatBps)',
+  'function getParams() view returns (Params)',
+  'function seats(uint256 tokenId) view returns (uint128 cost, uint40 boughtAt, uint16 startX, uint16 endX, uint32 decay, bool held, uint16 round)',
+  'function auctions(address token) view returns (uint128 lot, uint128 start, uint40 startedAt)',
+  'function auctionPrice(address token) view returns (uint256)',
+  'function imdAuction() view returns (uint128 lot, uint128 start, uint40 startedAt)',
+  'function imdDemand() view returns (uint256)',
+  'function depositTax() payable',
+  'function skim()',
+  'function buySeat(AdvancedOrder order, CriteriaResolver[] resolvers)',
+  'function adopt(uint256 tokenId)',
+  'function settleSeat(uint256 tokenId)',
+  'function burn()',
+  'function burnPupate()',
+  'function startAuction(address token)',
+  'function takeAuction(address token) payable',
+  'function startImdAuction()',
+  'function takeImdAuction()',
+  'function claimDeveloper()',
+  'event TaxDeposited(uint256 amount, uint256 toSeatPot, uint256 toBurnPot, uint256 toDeveloper, uint256 toImdBurn, uint8 mode)',
+  'event ProceedsReceived(address indexed from, uint256 amount)',
+  'event SeatBought(uint256 indexed tokenId, uint256 cost, address indexed caller, uint256 reward)',
+  'event SeatAdopted(uint256 indexed tokenId, uint256 cost)',
+  'event SeatListed(uint256 indexed tokenId, uint256 startPrice, uint256 endPrice, uint256 startTime, uint256 decayEnd)',
+  'event SeatSold(uint256 indexed tokenId, uint256 cost)',
+  'event Burned(uint256 ethSpent, uint256 pupateBurned, address indexed caller, uint256 reward)',
+  'event AuctionStarted(address indexed token, uint256 lot, uint256 startPrice)',
+  'event AuctionTaken(address indexed token, address indexed taker, uint256 lot, uint256 price)',
+  'event ImdAuctionStarted(uint256 lotWei, uint256 startDemand)',
+  'event ImdBurned(address indexed taker, uint256 imdBurned, uint256 ethPaid)',
+  'error ZeroAddress()',
+  'error NotOwner()',
+  'error NotDeveloper()',
+  'error NotOperator()',
+  'error OnlyPoolManager()',
+  'error UnexpectedCallback()',
+  'error Reentrancy()',
+  'error UnexpectedPayment()',
+  'error OutOfBounds()',
+  'error AlreadyWired()',
+  'error NotWired()',
+  'error WrongPool()',
+  'error BadOrder()',
+  'error FloorNotFresh()',
+  'error PriceAboveFloor()',
+  'error PotTooSmall()',
+  'error PurchaseFailed()',
+  'error UnexpectedToken()',
+  'error NotHeld()',
+  'error StillHeld()',
+  'error AlreadyHeld()',
+  'error TooSoon()',
+  'error NothingToBurn()',
+  'error NothingBought()',
+  'error NotForAuction()',
+  'error AuctionRunning()',
+  'error NoAuction()',
+  'error NothingToAuction()',
+  'error Underpaid()',
+  'error NothingToSkim()',
+  'error WrongWallet()',
+  'error Expired()',
+  'error TransferFailed()',
+  ...seaportErrors,
+]);
+
+export const MODE = ['NEUTRAL', 'ACCUMULATE', 'BURN'];
+/// Seaport enums, as uint8.
+export const ItemType = { NATIVE: 0, ERC20: 1, ERC721: 2, ERC1155: 3, ERC721_WITH_CRITERIA: 4, ERC1155_WITH_CRITERIA: 5 };
+export const OrderType = { FULL_OPEN: 0, PARTIAL_OPEN: 1, FULL_RESTRICTED: 2, PARTIAL_RESTRICTED: 3, CONTRACT: 4 };

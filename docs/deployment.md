@@ -48,8 +48,13 @@ timelock.
 
 - Submit the first floor report (`FloorFeed.report`). The first report after the question is set is
   not rate-limited.
-- Start the keeper (Plan 4): reports every six hours, `flush`, `buySeat`, `settleSeat`, `burn`, the
-  auctions.
+- Start the keeper: `node keeper/bin/keeper.mjs --loop` (env in `keeper/README.md`; `--once` for cron,
+  `--status` to look). It reports every six hours, flushes, buys from Seaport listings at or under the
+  tolerance, settles filled listings, burns and starts the auctions. `node keeper/test/fork.mjs` runs the
+  whole cycle on the local fork. Two things to expect: at the opening pool depth one `burn()` spends only
+  about 0.2 ETH (the 5% impact limit), so a large burn pot takes many calls five blocks apart; and the
+  burn reward only covers gas below roughly 9 gwei at that depth, so third-party callers will burn only
+  when it pays and the project's keeper burns regardless, up to `GAS_PRICE_CAP_GWEI`.
 - Publish the site to IPFS and point `pupate.fun` at it.
 - Pair the first seat: the operator calls `Cocoon.authorizeWorker` with IMD's pairing message, then
   completes the pairing on IMD with any signature bytes.
