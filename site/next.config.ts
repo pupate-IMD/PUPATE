@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-// A static export: the site is published to IPFS and named under ENS, with no server.
+// A static export: plain files for any host (deploy/ serves them from a VPS with nginx), no server of its own.
 const nextConfig: NextConfig = {
   // `npm run dev` (scripts/dev.mjs) sets NEXT_DIST_DIR=.next-dev, so the dev server owns a directory of
   // its own and `npm run build` never overwrites it mid-flight. The build keeps the default: with

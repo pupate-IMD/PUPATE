@@ -49,7 +49,7 @@ export function Contracts() {
           </div>
         ))}
       </div>
-      <div>Built with the IMD swarm, reviewed independently, hosted on IPFS. Source on GitHub.</div>
+      <div>Built with the IMD swarm, reviewed independently. Source on GitHub.</div>
     </footer>
   );
 }

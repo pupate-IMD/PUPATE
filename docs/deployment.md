@@ -55,7 +55,9 @@ timelock.
   about 0.2 ETH (the 5% impact limit), so a large burn pot takes many calls five blocks apart; and the
   burn reward only covers gas below roughly 9 gwei at that depth, so third-party callers will burn only
   when it pays and the project's keeper burns regardless, up to `GAS_PRICE_CAP_GWEI`.
-- Publish the site to IPFS and point `pupate.fun` at it.
+- Publish the site and point `pupate.fun` at it. `deploy/` sets up one small VPS that serves the export
+  over HTTPS and runs the keeper beside it, with `status.json`, `listings.json` and `work.json` written
+  straight into the web root; the export is plain files, so any static host (IPFS included) works too.
 - Pair the first seat: the operator calls `Cocoon.authorizeWorker` with IMD's pairing message, then
   completes the pairing on IMD with any signature bytes.
 

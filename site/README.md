@@ -1,7 +1,7 @@
 # Pupate site
 
-The Pupate website: Next.js 15 (App Router, TypeScript), exported as a static site for IPFS. Wallets
-connect through RainbowKit on wagmi and viem.
+The Pupate website: Next.js 15 (App Router, TypeScript), exported as a static site that any host can
+serve (`deploy/` puts it on a VPS next to the keeper). Wallets connect through RainbowKit on wagmi and viem.
 
     npm install
     npm run dev        # http://localhost:3000
@@ -15,6 +15,10 @@ Copy `.env.example` to `.env.local`:
 |---|---|
 | `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect project id from cloud.reown.com (free). Injected wallets such as MetaMask and Rabby work without it; WalletConnect wallets need it. Without it the console shows "Origin … not found on Allowlist", which is harmless until then. Add `pupate.fun` and `localhost:3000` to the project's allowlist. |
 | `NEXT_PUBLIC_CHAIN` | `mainnet` (default) or `sepolia`; puts that chain first in the wallet's chain list. |
+| `NEXT_PUBLIC_RPC_MAINNET`, `NEXT_PUBLIC_RPC_SEPOLIA` | RPC endpoints for the live reads and the wallet transports (a provider such as Alchemy; without them the public endpoints, which are rate-limited). |
+
+These are baked into the export at build time. On the VPS they live in `/etc/pupate/site.env`, which
+`deploy/update.sh` loads before `npm run build`.
 
 ## What is real and what is not
 
