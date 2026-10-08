@@ -111,3 +111,7 @@ Applied in spec revision 2.
 4. **Wiring.** The hook probably cannot take Cocoon's address as a constructor argument. Plan for a one-time `wire` call, as launch 697 does, or confirm that the manifest accepts `$contract:` placeholders for hooks.
 5. **Oracle cost.** Add the running cost of reports (0.5 IMD each) and say who pays it. A permissionless keeper will not pay it for free, so the caller reward or the vault has to cover it.
 6. **Floor source.** The floor question needs a keyless, reproducible source; the spec currently assumes one exists.
+
+## 2026-10-08 correction: hook pool fee tier
+
+IMD policy v34 (`univ4_hook`, chain 1, created 2026-10-07) sets `feeTiers: [12500]`. The `[500, 3000, 10000]` allowlist quoted above is now the `evm_project` policy (v33), not the hook policy. Pupate's manifest uses 12500. The free `launch.open` check (`keeper/questions/launch.check.json`) passes with the required steps `audit-imported-code → adapt-contract-project → adversarial-review` and returns IMD's ten-step plan without blockers; policy judgement happens at paid admission.

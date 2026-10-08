@@ -62,3 +62,9 @@ timelock.
 | Developer | claim the developer balance; change the developer address; release vested PUPATE | anything else |
 | Operator | approve and revoke IMD pairings for held seats | move anything; sign anything else |
 | Anyone | flush, buy, settle, adopt, burn, run the auctions, release vesting, execute matured timelock operations | |
+
+## The launch request (IMD policy v34, 2026-10-07)
+
+- The pool's LP fee tier must be **12500** (1.25%), tick spacing 60. The ETH-paired opening valuation is fixed by policy at 10 ETH on mainnet (20 ETH on Sepolia), up to 100 ETH.
+- A `launch.open` for a self-hosted repository must carry `shape: "chain"` and the steps `audit-imported-code → adapt-contract-project → adversarial-review`; the adapt step owns its own write budget and may not be given `paths`. Ready bodies: `keeper/questions/launch.check.json` (mainnet) and `launch.sepolia.check.json`. Run `node keeper/bin/imd.mjs check launch.open <body>` first: it is free and must return no blockers. Update `baseCommit` to the commit being launched.
+- IMD pays the launch transaction up to `gasCeilingWei` = 0.05 ETH on mainnet. Token + hook + pool open is about 3.5M gas, so launch while the base fee is at or under ~14 gwei.

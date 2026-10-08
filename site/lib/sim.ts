@@ -4,7 +4,7 @@
 
 export const RATE = 70_400_000; // PUPATE per ETH at the pool price (sample)
 export const SUPPLY = 1_000_000_000;
-export const LP_FEE = 0.003;
+export const LP_FEE = 0.0125; // IMD's univ4_hook policy opens hook pools at the 1.25% tier
 export const STANDING_TAX = 0.06;
 export const LAUNCH_TAX = 0.99;
 export const LAUNCH_MINUTES = 93;

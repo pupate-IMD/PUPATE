@@ -22,7 +22,7 @@ import {PupateVesting} from "../src/PupateVesting.sol";
 ///   DEVELOPER                beneficiary of the vesting
 ///   QUESTION_HASH            `questionHash` of the oracle request made with FloorFeed as consumer
 ///   VESTING_START            unix time the 12-month vesting starts (defaults to now)
-///   POOL_FEE, TICK_SPACING   the launch pool's (default 3000 and 60)
+///   POOL_FEE, TICK_SPACING   the launch pool's (default 12500 and 60)
 contract PostLaunch is Script {
     function run() external {
         Cocoon cocoon = Cocoon(payable(vm.envAddress("COCOON")));
@@ -33,7 +33,7 @@ contract PostLaunch is Script {
         address developer = vm.envAddress("DEVELOPER");
         bytes32 questionHash = vm.envBytes32("QUESTION_HASH");
         uint64 vestingStart = uint64(vm.envOr("VESTING_START", block.timestamp));
-        uint24 fee = uint24(vm.envOr("POOL_FEE", uint256(3000)));
+        uint24 fee = uint24(vm.envOr("POOL_FEE", uint256(12500)));
         int24 tickSpacing = int24(int256(vm.envOr("TICK_SPACING", uint256(60))));
 
         vm.startBroadcast();

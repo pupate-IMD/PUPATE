@@ -66,7 +66,7 @@ export function Feed() {
             </div>
           </div>
           <div className="field">
-            <span className="label">You receive, after tax and the 0.3% pool fee</span>
+            <span className="label">You receive, after tax and the 1.25% pool fee</span>
             <div className="row">
               <span className="out num">{receiveEstimate(s, value)}</span>
             </div>

@@ -23,7 +23,7 @@ export default function Mechanism() {
       <h2>The tax</h2>
       <p>
         Every buy and every sell pays <b>6% of the ETH side</b> of the trade. On a buy that is 6% of the ETH the trader
-        pays; on a sell it is 6% of the ETH the pool pays out. The pool’s own 0.3% fee applies as well and goes to the
+        pays; on a sell it is 6% of the ETH the pool pays out. The pool’s own 1.25% fee applies as well and goes to the
         liquidity position, which IMD holds.
       </p>
       <p>

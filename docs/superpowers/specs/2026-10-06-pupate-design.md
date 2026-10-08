@@ -29,7 +29,7 @@ Pupate is a strategy token on Ethereum mainnet, launched through the IMD launchp
 
 ## Flow
 
-1. A trader buys or sells PUPATE in the launch pool. The hook takes 6% of the ETH side of the trade. The pool's own 0.3% LP fee applies as well and goes to the liquidity position, which IMD holds.
+1. A trader buys or sells PUPATE in the launch pool. The hook takes 6% of the ETH side of the trade. The pool's own 1.25% LP fee applies as well and goes to the liquidity position, which IMD holds.
 2. Anyone can flush the collected tax to Cocoon. Cocoon splits it: 85% strategy, 10% developer, 5% IMD burn. The strategy share is divided between the seat pot and the burn pot according to the current mode.
 3. Anyone can trigger a seat purchase when the seat pot can afford one.
 4. The purchased seat is listed for resale at a descending price and paired to a worker device.
@@ -304,3 +304,7 @@ After the independent review of Cocoon (`docs/REVIEW.md`):
 6. Pairing approvals are tied to the purchase round of the seat.
 7. `settleSeat` accepts a filled Seaport order as proof of sale, so a seat sent straight back can be settled and adopted again.
 8. `wire` also requires the hook to have opened its launch pool.
+
+## Changes in revision 6
+
+- Pool LP fee tier 12500 (1.25%) instead of 3000. IMD's `univ4_hook` policy v34 for mainnet (created 2026-10-07) allows only `[12500]` for hook launches; the `[500, 3000, 10000]` allowlist recorded in Phase 0 now applies to `evm_project` launches. The hook is fee-agnostic, so only the launch manifest, the post-launch pool-key default and the site's sample arithmetic change.

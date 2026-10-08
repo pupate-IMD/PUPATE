@@ -1,0 +1,28 @@
+{
+  "action": "launch.open",
+  "input": {
+    "onchain": "univ4_hook",
+    "chainId": 1,
+    "pairWith": "eth",
+    "economics": { "poolBps": 8500 },
+    "repoUrl": "https://github.com/pupate-IMD/PUPATE",
+    "baseCommit": "bfdb454af44d863229fcd8d52c8eb86a215d0eda",
+    "references": ["uniswap-v4-hooks", "uniswap-v4-security"],
+    "shape": "chain",
+    "github": true,
+    "steps": [
+      { "skill": "audit-imported-code" },
+      {
+        "skill": "adapt-contract-project",
+        "objective": "Adapt only the launch manifest. PupateToken and PupateHook are final and independently reviewed: do not change anything under src/ or test/. Set the pool fee tier to the policy allowlist (12500) if the manifest's differs, keep tickSpacing 60, and keep the hook's constructor arguments: the PoolManager, the Cocoon address as sink, the timelock as owner.",
+        "acceptanceCriteria": [
+          "No file under src/ or test/ is modified",
+          "launch.json's fee tier is on the policy allowlist",
+          "PupateHook's constructor arguments are the PoolManager, the Cocoon sink and the timelock owner"
+        ]
+      },
+      { "skill": "adversarial-review" }
+    ],
+    "objective": "Pupate: a Uniswap v4 hook (PupateHook) that taxes the ETH side of every trade in the launch pool and hands the tax to a pre-deployed vault (Cocoon). The vault buys Identity MD seats on Seaport 1.6 at the price the IMD oracle attests, lists each seat at a falling price, and burns PUPATE with the proceeds. Deploy PupateToken (plain ERC-20, 1,000,000,000 supply, 18 decimals) and PupateHook from launch.json at the base commit; the hook's constructor takes the PoolManager, the Cocoon address as sink and the 48-hour timelock as owner (both deployed before the launch). Buy tax opens at 99% and falls one point per minute to a standing 6%; sells pay 6% from the first block; the owner can only lower the tax. Liquidity may be added only in the block that opens the pool. Contracts carry 214 Foundry tests, invariants, a mainnet-fork test of the Seaport path, and two independent reviews (docs/REVIEW.md)."
+  }
+}
