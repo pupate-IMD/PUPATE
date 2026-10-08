@@ -42,7 +42,7 @@ export function Cocoon() {
                     </Link>
                     <span className={`chip ${atFloor ? "gold" : x.status === "working" ? "jade" : ""}`}>
                       <i className="d" aria-hidden="true" />
-                      {atFloor ? "at 1.1×" : x.status === "working" ? "working" : "idle"}
+                      {atFloor ? "at 1.1×" : x.status === "working" ? "working" : x.status === "held" ? "held" : "idle"}
                     </span>
                   </div>
                   <div className="pin">

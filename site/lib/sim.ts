@@ -13,7 +13,8 @@ export const IMPACT_CAP_ETH = 0.3; // what the 5% price-impact limit lets one bu
 export const HALF_LIFE_H = 2;
 export const SHARE = { strategy: 0.85, developer: 0.1, imd: 0.05 } as const;
 
-export type SeatStatus = "working" | "idle";
+/// "held" is the live site's word for a seat whose pairing it cannot see from the chain.
+export type SeatStatus = "working" | "idle" | "held";
 
 export interface Seat {
   id: number;
@@ -21,6 +22,8 @@ export interface Seat {
   day: number;
   jobs: number;
   status: SeatStatus;
+  /// Unix seconds; present in live mode.
+  boughtAt?: number;
 }
 
 export interface Sale {
@@ -58,6 +61,29 @@ export interface Caller {
   reward: number;
 }
 
+/// What the chain says beyond the figures, when the site runs against deployed contracts.
+export interface LiveMeta {
+  chainId: number;
+  block: number;
+  /// Unix seconds the launch pool opened; 0 until it has.
+  openedAt: number;
+  buyTaxBps: number;
+  taxBps: number;
+  floorIssuedAt: number;
+  freshUntil: number;
+  fresh: boolean;
+  burnSpacing: number;
+  lastBurnBlock: number;
+  callerRewardBps: number;
+  toleranceBps: number;
+  wired: boolean;
+  imdAuction: { lotEth: number; demandImd: number; startedAt: number } | null;
+  /// The token of the open harvest auction, if one is running.
+  harvestToken: `0x${string}` | null;
+  /// A transaction in flight, described for the log; null when idle.
+  pending: string | null;
+}
+
 export interface SimState {
   preset: "steady" | "launch";
   launchMinute: number;
@@ -82,6 +108,8 @@ export interface SimState {
   log: LogEntry[];
   history: HistoryPoint[];
   callers: Caller[];
+  /// Present in live mode only.
+  live?: LiveMeta;
 }
 
 const seat = (id: number, cost: number, day: number, jobs: number, status: SeatStatus): Seat => ({
@@ -174,6 +202,7 @@ export const isLaunch = (s: SimState) => s.preset === "launch";
 export const launchTaxAt = (minute: number) => Math.max(LAUNCH_TAX - 0.01 * minute, STANDING_TAX);
 
 export function buyTax(s: SimState): number {
+  if (s.live) return s.live.buyTaxBps / 10_000;
   return isLaunch(s) ? launchTaxAt(s.launchMinute) : STANDING_TAX;
 }
 
@@ -183,12 +212,20 @@ export function avgCost(s: SimState): number {
 }
 
 export interface ModeInfo {
-  name: "Spinning" | "Shedding";
+  name: "Spinning" | "Shedding" | "Neutral";
   seatBps: number;
   why: string;
 }
 
 export function mode(s: SimState): ModeInfo {
+  // The contract's first rule: without a fresh report the split is even and the vault does not buy.
+  if (s.live && !s.live.fresh) {
+    return {
+      name: "Neutral",
+      seatBps: 0.5,
+      why: "no fresh oracle report, so the strategy share splits evenly and the vault does not buy",
+    };
+  }
   if (!s.seats.length || s.floor <= avgCost(s)) {
     return {
       name: "Spinning",
@@ -222,8 +259,8 @@ export function decay(start: number, ageH: number): number {
 export const auctionPrice = (a: Auction) => decay(a.start, a.ageH);
 
 export const canFlush = (s: SimState) => s.hookWaiting > 0;
-export const canBuySeat = (s: SimState) => s.seatPot >= nextSeatPrice(s);
-export const canBurn = (s: SimState) => s.burnPot > 0 && s.burnCooldown === 0;
+export const canBuySeat = (s: SimState) => s.seatPot >= nextSeatPrice(s) && !(s.live && !s.live.fresh);
+export const canBurn = (s: SimState) => s.burnPot > 0 && s.burnCooldown === 0 && (!s.live || s.live.wired);
 
 export interface Breakdown {
   eth: number; // the ETH side of the trade
@@ -236,11 +273,11 @@ export interface Breakdown {
   rate: number;
 }
 
-/// Where the ETH side of a trade goes, at the tax and mode of this moment.
-export function breakdown(s: SimState, amount: number): Breakdown | null {
-  if (!(amount > 0)) return null;
-  const rate = s.buying ? buyTax(s) : STANDING_TAX;
-  const eth = s.buying ? amount : (amount / RATE) * (1 - LP_FEE);
+/// The tax on the sell side: the standing rate, read from the hook when live.
+export const sellTax = (s: SimState) => (s.live ? s.live.taxBps / 10_000 : STANDING_TAX);
+
+/// Where a given ETH side goes, at the mode of this moment.
+export function splitEth(s: SimState, eth: number, rate: number): Breakdown {
   const tax = eth * rate;
   const strategy = tax * SHARE.strategy;
   const m = mode(s);
@@ -254,6 +291,15 @@ export function breakdown(s: SimState, amount: number): Breakdown | null {
     toImd: tax * SHARE.imd,
     rate,
   };
+}
+
+/// Where the ETH side of a trade goes, at the tax and mode of this moment. Sells convert through the
+/// sample rate; the live site passes the quoted ETH to `splitEth` instead.
+export function breakdown(s: SimState, amount: number): Breakdown | null {
+  if (!(amount > 0)) return null;
+  const rate = s.buying ? buyTax(s) : sellTax(s);
+  const eth = s.buying ? amount : (amount / RATE) * (1 - LP_FEE);
+  return splitEth(s, eth, rate);
 }
 
 // ------------------------------------------------------------------ actions
@@ -270,8 +316,10 @@ export type Action =
   | { type: "takeAuction" }
   | { type: "wallet"; address: string | null }
   | { type: "direction"; buying: boolean }
-  | { type: "swap"; amount: number }
-  | { type: "dismissToast" };
+  | { type: "swap"; amount: number; raw?: string }
+  | { type: "dismissToast" }
+  /// A line for the log and the toast; the live site reports transactions this way.
+  | { type: "note"; text: string };
 
 let toastId = 0;
 const stamp = (s: SimState) => (isLaunch(s) ? `min ${s.launchMinute}` : `day ${s.day}`);
@@ -441,6 +489,9 @@ export function reduce(s: SimState, a: Action): SimState {
 
     case "dismissToast":
       return { ...s, toast: null };
+
+    case "note":
+      return withToast(s, a.text);
   }
 }
 

@@ -1,0 +1,70 @@
+// Where the contracts live, per chain. A chain with addresses runs the site in live mode; a chain
+// without them runs the preview simulation. Mainnet and Sepolia are filled in when the contracts are
+// deployed; the local anvil fork publishes its own file (written by script/local/up.mjs, gitignored).
+
+import type { Address } from "viem";
+
+export interface Addresses {
+  chainId: number;
+  /// The block of the pre-launch deploy; event history is read from here.
+  fromBlock: number;
+  token: Address;
+  hook: Address;
+  cocoon: Address;
+  feed: Address;
+  timelock: Address;
+  vesting?: Address;
+  poolManager: Address;
+  universalRouter: Address;
+  quoter: Address;
+  permit2: Address;
+  collection: Address;
+  imd: Address;
+  seaport: Address;
+  poolKey: { fee: number; tickSpacing: number };
+}
+
+export const PERMIT2: Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+export const SEAPORT: Address = "0x0000000000000068F116a894984e2DB1123eB395";
+export const COLLECTION: Address = "0x0000eC93127BAA929E58E97dd0095A2BFb38ec1D";
+export const IMD: Address = "0xd34a99bc0f67ae1bbd63c660e6d0b0dd03e263b7";
+
+/// Uniswap v4 on each chain, from developers.uniswap.org/docs/protocols/v4/deployments.
+export const UNISWAP = {
+  1: {
+    poolManager: "0x000000000004444c5dc75cB358380D2e3dE08A90",
+    universalRouter: "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+    quoter: "0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203",
+  },
+  11155111: {
+    poolManager: "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
+    universalRouter: "0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b",
+    quoter: "0x61b3f2011a92d183c7dbadbda940a7555ccf9227",
+  },
+} as const satisfies Record<number, { poolManager: Address; universalRouter: Address; quoter: Address }>;
+
+// Filled at launch (mainnet) and at the rehearsal (Sepolia). Null keeps the chain in preview mode.
+export const MAINNET: Addresses | null = null;
+export const SEPOLIA: Addresses | null = null;
+
+export type Target = "mainnet" | "sepolia" | "local";
+
+export const TARGET: Target =
+  process.env.NEXT_PUBLIC_CHAIN === "sepolia" ? "sepolia" : process.env.NEXT_PUBLIC_CHAIN === "local" ? "local" : "mainnet";
+
+export const TARGET_CHAIN_ID = TARGET === "sepolia" ? 11155111 : TARGET === "local" ? 31337 : 1;
+
+/// The addresses for the configured target, or null for preview mode. The local fork's file is
+/// fetched at runtime so a fresh deploy needs no rebuild.
+export async function loadAddresses(): Promise<Addresses | null> {
+  if (TARGET === "mainnet") return MAINNET;
+  if (TARGET === "sepolia") return SEPOLIA;
+  try {
+    const res = await fetch("/addresses.local.json", { cache: "no-store" });
+    if (!res.ok) return null;
+    const a = (await res.json()) as Addresses;
+    return a && a.token && a.hook && a.cocoon && a.feed ? a : null;
+  } catch {
+    return null;
+  }
+}

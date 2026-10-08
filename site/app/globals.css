@@ -186,6 +186,7 @@ h1, h2, h3, p { margin: 0; }
 .mode { display: inline-flex; align-items: center; gap: 8px; font-family: var(--serif); font-size: 22px; line-height: 1; }
 .mode .d { width: 10px; height: 10px; background: var(--jade); }
 .mode.shedding .d { background: var(--gold); }
+.mode.neutral .d, .hero .eyebrow .d.neutral { background: var(--faint); }
 
 /* --- cocoon drawer */
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }

@@ -91,7 +91,8 @@ export function SeatSheet() {
         <span className="n">II</span>
         <h2>Seat {pad4(x.id)}</h2>
         <p>
-          Bought {x.day} {x.day === 1 ? "day" : "days"} ago for {eth(x.cost)}. Listed at {eth(price)} today, {x.status === "working" ? "and working in the IMD swarm" : "with no worker paired yet"}.
+          Bought {x.day} {x.day === 1 ? "day" : "days"} ago for {eth(x.cost)}. Listed at {eth(price)} today,{" "}
+          {x.status === "working" ? "and working in the IMD swarm" : x.status === "held" ? "held by the vault" : "with no worker paired yet"}.
         </p>
       </header>
 
@@ -100,7 +101,7 @@ export function SeatSheet() {
           <Chrysalis ripe={ripeness(x)} id={`sheet-${x.id}`} />
           <span className={`chip ${day >= 14 ? "gold" : x.status === "working" ? "jade" : ""}`}>
             <i className="d" aria-hidden="true" />
-            {day >= 14 ? "at 1.1×" : x.status === "working" ? "working" : "idle"}
+            {day >= 14 ? "at 1.1×" : x.status === "working" ? "working" : x.status === "held" ? "held" : "idle"}
           </span>
           <div className="rows">
             <Lead k="Bought" v={eth(x.cost)} />
@@ -109,14 +110,19 @@ export function SeatSheet() {
             <Lead k="Floor of the listing" v={eth(x.cost * 1.1)} note="from day 14 on" />
             <Lead k="Jobs accepted" v={int(x.jobs)} note={x.day ? `${(x.jobs / x.day).toFixed(1)} a day` : undefined} />
           </div>
-          <button
-            className="btn primary"
-            onClick={() => dispatch({ type: "sellSeat", id: x.id })}
-          >
-            Buy this seat for {eth(price)} <span className="arrow">→</span>
-          </button>
+          {s.live ? (
+            <a className="btn primary" href={`https://opensea.io/assets/ethereum/${COLLECTION}/${x.id}`} target="_blank" rel="noreferrer">
+              Buy on OpenSea for {eth(price)} <span className="arrow">→</span>
+            </a>
+          ) : (
+            <button className="btn primary" onClick={() => dispatch({ type: "sellSeat", id: x.id })}>
+              Buy this seat for {eth(price)} <span className="arrow">→</span>
+            </button>
+          )}
           <p className="dim" style={{ fontSize: 11 }}>
-            Simulated here. On the live site this fills the vault&apos;s Seaport listing; the ETH goes to the burn pot.
+            {s.live
+              ? "The vault's listing is a Seaport order; OpenSea shows it. The ETH goes to the burn pot."
+              : "Simulated here. On the live site this fills the vault's Seaport listing; the ETH goes to the burn pot."}
           </p>
         </aside>
 
@@ -149,7 +155,12 @@ export function SeatSheet() {
       </div>
 
       <h3 className="serif sub-h">Work in the swarm</h3>
-      {x.status === "idle" ? (
+      {x.status === "held" ? (
+        <div className="empty">
+          Held by the vault. Pairing and job records come from IMD&apos;s seat API, which this page does not read yet; the
+          chain alone shows only the holding.
+        </div>
+      ) : x.status === "idle" ? (
         <div className="empty">
           No device is paired with this seat, so it has accepted no jobs. The operator pairs one with{" "}
           <span className="num">authorizeWorker</span>; the approval ends by itself when the seat sells.

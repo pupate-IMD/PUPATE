@@ -1,11 +1,39 @@
 "use client";
 
-import { isLaunch } from "@/lib/sim";
+import { useEffect, useState } from "react";
+import { TARGET_CHAIN_ID } from "@/lib/addresses";
+import { hm, isLaunch } from "@/lib/sim";
 import { useDispatch, useSim } from "./SimContext";
 
+const CHAIN_NAME: Record<number, string> = { 1: "Ethereum", 11155111: "Sepolia", 31337: "local fork" };
+
+/// The strip under the bar: in preview mode the controls of the simulation, in live mode the chain,
+/// the block, the report's freshness and any transaction in flight.
 export function PreviewBar() {
   const s = useSim();
   const dispatch = useDispatch();
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 15_000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (s.live) {
+    const left = s.live.freshUntil - now;
+    return (
+      <div className="preview live" role="status">
+        <div className="wrap">
+          <span className="label jade">Live · {CHAIN_NAME[TARGET_CHAIN_ID] ?? `chain ${TARGET_CHAIN_ID}`}</span>
+          <span className="dim num">
+            Block {s.live.block.toLocaleString("en-US")} · oracle report{" "}
+            {s.live.fresh ? `fresh for ${hm(Math.max(left, 0))}` : "stale, the vault is not buying"}
+            {s.live.pending ? ` · ${s.live.pending}, waiting for the block…` : ""}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="preview" role="note">
       <div className="wrap">
