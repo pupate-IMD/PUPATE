@@ -44,7 +44,9 @@ nothing can raise it.
 
 ## What makes it different
 
-- **The seats work.** A seat in the vault is paired to a worker and earns in the swarm until the day it sells.
+- **The seats work, and you can check.** A seat in the vault is paired to a worker and earns in the swarm until the day it
+  sells; the site's Work page shows each seat's jobs, acceptance rate and collaborators from IMD's own records, each job
+  linked to the explorer.
 - **The price comes from the swarm.** The vault trusts no key for the reference price — only attestations
   signed by the IMD oracle after a panel of seats agreed. You can verify one in your browser on the site.
 - **Anyone turns the crank.** The steps are public functions; an agent can run them from a single
