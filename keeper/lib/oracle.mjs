@@ -289,6 +289,8 @@ export async function imdAttestation({ cfg, account, cache, persist, feed, consu
     try {
       const json = await imd.oracleAttestation(pending.requestId);
       if (json && (json.signature || json.sig || json.attestation?.signature)) {
+        // Remembered for the status feed: the site's oracle panel loads this request and verifies it.
+        cache.lastOracleRequest = { requestId: pending.requestId, at: new Date().toISOString() };
         cache.pendingReport = null;
         persist();
         return mapApiAttestation(json);

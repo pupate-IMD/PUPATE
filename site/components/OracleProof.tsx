@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { hexToBigInt } from "viem";
 import { fetchAttestation, fetchLatestAttestedId, ORACLE_SIGNER, SAMPLE, tamper, utc, verify, type Check, type Signed } from "@/lib/attestation";
 import { Lead } from "./Hero";
@@ -32,14 +32,14 @@ export function OracleProof() {
     setChecks(null);
   }
 
-  async function load(id: string | null) {
+  async function load(id: string | null, label?: string) {
     setError(null);
     setBusy("fetch");
     try {
       const target = id ?? (await fetchLatestAttestedId());
       if (!target) throw new Error("IMD lists no attested request right now");
       const signed = await fetchAttestation(target);
-      setSource({ signed, label: `request ${target.slice(0, 8)}…` });
+      setSource({ signed, label: label ?? `request ${target.slice(0, 8)}…` });
       setRequestId(target);
       setAltered(false);
       setChecks(null);
@@ -49,6 +49,27 @@ export function OracleProof() {
       setBusy(null);
     }
   }
+
+  // Once the keeper has reported from a real IMD attestation, the status feed names the request;
+  // start from that one, so the panel checks Pupate's own report rather than the sample.
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        const res = await fetch("/status.json", { cache: "no-store" });
+        if (!res.ok) return;
+        const st = (await res.json()) as { feed?: { lastRequestId?: string | null } };
+        const id = st.feed?.lastRequestId;
+        if (on && typeof id === "string" && id) await load(id, `Pupate's latest report · ${id.slice(0, 8)}…`);
+      } catch {
+        // no feed, or no network: the sample stays
+      }
+    })();
+    return () => {
+      on = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="proof" id="proof">

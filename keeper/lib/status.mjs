@@ -102,6 +102,10 @@ export function buildStatus({ cfg, s, cache, scan, keeperAddress, dryRun }) {
       issuedAt: str(s.feed.issuedAt),
       freshUntil: str(s.feed.freshUntil),
       fresh: Boolean(s.feed.fresh),
+      // The IMD oracle request behind the newest report the keeper fetched (null for local signing).
+      lastRequestId: cache.lastOracleRequest?.requestId ?? null,
+      lastRequestAt: cache.lastOracleRequest?.at ?? null,
+      reportSource: cfg.attestationSource,
     },
     vault: {
       seatPotWei: str(s.pots.seat),

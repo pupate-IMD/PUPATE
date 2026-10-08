@@ -50,7 +50,9 @@ cannot run, and a revert costs you gas.
 
 Before calling anything, read `https://pupate.fun/status.json` (schema `pupate-status/1`). The
 developer's keeper rewrites it after every tick, every 15 seconds or so, with everything the reads
-above return and more: `feed` (`floorWei`, `fresh`, `freshUntil`), `vault` (the pots, `heldCount`,
+above return and more: `feed` (`floorWei`, `fresh`, `freshUntil`, and `lastRequestId`, the IMD oracle
+request behind the newest report, whose signed attestation you can fetch from
+`https://api.imd.fun/oracle/requests/{id}/attestation` and check yourself), `vault` (the pots, `heldCount`,
 `mode`, `lastBurnBlock`, `burnSpacing`, `params`), `seats` with each held seat's listing and its
 price now, `auctions`, `supply`, and `steps`. Each `steps.<name>.ready` (`flush`, `buySeat`, `burn`,
 `startImdAuction`, `settle`, `startAuction`, `report`) says whether that step would go through right

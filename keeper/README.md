@@ -127,7 +127,7 @@ chain's clock and ISO strings for the keeper's own clock.
 | `generatedAt`, `chainId`, `block`, `blockTimestamp` | when the file was written, and the block the state was read at |
 | `addresses` | `token`, `hook`, `cocoon`, `feed`, `timelock`, `collection`, `seaport`, `universalRouter`, `quoter` |
 | `hook` | `buyTaxBps`, `taxBps`, `openedAt`, `totalTaxWei`, `claimsWei` (the tax waiting on the PoolManager, what `flush` would move) |
-| `feed` | `floorWei`, `floorEth`, `issuedAt`, `freshUntil`, `fresh` |
+| `feed` | `floorWei`, `floorEth`, `issuedAt`, `freshUntil`, `fresh`, `reportSource` (this keeper's `ATTESTATION_SOURCE`), and `lastRequestId`, `lastRequestAt` (the IMD oracle request behind the newest report this keeper fetched, `null` until it has fetched one; the site's oracle panel loads that request and verifies it in the browser) |
 | `vault` | `seatPotWei`, `burnPotWei`, `developerWei`, `imdBurnWei`, `heldCount`, `heldCostWei`, `mode` (`NEUTRAL`, `ACCUMULATE` or `BURN`), `seatShareBps`, `wired`, `lastBurnBlock`, `burnSpacing`, `params` (every field of `getParams()`) |
 | `seats[]` | each held seat: `tokenId`, `costWei`, `boughtAt`, `round`, `filled` (sold, `settleSeat` due), and `listing` { `startWei`, `endWei`, `startTime`, `decayEnd`, `priceNowWei`, `priceNowEth` }: Cocoon's falling Seaport order, its price at `blockTimestamp` computed with `lib/listings.mjs`'s port of `SeatListing` (Seaport's linear interpolation, rounded up) |
 | `auctions` | `imd`: `{ lotWei, lotEth, demandWei, startedAt }` or `null`; `harvest[]`: `{ token, lotWei, startWei, startedAt, priceNowWei }` for each running `HARVEST_TOKENS` auction |
