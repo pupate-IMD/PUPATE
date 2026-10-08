@@ -135,7 +135,10 @@ export function SimProvider({ children }: { children: ReactNode }) {
           }
         }
         const quoted = await quoteExactIn(client, a, buying, amountIn);
-        const call = buildSwap(a, buying, amountIn, withSlippage(quoted, SLIPPAGE_BPS));
+        // The deadline comes from the chain's clock, not the user's, so a skewed device cannot
+        // produce a transaction that is already expired.
+        const head = await client.getBlock();
+        const call = buildSwap(a, buying, amountIn, withSlippage(quoted, SLIPPAGE_BPS), head.timestamp + 20n * 60n);
         note(
           buying
             ? `Buying with ${eth(Number(formatEther(amountIn)), 4)}; at least ${Math.floor(Number(formatEther(quoted)) * (1 - SLIPPAGE_BPS / 10_000)).toLocaleString("en-US")} PUPATE.`

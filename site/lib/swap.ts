@@ -55,7 +55,9 @@ export interface SwapCall {
 }
 
 /// Universal Router calldata for one exact-in swap in the launch pool. Buying pays ETH (sent as
-/// value) and takes PUPATE; selling pays PUPATE through Permit2 and takes ETH.
+/// value) and takes PUPATE; selling pays PUPATE through Permit2 and takes ETH. Pass a deadline
+/// derived from the chain's latest block; the wall-clock default is only a fallback, and the router
+/// reverts with TransactionDeadlinePassed (0x5bf6f916) when the chain is ahead of the device.
 export function buildSwap(
   a: Addresses,
   buying: boolean,

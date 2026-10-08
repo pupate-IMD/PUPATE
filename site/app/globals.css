@@ -102,6 +102,7 @@ h1, h2, h3, p { margin: 0; }
 
 /* --- preview strip */
 .preview { border-bottom: 1px dashed var(--gold); background: var(--paper-2); }
+.preview.live { border-bottom: 1px solid var(--jade); }
 .preview .wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 42px; padding-block: 8px; font-size: 12px; }
 .preview .label { color: var(--gold-ink); }
 .preview .chips { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
