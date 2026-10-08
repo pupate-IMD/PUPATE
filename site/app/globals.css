@@ -362,7 +362,7 @@ footer .serif { color: var(--ink); font-size: 16px; }
 /* --- proof of work */
 .work-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
 .work-card { padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
-.work-head { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+.work-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .work-head .id { font-size: 22px; line-height: 1; }
 .work-head .id:hover { color: var(--jade-ink); }
 .work-card .rows { display: grid; }
