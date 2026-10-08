@@ -1,6 +1,7 @@
 "use client";
 
 import { avgCost, eth, listPrice, pad4, ripeness } from "@/lib/sim";
+import { useWorkFeed } from "@/lib/work";
 import Link from "next/link";
 import { Chrysalis } from "./Chrysalis";
 import { Lead } from "./Hero";
@@ -8,6 +9,7 @@ import { useSim } from "./SimContext";
 
 export function Cocoon() {
   const s = useSim();
+  const { feed } = useWorkFeed();
   const total = s.seats.reduce((a, x) => a + x.cost, 0);
   return (
     <section className="wrap section" id="cocoon" aria-label="Cocoon">
@@ -34,15 +36,18 @@ export function Cocoon() {
             {s.seats.map((x) => {
               const r = ripeness(x);
               const atFloor = x.day >= 14;
+              const rec = feed?.seats.find((w) => w.tokenId === x.id);
+              const working = x.status === "working" || (rec?.paired && rec.online);
+              const label = atFloor ? "at 1.1×" : working ? "working" : rec?.paired ? "paired" : x.status === "held" ? "held" : "idle";
               return (
                 <article className="panel card" key={x.id} style={{ ["--ripe" as string]: r.toFixed(2) }}>
                   <div className="top">
                     <Link className="id" href={`/seat/?id=${x.id}`}>
                       Seat {pad4(x.id)}
                     </Link>
-                    <span className={`chip ${atFloor ? "gold" : x.status === "working" ? "jade" : ""}`}>
+                    <span className={`chip ${atFloor ? "gold" : working ? "jade" : ""}`}>
                       <i className="d" aria-hidden="true" />
-                      {atFloor ? "at 1.1×" : x.status === "working" ? "working" : x.status === "held" ? "held" : "idle"}
+                      {label}
                     </span>
                   </div>
                   <div className="pin">
@@ -55,7 +60,7 @@ export function Cocoon() {
                     <Lead k="bought" v={eth(x.cost)} />
                     <Lead k="listed" v={eth(listPrice(x))} />
                     <Lead k="day" v={`${Math.min(x.day, 14)} of 14`} />
-                    <Lead k="jobs accepted" v={String(x.jobs)} />
+                    <Lead k="jobs accepted" v={String(rec ? rec.counts.accepted : x.jobs)} />
                   </div>
                   <Link className="more label" href={`/seat/?id=${x.id}`}>
                     Open the sheet →

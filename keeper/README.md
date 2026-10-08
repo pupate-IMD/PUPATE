@@ -10,7 +10,9 @@ function of the contracts, and if the keeper stops, anyone can make the same cal
 
 `bin/keeper.mjs` is the loop that keeps the protocol moving. Each tick it reads the whole state in
 one multicall and the seats Cocoon holds (from its `SeatBought` / `SeatAdopted` / `SeatSold` logs,
-cached in `.state/<chainId>.json`), prints one status line, then decides, in this order:
+cached in `.state/<chainId>.json`), prints one status line, decides the steps below in order, and
+finally rewrites the [status feed](#the-status-feed) (`status.json`, `listings.json`) for anyone
+reading the vault without an RPC:
 
 | step | call | when |
 |---|---|---|
@@ -81,6 +83,7 @@ never printed.
 | `HARVEST_TOKENS` | none | comma list of ERC-20s to auction when Cocoon holds a balance |
 | `LOG_CHUNK` | `50000` | blocks per `eth_getLogs` call when scanning seat events |
 | `DRY_RUN` | unset | `1`: simulate every step, never send (also `--dry-run`) |
+| `STATUS_DIR` | `site/public` | where `status.json` and `listings.json` are rewritten after every tick and on `--status` (see [the status feed](#the-status-feed)); relative to the repository root; an empty string disables the feed |
 
 ### Safety gates
 
@@ -101,6 +104,49 @@ never printed.
 - Gas price cap, sequential nonce, receipt wait, one purchase per tick.
 - The keeper never takes an auction and never holds Cocoon's ETH; its only income is the caller reward
   of `buySeat` and `burn`.
+
+### The status feed
+
+After every tick, and on `--status`, the keeper writes two JSON files to `STATUS_DIR` (default
+`site/public`, so the dev server serves them at `http://localhost:3000/status.json` and the static
+export at `https://pupate.fun/status.json` once the site is live). They are what an IMD agent, a
+judge or a third-party keeper reads instead of an RPC: the vault's state, what each step would do
+right now, and whether this keeper is alive. Each file is written to a temp file and renamed into
+place, so a reader never sees a partial one. `lib/status.mjs` builds them; the `steps` block calls
+the same decision functions the tick itself runs (`lib/actions.mjs`), on the same state, so the file
+never says "ready" where the keeper would have skipped.
+
+Conventions: every integer is a decimal string (wei, seconds, bps, block numbers), `chainId` and
+`block` are plain numbers, the `*Eth` fields are floats for humans, times are unix seconds in the
+chain's clock and ISO strings for the keeper's own clock.
+
+**`status.json`** (`"schema": "pupate-status/1"`)
+
+| field | meaning |
+|---|---|
+| `generatedAt`, `chainId`, `block`, `blockTimestamp` | when the file was written, and the block the state was read at |
+| `addresses` | `token`, `hook`, `cocoon`, `feed`, `timelock`, `collection`, `seaport`, `universalRouter`, `quoter` |
+| `hook` | `buyTaxBps`, `taxBps`, `openedAt`, `totalTaxWei`, `claimsWei` (the tax waiting on the PoolManager, what `flush` would move) |
+| `feed` | `floorWei`, `floorEth`, `issuedAt`, `freshUntil`, `fresh` |
+| `vault` | `seatPotWei`, `burnPotWei`, `developerWei`, `imdBurnWei`, `heldCount`, `heldCostWei`, `mode` (`NEUTRAL`, `ACCUMULATE` or `BURN`), `seatShareBps`, `wired`, `lastBurnBlock`, `burnSpacing`, `params` (every field of `getParams()`) |
+| `seats[]` | each held seat: `tokenId`, `costWei`, `boughtAt`, `round`, `filled` (sold, `settleSeat` due), and `listing` { `startWei`, `endWei`, `startTime`, `decayEnd`, `priceNowWei`, `priceNowEth` }: Cocoon's falling Seaport order, its price at `blockTimestamp` computed with `lib/listings.mjs`'s port of `SeatListing` (Seaport's linear interpolation, rounded up) |
+| `auctions` | `imd`: `{ lotWei, lotEth, demandWei, startedAt }` or `null`; `harvest[]`: `{ token, lotWei, startWei, startedAt, priceNowWei }` for each running `HARVEST_TOKENS` auction |
+| `supply` | `totalWei`, `burnedWei` (1,000,000,000 PUPATE minus `totalSupply`) |
+| `steps` | `flush`, `buySeat`, `burn`, `startImdAuction`, `settle`, `startAuction`, `report`, each `{ ready, why }`: what the keeper would do with this state, under this keeper's thresholds (`MIN_FLUSH_WEI`, `MIN_BURN_WEI`, `MIN_IMD_AUCTION_WEI`, `LISTING_SOURCE`). `buySeat` adds `bestListingWei` (the cheapest listing that passes `_checkOrder` and is open on Seaport, when there is one), `ceilingWei` (floor × (1 + tolerance)), `affordableWei` (what the seat pot covers after the reward) and `source`; `settle` adds `tokenIds` |
+| `keeper` | `lastTickAt` (ISO; the site turns red past ten minutes), `lastActions` (the last 20 transactions with a receipt: `{ at, action, hash, gasUsed, block, status }`, kept in the state file), `listingSource`, `attestationSource`, `dryRun`, `address` |
+
+**`listings.json`** (`"schema": "pupate-listings/1"`): the market the buy step last looked at, with
+`source`, `fetchedAt`, `floorWei`, `fresh`, `ceilingWei`, `affordableWei` and `listings[]`, each
+`{ ref, tokenId, priceWei, priceEth, offerer, endTime, withinTolerance, passesOrderRules, ok, reason }`
+and never a signature or the raw order. `withinTolerance` is price ≤ `ceilingWei`; `passesOrderRules`
+is `_checkOrder`'s structural rules plus, for the five cheapest candidates, Seaport's `getOrderStatus`
+(not cancelled, not filled, validated when unsigned); `reason` names the rule that failed. Only the
+`opensea` source is published: `file` is the operator's own list and `none` fetches nothing, so both
+leave `listings` an empty array (the `note` field says which). Listings are only fetched when the
+keeper itself would look (a fresh floor and a seat pot), which keeps the OpenSea calls to one per tick.
+
+    curl -s https://pupate.fun/status.json | jq '.steps, .keeper.lastTickAt'
+    node bin/keeper.mjs --status           # prints the summary and rewrites both files
 
 ### Untested
 
@@ -161,6 +207,22 @@ The definitions and guards travel with the quote body, not the check. The keeper
 - `lib/config.mjs` environment and addresses; `lib/chain.mjs` clients, revert decoding, the transaction
   path; `lib/state.mjs` the multicall, the seat cache, the status line; `lib/listings.mjs` Cocoon's own
   Seaport orders (a port of `src/cocoon/SeatListing.sol`), `_checkOrder` client-side, the listing sources;
-  `lib/oracle.mjs` report timing, the local signer, the paid IMD flow; `lib/actions.mjs` the six steps;
+  `lib/oracle.mjs` report timing, the local signer, the paid IMD flow; `lib/actions.mjs` the six steps and
+  their decision functions; `lib/status.mjs` the status feed (`status.json`, `listings.json`);
   `lib/abi.mjs` the ABI slices; `lib/log.mjs` formatting; `lib/imd.mjs` the IMD client.
 - `test/fork.mjs` the fork test. `.state/` (git-ignored) the seat cache and the test's listings file.
+
+## The work feed (`work.json`)
+
+Proof of work for the seats: IMD's own record of what each seat has done, condensed. After each tick
+the keeper writes `STATUS_DIR/work.json` (schema `pupate-work/1`, the contract in `site/lib/work.ts`)
+for every seat the vault holds plus the seats in `WORK_SEATS`, refreshed at most every `WORK_EVERY`
+seconds (default 600) because a busy seat's record on `api.imd.fun/seats/<tokenId>` is megabytes and
+that endpoint does not allow browser reads. Per seat: paired/online, runtime and model, attempts and
+how many were accepted, rejected or failed, the newest jobs with explorer links, and collaborators.
+The site's Work page, seat sheets and cocoon cards read it.
+
+| Variable | Meaning |
+|---|---|
+| `WORK_SEATS` | Comma-separated seat token ids to show besides the vault's own (for example `1,1477`), useful before the vault holds any. Default none. |
+| `WORK_EVERY` | Seconds between re-reads of IMD's seat records. Default 600. |

@@ -74,6 +74,18 @@ function list(v) {
 }
 
 /**
+ * STATUS_DIR, where status.json and listings.json go after every tick: unset is site/public under
+ * the repository (the dev server and the static export serve it at /status.json), an empty string
+ * disables the feed, a relative path is taken from the repository root.
+ */
+function statusDir(v) {
+  if (v === undefined) return join(REPO_ROOT, 'site', 'public');
+  const s = String(v).trim();
+  if (s === '') return null;
+  return isAbsolute(s) ? s : resolve(REPO_ROOT, s);
+}
+
+/**
  * @param {string[]} argv process.argv.slice(2)
  * @returns the configuration; secrets live on it but no code path prints them.
  */
@@ -167,7 +179,15 @@ export function loadConfig(argv = []) {
     openseaApi: env('OPENSEA_API') || 'https://api.opensea.io',
     openseaChain: env('OPENSEA_CHAIN') || 'ethereum',
     harvestTokens: list(env('HARVEST_TOKENS')),
+    // Seats shown on the site's Work page besides the vault's own, and how often IMD is re-read.
+    workSeats: String(env('WORK_SEATS') || '')
+      .split(/[,\s]+/)
+      .map((x) => Number(x.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0),
+    workEverySec: num(env('WORK_EVERY'), 600),
     stateFile: join(STATE_DIR, `${chainId}.json`),
+    // The environment's empty string must reach statusDir (it means "disabled"), so not through env().
+    statusDir: statusDir(process.env.STATUS_DIR !== undefined ? process.env.STATUS_DIR : dotenv.STATUS_DIR),
   };
 }
 
@@ -183,5 +203,9 @@ export function describeConfig(cfg) {
     `loop every ${cfg.loopEverySec}s, report every ${cfg.reportEverySec}s (lead ${cfg.reportLeadSec}s), ` +
       `min flush ${cfg.minFlushWei} wei, min burn ${cfg.minBurnWei} wei, gas cap ${Number(cfg.gasPriceCapWei) / 1e9} gwei` +
       (cfg.flags.dryRun ? ', DRY RUN' : ''),
+    cfg.statusDir
+      ? `status feed: ${join(cfg.statusDir, 'status.json')} and listings.json after every tick; work.json every ${cfg.workEverySec}s` +
+        (cfg.workSeats.length ? ` (featured seats ${cfg.workSeats.join(',')})` : '')
+      : 'status feed disabled (STATUS_DIR is empty)',
   ];
 }

@@ -53,8 +53,10 @@ export function revertReason(e) {
  * @param {boolean} o.dryRun
  * @param {bigint} o.gasCapWei maxFeePerGas above which nothing is sent this tick
  * @param {number} o.txTimeoutSec how long to wait for a receipt
+ * @param {(entry: {at: string, action: string, hash: string, gasUsed: string, block: number, status: 'sent'|'reverted'}) => void} [o.onResult]
+ *   called for every transaction that got a receipt (the status feed keeps the last few)
  */
-export function createTx({ pub, wallet, account, dryRun, gasCapWei, txTimeoutSec }) {
+export function createTx({ pub, wallet, account, dryRun, gasCapWei, txTimeoutSec, onResult }) {
   let nonce = null;
   let waitingLogged = false;
 
@@ -145,6 +147,13 @@ export function createTx({ pub, wallet, account, dryRun, gasCapWei, txTimeoutSec
     }
     const ok = receipt.status === 'success';
     log(`${ok ? 'sent' : 'REVERTED'} ${label} -> ${hash} (gas ${receipt.gasUsed}, block ${receipt.blockNumber})`);
+    if (onResult) {
+      try {
+        onResult({ at: new Date().toISOString(), action: label, hash, gasUsed: receipt.gasUsed.toString(), block: Number(receipt.blockNumber), status: ok ? 'sent' : 'reverted' });
+      } catch (e) {
+        warn(`could not record ${label}: ${e.message}`);
+      }
+    }
     return { status: ok ? 'sent' : 'failed', hash, gasUsed: receipt.gasUsed, receipt, result: sim.result };
   }
 

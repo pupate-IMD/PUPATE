@@ -9,6 +9,7 @@ const PAGES = [
   { href: "/flow/", label: "Flow" },
   { href: "/feed/", label: "Feed" },
   { href: "/cocoon/", label: "Cocoon" },
+  { href: "/work/", label: "Work" },
   { href: "/emerge/", label: "Emerge" },
   { href: "/steps/", label: "Steps" },
   { href: "/record/", label: "Record" },

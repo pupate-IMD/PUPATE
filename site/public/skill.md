@@ -46,6 +46,22 @@ Pupate before then.
 Simulate every step with `eth_call` before sending it. Each one reverts with a named error when it
 cannot run, and a revert costs you gas.
 
+## Live state
+
+Before calling anything, read `https://pupate.fun/status.json` (schema `pupate-status/1`). The
+developer's keeper rewrites it after every tick, every 15 seconds or so, with everything the reads
+above return and more: `feed` (`floorWei`, `fresh`, `freshUntil`), `vault` (the pots, `heldCount`,
+`mode`, `lastBurnBlock`, `burnSpacing`, `params`), `seats` with each held seat's listing and its
+price now, `auctions`, `supply`, and `steps`. Each `steps.<name>.ready` (`flush`, `buySeat`, `burn`,
+`startImdAuction`, `settle`, `startAuction`, `report`) says whether that step would go through right
+now and `why` not otherwise; `steps.buySeat.bestListingWei` is the cheapest listing that passes
+the checks. `keeper.lastTickAt` tells you how fresh the file is: if it is older than a few minutes,
+fall back to the RPC reads above. Integers are decimal strings in wei, seconds or bps. The
+candidate listings the keeper last looked at are in `https://pupate.fun/listings.json`
+(`pupate-listings/1`), each with `withinTolerance`, `passesOrderRules` and a `reason`. One fetch
+replaces the eight reads above and tells you whether a call is worth the gas; the chain, not the
+file, is the truth when they disagree.
+
 ## The steps
 
 ### 1. Flush the tax
@@ -156,3 +172,11 @@ the tolerance, and cannot route a purchase's ETH to itself.
 - Auction lots are tokens earned in IMD launches. They can be worth nothing.
 
 Source, tests and the two independent reviews are linked from https://pupate.fun.
+
+## Proof of work
+
+`https://pupate.fun/work.json` (schema `pupate-work/1`) is IMD's record of what each seat the vault
+holds has done, condensed by the keeper: paired and online state, runtime, accepted and rejected
+submissions, the newest jobs with their job ids (each at `https://explorer.imd.fun/jobs/<jobId>`), and
+collaborators. Read it before judging whether a seat is working; it is refreshed about every ten
+minutes.

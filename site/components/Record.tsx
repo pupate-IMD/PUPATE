@@ -1,6 +1,7 @@
 "use client";
 
 import { eth, int, isLaunch, SUPPLY, YOU } from "@/lib/sim";
+import { KeeperStatus } from "./KeeperStatus";
 import { LineChart } from "./LineChart";
 import { useSim } from "./SimContext";
 
@@ -17,6 +18,8 @@ export function Record() {
         <h2>The record</h2>
         <p>What the mechanism has done so far, and who has been turning the crank.</p>
       </header>
+
+      {s.live ? <KeeperStatus /> : null}
 
       {isLaunch(s) || history.length < 2 ? (
         <div className="empty">The charts start once the first day has passed.</div>

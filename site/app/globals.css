@@ -359,6 +359,20 @@ footer .serif { color: var(--ink); font-size: 16px; }
 .proof-sheet .lead { padding: 5px 0; }
 .proof-run { display: grid; gap: 14px; }
 .proof-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+/* --- proof of work */
+.work-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+.work-card { padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.work-head { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+.work-head .id { font-size: 22px; line-height: 1; }
+.work-head .id:hover { color: var(--jade-ink); }
+.work-card .rows { display: grid; }
+.work-card .lead { padding: 4px 0; font-size: 11px; }
+.work-table table { min-width: 0; }
+.work-table th, .work-table td { padding: 6px 8px 6px 0; font-size: 11px; }
+.work-table td a { color: var(--ink); }
+.work-table td a:hover { color: var(--jade-ink); }
+.work-table .chip { height: 18px; font-size: 9px; padding: 0 6px; }
+
 .proof-fetch { display: flex; gap: 8px; flex-wrap: wrap; }
 .proof-fetch input { flex: 1 1 260px; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--hair); background: transparent; color: inherit; font: inherit; font-size: 12px; }
 .proof-fetch input:focus { outline: none; border-color: var(--jade); }
@@ -368,6 +382,19 @@ footer .serif { color: var(--ink); font-size: 16px; }
 .checks li { display: grid; grid-template-columns: 18px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--hair); font-size: 12px; overflow-wrap: anywhere; }
 .verdict .mark, .checks .mark { color: var(--jade-ink); font-weight: 500; }
 .verdict.bad .mark, .checks .bad .mark { color: var(--alarm); }
+
+/* --- keeper status (live mode): is the loop alive, what it did last, what could run now */
+.alarm { color: var(--alarm); }
+.keeper { padding: 14px 16px 12px; margin-bottom: 24px; display: grid; gap: 8px; }
+.keeper .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.keeper .head .t { font-size: 24px; line-height: 1.1; margin-top: 2px; }
+.keeper .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.keeper .ready { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.keeper .acts { list-style: none; margin: 0; padding: 0; display: grid; }
+.keeper .acts li { display: grid; grid-template-columns: 84px 1fr auto; gap: 12px; padding: 6px 0; border-top: 1px solid var(--hair); font-size: 12px; overflow-wrap: anywhere; }
+.keeper .acts li.dim { grid-template-columns: 1fr; }
+.keeper .links { display: flex; gap: 16px; font-size: 11px; color: var(--dim); }
+.keeper .links a:hover { color: var(--jade-ink); }
 
 /* --- keeper skill */
 .agents { display: grid; grid-template-columns: 1fr auto; gap: 16px 28px; align-items: center; padding: 18px 20px; margin-top: 24px; }
@@ -388,6 +415,8 @@ footer .serif { color: var(--ink); font-size: 16px; }
 @media (max-width: 860px) {
   .proof-grid, .agents, .seat-grid.emerged { grid-template-columns: 1fr; }
   .proof-grid { gap: 20px; }
+  .keeper .acts li { grid-template-columns: 1fr; gap: 2px; }
+  .keeper .ready { justify-content: flex-start; }
 }
 
 /* --- the home index */

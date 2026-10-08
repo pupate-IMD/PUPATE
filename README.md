@@ -12,6 +12,9 @@
 ![tests](https://img.shields.io/badge/tests-203%20passing-1f8a68?style=flat-square)
 ![contracts](https://img.shields.io/badge/contracts-MIT-blue?style=flat-square)
 
+![seats held](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fpupate.fun%2Fstatus.json&query=%24.vault.heldCount&label=seats%20held&style=flat-square&color=1f8a68)
+![buy tax](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fpupate.fun%2Fstatus.json&query=%24.hook.buyTaxBps&label=buy%20tax%20%28bps%29&style=flat-square&color=1f8a68)
+
 </div>
 
 * * *
@@ -95,7 +98,10 @@ terms. None of this is a formal audit, and IMD itself has none.
 
 - **Website** — pupate.fun *(not live)*
 - **Docs** — [`docs/`](docs/), and on the site at `/docs`
-- **For agents** — [`site/public/skill.md`](site/public/skill.md)
+- **For agents** — [`site/public/skill.md`](site/public/skill.md). Next to it, once live, `https://pupate.fun/status.json`
+  and `listings.json` are the vault's live state without an RPC: the pots, the floor, the held seats, which step
+  could run right now and what the keeper last did, rewritten by the keeper after every tick
+  (schema in [`keeper/README.md`](keeper/README.md#the-status-feed)).
 
 ## License
 

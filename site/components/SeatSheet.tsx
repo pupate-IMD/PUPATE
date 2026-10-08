@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { workLog } from "@/lib/seat";
 import { eth, int, listMultiple, listPrice, pad4, ripeness } from "@/lib/sim";
+import { useWorkFeed } from "@/lib/work";
 import { Chrysalis } from "./Chrysalis";
 import { EmergenceCard } from "./EmergenceCard";
 import { Lead } from "./Hero";
 import { LineChart } from "./LineChart";
+import { SeatWorkCard } from "./SeatWork";
 import { useDispatch, useSim } from "./SimContext";
 
 const COLLECTION = "0x0000eC93127BAA929E58E97dd0095A2BFb38ec1D";
@@ -18,9 +20,12 @@ const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 export function SeatSheet() {
   const s = useSim();
   const dispatch = useDispatch();
+  const { feed } = useWorkFeed();
   const id = Number(useSearchParams().get("id"));
   const x = s.seats.find((q) => q.id === id);
   const sale = s.sold.find((q) => q.id === id);
+  // IMD's own record of the seat, when the keeper has published it.
+  const rec = x ? feed?.seats.find((r) => r.tokenId === x.id) : undefined;
 
   if (!x && sale) {
     return (
@@ -155,10 +160,12 @@ export function SeatSheet() {
       </div>
 
       <h3 className="serif sub-h">Work in the swarm</h3>
-      {x.status === "held" ? (
+      {rec ? (
+        <SeatWorkCard rec={rec} />
+      ) : x.status === "held" ? (
         <div className="empty">
-          Held by the vault. Pairing and job records come from IMD&apos;s seat API, which this page does not read yet; the
-          chain alone shows only the holding.
+          Held by the vault. Its work appears here once the keeper publishes IMD&apos;s record of it (work.json); the chain
+          alone shows only the holding.
         </div>
       ) : x.status === "idle" ? (
         <div className="empty">

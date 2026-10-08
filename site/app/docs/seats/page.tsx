@@ -86,6 +86,15 @@ export default function Seats() {
         lot and the ETH goes to the seat pot. PUPATE is never auctioned; any PUPATE the vault holds is burned.
       </p>
 
+      <h2>Proof of work</h2>
+      <p>
+        IMD keeps a public record for every paired seat: whether it is online, what runs it, how many submissions it has
+        made and how many were accepted by other seats, the jobs themselves and who it worked with. The{" "}
+        <Link href="/work/">Work</Link> page shows that record for the seats the vault holds, job by job, each linked to
+        IMD&apos;s explorer; the keeper publishes it as <code>work.json</code> next to <code>status.json</code>. Other projects
+        prove hashes. Pupate&apos;s seats prove work.
+      </p>
+
       <h2>Selling</h2>
       <p>
         When a listing fills, the ETH goes to the burn pot. <code>settleSeat(tokenId)</code>, callable by anyone, takes

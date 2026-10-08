@@ -14,7 +14,18 @@ const SEAT_EVENTS = cocoonAbi.filter((x) => x.type === 'event' && ['SeatBought',
 // ------------------------------------------------------------------ the cache file
 
 export function emptyCache(chainId, cocoon, fromBlock) {
-  return { chainId, cocoon, fromBlock: String(fromBlock), scannedTo: null, seats: {}, lastReportAttempt: 0, pendingReport: null };
+  return {
+    chainId,
+    cocoon,
+    fromBlock: String(fromBlock),
+    scannedTo: null,
+    seats: {},
+    lastReportAttempt: 0,
+    pendingReport: null,
+    // For the status feed: when the last tick finished and the last transactions sent (see status.mjs).
+    lastTickAt: null,
+    lastActions: [],
+  };
 }
 
 /**
@@ -26,7 +37,7 @@ export function loadCache(file, chainId, cocoon, fromBlock) {
     try {
       const c = JSON.parse(readFileSync(file, 'utf8'));
       if (Number(c.chainId) === chainId && c.cocoon && isAddressEqual(c.cocoon, cocoon) && String(c.fromBlock) === String(fromBlock)) {
-        return { ...emptyCache(chainId, cocoon, fromBlock), ...c, seats: c.seats || {} };
+        return { ...emptyCache(chainId, cocoon, fromBlock), ...c, seats: c.seats || {}, lastActions: Array.isArray(c.lastActions) ? c.lastActions : [] };
       }
     } catch {
       // unreadable: start over
@@ -94,6 +105,8 @@ export async function readState({ pub, cfg, cache, keeperAddress }) {
     call(a.cocoon, cocoonAbi, 'mode'),
     call(a.token, erc20Abi, 'totalSupply'),
     call(a.seaport, seaportAbi, 'getCounter', [a.cocoon]),
+    call(a.hook, hookAbi, 'taxBps'),
+    call(a.hook, hookAbi, 'openedAt'),
   ];
   const harvestAt = base.length;
   for (const t of cfg.harvestTokens) {
@@ -118,8 +131,25 @@ export async function readState({ pub, cfg, cache, keeperAddress }) {
 
   const harvest = cfg.harvestTokens.map((token, i) => {
     const [lot, start, startedAt] = r[harvestAt + 2 * i + 1];
-    return { token, balance: r[harvestAt + 2 * i], auction: { lot, start, startedAt } };
+    return { token, balance: r[harvestAt + 2 * i], auction: { lot, start, startedAt, price: null } };
   });
+
+  // The running auctions' prices now. imdDemand and auctionPrice revert with NoAuction when nothing
+  // runs, so they are asked only for a running auction and may fail without failing the tick.
+  const priceCalls = [];
+  if (imdLot !== 0n) priceCalls.push({ key: 'imd', c: call(a.cocoon, cocoonAbi, 'imdDemand') });
+  harvest.forEach((h, i) => {
+    if (h.auction.lot !== 0n) priceCalls.push({ key: i, c: call(a.cocoon, cocoonAbi, 'auctionPrice', [h.token]) });
+  });
+  let imdDemand = null;
+  if (priceCalls.length) {
+    const rp = await pub.multicall({ contracts: priceCalls.map((x) => x.c), allowFailure: true, multicallAddress: MULTICALL3 });
+    priceCalls.forEach((x, i) => {
+      const v = rp[i].status === 'success' ? rp[i].result : null;
+      if (x.key === 'imd') imdDemand = v;
+      else harvest[x.key].auction.price = v;
+    });
+  }
 
   // Held seats: terms from the contract, then owner + order hashes, then order statuses.
   let seats = heldIds.map((tokenId, i) => {
@@ -164,6 +194,8 @@ export async function readState({ pub, cfg, cache, keeperAddress }) {
     claims: r[0],
     totalTax: r[1],
     buyTaxBps: r[2],
+    taxBps: r[20],
+    openedAt: r[21],
     feed: { floorWei, fresh, issuedAt, expiresAt, maxAge, freshUntil },
     pots: { seat: r[7], burn: r[8], dev: r[9], imd: r[10] },
     heldCount: r[11],
@@ -171,7 +203,7 @@ export async function readState({ pub, cfg, cache, keeperAddress }) {
     lastBurnBlock: r[13],
     wired: r[14],
     params: r[15],
-    imdAuction: { lot: imdLot, start: imdStart, startedAt: imdStartedAt },
+    imdAuction: { lot: imdLot, start: imdStart, startedAt: imdStartedAt, demand: imdDemand },
     mode: { index: Number(modeIdx), name: MODE[Number(modeIdx)], seatBps },
     totalSupply: r[18],
     counter,

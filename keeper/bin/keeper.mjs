@@ -15,6 +15,8 @@
 //   e. burn    Cocoon.burn when the burn pot is at least MIN_BURN_WEI and burnSpacing blocks have passed
 //   f. auctions Cocoon.startAuction for each HARVEST_TOKENS balance, Cocoon.startImdAuction for the IMD-burn ETH
 // Every step is simulated with eth_call first; a revert is logged by its custom error name and skipped.
+// After the tick, STATUS_DIR/status.json and listings.json are rewritten (lib/status.mjs): the state,
+// what each step would do right now, and the keeper's last actions, for anyone without an RPC.
 // Environment: see keeper/README.md. Keys, RPC URLs and API keys are never printed.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -23,10 +25,18 @@ import { createClients, createTx, revertReason } from '../lib/chain.mjs';
 import { describeConfig, loadConfig } from '../lib/config.mjs';
 import { log, setTick, warn } from '../lib/log.mjs';
 import { loadCache, readState, saveCache, statusLine, statusReport, syncSeats } from '../lib/state.mjs';
+import { rememberAction, writeStatusFiles } from '../lib/status.mjs';
+import { writeWorkFile } from '../lib/work.mjs';
 
 function usage() {
-  const src = readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n');
-  console.log(src.slice(1, 20).join('\n').replace(/^\/\/ ?/gm, ''));
+  // The comment block at the top of this file, however long it is.
+  const src = readFileSync(fileURLToPath(import.meta.url), 'utf8').split(/\r?\n/);
+  const head = [];
+  for (const line of src.slice(1)) {
+    if (!line.startsWith('//')) break;
+    head.push(line.replace(/^\/\/ ?/, ''));
+  }
+  console.log(head.join('\n'));
 }
 
 const argv = process.argv.slice(2);
@@ -60,8 +70,16 @@ async function main() {
   if (cfg.attestationSource === 'imd' && !dryRun) log('ATTESTATION_SOURCE=imd: a due report costs 0.5 IMD from the keeper wallet (Permit2)');
   if (cfg.listingSource === 'opensea') log('LISTING_SOURCE=opensea: this source is untested; watch the first purchases');
 
-  const tx = createTx({ pub, wallet, account, dryRun, gasCapWei: cfg.gasPriceCapWei, txTimeoutSec: cfg.txTimeoutSec });
   const cache = loadCache(cfg.stateFile, cfg.chainId, cfg.addresses.cocoon, cfg.fromBlock);
+  const tx = createTx({
+    pub,
+    wallet,
+    account,
+    dryRun,
+    gasCapWei: cfg.gasPriceCapWei,
+    txTimeoutSec: cfg.txTimeoutSec,
+    onResult: (entry) => rememberAction(cache, entry),
+  });
   const ctx = {
     cfg,
     a: cfg.addresses,
@@ -72,13 +90,28 @@ async function main() {
     cache,
     dryRun,
     forceReport: cfg.flags.forceReport,
+    // The buy step's last listings scan and the state it was made on, so the status feed can reuse it.
+    listingScan: null,
+    stateVersion: 0,
     persist: () => saveCache(cfg.stateFile, cache),
-    refresh: () => readState({ pub, cfg, cache, keeperAddress: account?.address }),
+    refresh: () => {
+      ctx.stateVersion += 1;
+      return readState({ pub, cfg, cache, keeperAddress: account?.address });
+    },
   };
 
   if (cfg.flags.status) {
     const s = await load(ctx);
     for (const line of statusReport(s, cfg)) console.log(line);
+    const files = await writeStatusFiles(ctx, s);
+    if (files) console.log(`status    written to ${files.status} and ${files.listings}`);
+    try {
+      const work = await writeWorkFile(ctx, s);
+      if (work) console.log(`work      written to ${work}`);
+      ctx.persist();
+    } catch (e) {
+      warn(`work feed: ${revertReason(e)}`);
+    }
     return;
   }
 
@@ -116,9 +149,11 @@ async function load(ctx) {
 async function tick(ctx, n) {
   setTick(n);
   const notes = [];
+  let s = null;
   try {
     await ctx.tx.syncNonce();
-    let s = await load(ctx);
+    ctx.listingScan = null;
+    s = await load(ctx);
     log(statusLine(s));
     if (s.keeperBalance !== null && s.keeperBalance < 10n ** 16n && !ctx.dryRun) warn(`keeper balance is under 0.01 ETH`);
 
@@ -145,10 +180,25 @@ async function tick(ctx, n) {
   } catch (e) {
     warn(`tick failed: ${revertReason(e)}`);
   } finally {
+    // A tick that read the chain counts as a tick, whatever its steps did; one that could not read
+    // it leaves lastTickAt alone, so the status file ages and the site's panel shows it.
+    if (s) ctx.cache.lastTickAt = new Date().toISOString();
     try {
       ctx.persist();
     } catch (e) {
       warn(`could not write ${ctx.cfg.stateFile}: ${e.message}`);
+    }
+    if (s) {
+      try {
+        await writeStatusFiles(ctx, s);
+      } catch (e) {
+        warn(`status feed: ${revertReason(e)}`);
+      }
+      try {
+        if (await writeWorkFile(ctx, s)) ctx.persist();
+      } catch (e) {
+        warn(`work feed: ${revertReason(e)}`);
+      }
     }
     setTick(null);
   }

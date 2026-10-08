@@ -5,3 +5,7 @@ next-env.d.ts
 *.tsbuildinfo
 .next-build/
 public/addresses.local.json
+# written by the keeper after every tick (keeper/lib/status.mjs)
+public/status.json
+public/listings.json
+public/work.json

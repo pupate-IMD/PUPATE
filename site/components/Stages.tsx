@@ -13,6 +13,7 @@ export function Stages() {
     { href: "/flow/", n: "·", title: "Flow", fig: eth(s.taxCollected, 1), s: "tax collected so far, and where every part of it went" },
     { href: "/feed/", n: "I", title: "Feed", fig: `${pct(buyTax(s))} tax`, s: "trade in the launch pool, see where each ETH goes, check the oracle" },
     { href: "/cocoon/", n: "II", title: "Cocoon", fig: `${s.seats.length} ${s.seats.length === 1 ? "seat" : "seats"}`, s: "the seats the vault holds, each listed and working" },
+    { href: "/work/", n: "II", title: "Work", fig: "proof of work", s: "what the vault's seats actually do in the swarm, job by job, from IMD's records" },
     { href: "/emerge/", n: "III", title: "Emerge", fig: `${int(s.burned)} burned`, s: "seats that sold, the PUPATE their sale destroyed, the auctions" },
     { href: "/steps/", n: "IV", title: "Steps", fig: `${ready} of 3 ready`, s: "the public functions anyone can run, and the skill file for agents" },
     { href: "/record/", n: "V", title: "Record", fig: `${s.callers.length} callers`, s: "supply over time, seats over time, who has been running the steps" },
