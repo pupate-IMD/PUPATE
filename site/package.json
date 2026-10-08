@@ -4,7 +4,7 @@
   "private": true,
   "description": "The Pupate website: a static Next.js export for IPFS.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "npx serve out",
     "typecheck": "tsc --noEmit"

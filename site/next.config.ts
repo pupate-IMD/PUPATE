@@ -2,8 +2,11 @@ import type { NextConfig } from "next";
 
 // A static export: the site is published to IPFS and named under ENS, with no server.
 const nextConfig: NextConfig = {
-  // `npm run build` writes to its own directory, so building never disturbs a running `npm run dev`.
-  distDir: process.env.npm_lifecycle_event === "build" ? ".next-build" : ".next",
+  // `npm run dev` (scripts/dev.mjs) sets NEXT_DIST_DIR=.next-dev, so the dev server owns a directory of
+  // its own and `npm run build` never overwrites it mid-flight. The build keeps the default: with
+  // `output: "export"` Next treats any custom distDir as the export folder and builds in `.next`
+  // regardless (hasCustomExportOutput in next's build/index.js), so the site lands in `out/`.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   output: "export",
   trailingSlash: true,
   reactStrictMode: true,
