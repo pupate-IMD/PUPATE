@@ -1,0 +1,13 @@
+# What the CLI must not upload. Vercel ignores .gitignore when deploying from the CLI, so the
+# keeper's local feeds and the fork's addresses are named here as well: they belong to a running
+# keeper, never to a deployment.
+node_modules
+.next
+.next-dev
+out
+.env*
+!.env.example
+public/status.json
+public/listings.json
+public/work.json
+public/addresses.local.json
