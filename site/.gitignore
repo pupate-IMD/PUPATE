@@ -12,3 +12,4 @@ public/addresses.local.json
 public/status.json
 public/listings.json
 public/work.json
+.vercel/
