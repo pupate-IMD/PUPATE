@@ -37,6 +37,7 @@ export function Contracts() {
         <span className="serif">Pupate</span>
         <nav className="foot-links" aria-label="Elsewhere">
           <Link href="/how/">How it works</Link>
+          <Link href="/mine/">Mine</Link>
           <Link href="/docs/">Docs</Link>
           <a href="https://github.com/pupate-IMD/PUPATE" target="_blank" rel="noreferrer">
             GitHub

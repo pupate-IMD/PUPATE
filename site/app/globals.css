@@ -603,3 +603,26 @@ footer .serif { color: var(--ink); font-size: 16px; }
   .buy-grid { grid-template-columns: 1fr; gap: 28px; }
   .buy-grid > :first-child { order: 2; }
 }
+
+/* --- the mine page (announced, not live) */
+.mine-page { padding-block: 40px 0; }
+.mine-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: start; }
+.mine-grid > * { min-width: 0; }
+.mine-grid h1 { font-size: clamp(32px, 4.4vw, 50px); line-height: 1.05; margin-top: 8px; max-width: 16ch; text-wrap: balance; }
+.mine-grid .lede { margin-top: 14px; font-size: 14px; }
+.mine-grid .lede b { color: var(--ink); font-weight: 500; }
+.mine-p { max-width: 64ch; }
+.mine-table { min-width: 0; max-width: 520px; margin: 10px 0; border: 1px solid var(--hair); }
+.mine-table th, .mine-table td { padding: 8px 12px; }
+.mine-table td { color: var(--dim); }
+.mine-table td:first-child { color: var(--ink); }
+.card-preview { margin: 0; display: grid; gap: 10px; position: sticky; top: 76px; }
+.card-preview img { display: block; width: 100%; height: auto; border: 1px solid var(--hair); }
+.card-preview figcaption { font-size: 12px; max-width: 52ch; }
+.mine-page p a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hair); text-underline-offset: 3px; }
+.mine-page p a:hover { color: var(--jade-ink); }
+@media (max-width: 860px) {
+  .mine-grid { grid-template-columns: 1fr; gap: 28px; }
+  .mine-grid > :first-child { order: 2; }
+  .card-preview { position: static; }
+}
