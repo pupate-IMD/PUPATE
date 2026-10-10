@@ -45,7 +45,27 @@ export const UNISWAP = {
 
 // Filled at launch (mainnet) and at the rehearsal (Sepolia). Null keeps the chain in preview mode.
 export const MAINNET: Addresses | null = null;
-export const SEPOLIA: Addresses | null = null;
+
+/// The Sepolia rehearsal of 2026-10-10 (script/sepolia/up.mjs): the real contracts against a mock
+/// collection and a mock IMD, the pool opened by the local launch factory. Test figures, not Pupate.
+export const SEPOLIA: Addresses | null = {
+  chainId: 11155111,
+  fromBlock: 11884126,
+  token: "0xF5389EA27807536BAA5B6096f3F873E86606F3F3",
+  hook: "0x84C2E27279a14D314CCB4fD94611A4c3e84018cc",
+  cocoon: "0xFF466998add222dE5963f9648Fc8499a46bADC82",
+  feed: "0x17FD7Bc83F893868798caa27B0aa5c1444fb6E22",
+  timelock: "0x780A18072C024EA79B2f4E27dA89AaF3B166C5A3",
+  vesting: "0x1582D6710a3e1aFBa2E8eC4aDD75acd82CE464a7",
+  poolManager: UNISWAP[11155111].poolManager,
+  universalRouter: UNISWAP[11155111].universalRouter,
+  quoter: UNISWAP[11155111].quoter,
+  permit2: PERMIT2,
+  collection: "0x0adD7b9584cd73CeF21B39014e3ff6077BE53441",
+  imd: "0x2B14082662A1664C60D9BdE5ef54aD2fd98b5f65",
+  seaport: SEAPORT,
+  poolKey: { fee: 12500, tickSpacing: 60 },
+};
 
 export type Target = "mainnet" | "sepolia" | "local";
 
