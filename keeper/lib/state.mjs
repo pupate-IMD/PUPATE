@@ -51,13 +51,32 @@ export function saveCache(file, cache) {
   writeFileSync(file, JSON.stringify(cache, null, 2) + '\n');
 }
 
-/** Scan Cocoon's seat events from where the cache stopped up to `toBlock`, in LOG_CHUNK pieces. */
+/** True when an RPC refused a log query for its block range (Alchemy's free tier allows 10 blocks, others 2,000 or 10,000). */
+export function isRangeRefusal(e) {
+  const code = e?.code ?? e?.cause?.code;
+  const text = `${e?.details || ''} ${e?.shortMessage || ''} ${e?.message || ''}`;
+  return code === -32600 || code === -32005 || code === -32602 || /block range|too many|exceed|more than|limit/i.test(text);
+}
+
+/**
+ * Scan Cocoon's seat events from where the cache stopped up to `toBlock`, in LOG_CHUNK pieces. When the
+ * node refuses a range it is halved and retried, and the size that worked is kept in the cache, so
+ * the next tick starts from it instead of learning it again.
+ */
 export async function syncSeats({ pub, cocoon, fromBlock, toBlock, cache, chunk }) {
   let from = cache.scannedTo === null ? BigInt(fromBlock) : BigInt(cache.scannedTo) + 1n;
-  const step = BigInt(chunk);
+  let step = BigInt(cache.logChunk && cache.logChunk < chunk ? cache.logChunk : chunk);
   while (from <= toBlock) {
     const to = from + step - 1n < toBlock ? from + step - 1n : toBlock;
-    const logs = await pub.getLogs({ address: cocoon, events: SEAT_EVENTS, fromBlock: from, toBlock: to });
+    let logs;
+    try {
+      logs = await pub.getLogs({ address: cocoon, events: SEAT_EVENTS, fromBlock: from, toBlock: to });
+    } catch (e) {
+      if (!isRangeRefusal(e) || step <= 1n) throw e;
+      step = step / 2n < 1n ? 1n : step / 2n;
+      cache.logChunk = Number(step);
+      continue;
+    }
     logs.sort((x, y) => (x.blockNumber === y.blockNumber ? Number(x.logIndex) - Number(y.logIndex) : x.blockNumber < y.blockNumber ? -1 : 1));
     for (const l of logs) {
       const id = l.args.tokenId.toString();

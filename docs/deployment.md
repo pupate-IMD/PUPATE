@@ -76,3 +76,24 @@ timelock.
 - A `launch.open` for a self-hosted repository must carry `shape: "chain"` and the steps `audit-imported-code → adapt-contract-project → adversarial-review`; the adapt step owns its own write budget and may not be given `paths`. Ready bodies: `keeper/questions/launch.check.json` (mainnet) and `launch.sepolia.check.json`. Run `node keeper/bin/imd.mjs check launch.open <body>` first: it is free and must return no blockers. Update `baseCommit` to the commit being launched.
 - IMD pays the launch transaction up to `gasCeilingWei` = 0.05 ETH on mainnet. Measured on the local mainnet fork (`script/local/`): token deploy 415,644 gas, hook deploy through the CREATE2 factory 1,390,744, pool open + single-sided seed in one transaction 289,486, about 2.1M in all before IMD's own factory overhead. At 2.1M the ceiling holds up to ~24 gwei; budget for 3.5M (~14 gwei) to be safe, and launch while the base fee is well under that.
 - Rehearse locally first: `node script/local/up.mjs` deploys the whole stack on an anvil fork of mainnet and `cd site && npx --yes tsx scripts/fork-e2e.ts` exercises the site's live modules against it (buy and sell through the Universal Router, flush).
+
+## What the Sepolia rehearsal taught (2026-10-10)
+
+`script/sepolia/up.mjs` ran the whole sequence on Sepolia with the real deployer wallet (addresses in
+`keeper/addresses.sepolia.json`; all post-deploy checks pass). Four things to carry to mainnet:
+
+- **Gas limits need a margin over forge's estimate.** Forge simulates on the project's `cancun` EVM;
+  live networks run newer schedules. On Sepolia contract creation cost about seven times the estimate
+  (Cocoon 38.4M gas against 5.5M on mainnet), so the rehearsal runs `--gas-estimate-multiplier 900`.
+  Mainnet's `eth_estimateGas` agrees with forge (Cocoon 5.5M), so `130` is enough there. Unused gas is
+  refunded; an underestimate costs the whole limit.
+- **Do not take gas limits from the node per transaction (`--skip-simulation`).** The provider's nodes
+  lag each other by a block or two; the second transaction's estimate then runs against a state that
+  does not have the first, and forge gives up on the nonce. Keep the simulation, send with `--slow
+  --retries 10 --delay 8`, and wait for the state to settle (three agreeing polls) between scripts.
+- **`PostLaunch` is idempotent.** It skips the wiring, the question and the ownership transfers the
+  chain already shows, and `VESTING` reuses a vesting contract an interrupted attempt deployed. A run
+  that stops halfway is simply run again.
+- **Free RPC tiers cap `eth_getLogs` ranges** (Alchemy: 10 blocks). The keeper and the site halve their
+  log chunk when a node refuses a range and keep the size that worked, so a fresh keeper can still
+  catch up from the pre-launch block.

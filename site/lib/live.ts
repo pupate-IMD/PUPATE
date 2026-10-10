@@ -47,12 +47,34 @@ interface RawLog {
 const cocoonEvents = cocoonAbi.filter((x) => x.type === "event");
 const hookEvents = hookAbi.filter((x) => x.type === "event");
 
-/// Logs over a range, in chunks small enough for public endpoints.
+/// True when an endpoint refused a log query for its block range (Alchemy's free tier allows 10 blocks, others 2,000 or 10,000).
+function isRangeRefusal(e: unknown): boolean {
+  const x = e as { code?: number; details?: string; shortMessage?: string; message?: string; cause?: { code?: number } };
+  const code = x?.code ?? x?.cause?.code;
+  const text = `${x?.details ?? ""} ${x?.shortMessage ?? ""} ${x?.message ?? ""}`;
+  return code === -32600 || code === -32005 || code === -32602 || /block range|too many|exceed|more than|limit/i.test(text);
+}
+
+/// The chunk size the endpoint accepted last, so later reads start from it.
+let learnedChunk = LOG_CHUNK;
+
+/// Logs over a range, in chunks the endpoint accepts: when it refuses a range, the chunk is halved and retried.
 async function logsOf(client: PublicClient, address: Address, events: typeof cocoonEvents | typeof hookEvents, from: bigint, to: bigint): Promise<RawLog[]> {
   const out: RawLog[] = [];
-  for (let start = from; start <= to; start += LOG_CHUNK) {
-    const end = start + LOG_CHUNK - 1n < to ? start + LOG_CHUNK - 1n : to;
-    const logs = await client.getLogs({ address, events, fromBlock: start, toBlock: end });
+  let chunk = learnedChunk;
+  for (let start = from; start <= to; ) {
+    const end = start + chunk - 1n < to ? start + chunk - 1n : to;
+    // A refused range comes back as null and the chunk shrinks; anything else is a real failure.
+    const logs = await client.getLogs({ address, events, fromBlock: start, toBlock: end }).catch((e: unknown) => {
+      if (!isRangeRefusal(e) || chunk <= 1n) throw e;
+      return null;
+    });
+    if (logs === null) {
+      chunk = chunk / 2n < 1n ? 1n : chunk / 2n;
+      learnedChunk = chunk;
+      continue;
+    }
+    start = end + 1n;
     for (const l of logs) {
       out.push({
         eventName: String(l.eventName),
