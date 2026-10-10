@@ -77,6 +77,21 @@ timelock.
 - IMD pays the launch transaction up to `gasCeilingWei` = 0.05 ETH on mainnet. Measured on the local mainnet fork (`script/local/`): token deploy 415,644 gas, hook deploy through the CREATE2 factory 1,390,744, pool open + single-sided seed in one transaction 289,486, about 2.1M in all before IMD's own factory overhead. At 2.1M the ceiling holds up to ~24 gwei; budget for 3.5M (~14 gwei) to be safe, and launch while the base fee is well under that.
 - Rehearse locally first: `node script/local/up.mjs` deploys the whole stack on an anvil fork of mainnet and `cd site && npx --yes tsx scripts/fork-e2e.ts` exercises the site's live modules against it (buy and sell through the Universal Router, flush).
 
+## Mainnet, in progress (2026-10-10)
+
+`script/mainnet/launch.mjs pre` ran on 2026-10-10 from the deployer `0x7A2B112aF54419ed0B18e051027f3142C13441D9`
+(also `DEVELOPER` and `OPERATOR`), base fee 0.063 gwei:
+
+| Contract | Address | |
+|---|---|---|
+| TimelockController | `0x8bE826082c0FbAeC485048aA26ef42aC147898EC` | 48 hours, the developer proposes |
+| FloorFeed | `0x5A215aa9883cEfE5fa74085ba66288388b83700C` | attester `0x5598Aa91…2982`, evidence chain 1; owned by the deployer until `post` |
+| Cocoon | `0x0adD7b9584cd73CeF21B39014e3ff6077BE53441` | owned by the deployer until `post` |
+
+From block 26161806. Nothing has been paid to IMD yet. Next: `question` (0.5 IMD, pins the question
+hash and yields the first attestation), `manifest`, `open` (0.5 IMD), `post`, `report`, `finish`.
+The runner's progress file carries the same addresses.
+
 ## What the Sepolia rehearsal taught (2026-10-10)
 
 `script/sepolia/up.mjs` ran the whole sequence on Sepolia with the real deployer wallet (addresses in

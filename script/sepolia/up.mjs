@@ -12,7 +12,6 @@
 // also DEVELOPER and OPERATOR here), SEPOLIA_ATTESTER_KEY (a throwaway key for the feed's attester,
 // generated and appended to .env on the first run). None of them is ever printed.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { POOL_KEY, ROOT, castLocal, fmtEth, fmtGwei, localQuestionHash, readDotEnv, run } from '../local/common.mjs';
 
@@ -28,8 +27,8 @@ const SEPOLIA = {
 };
 const ADDRESSES_FILE = join(ROOT, 'keeper', 'addresses.sepolia.json');
 const ENV_FILE = join(ROOT, '.env');
-/** Where a run records what it has deployed, so `resume` can pick up after a failed step. */
-const PROGRESS_FILE = join(tmpdir(), 'pupate-sepolia', 'progress.json');
+/** Where a run records what it has deployed, so `resume` can pick up after a failed step: inside the project, not the shared temp directory. */
+const PROGRESS_FILE = join(ROOT, 'keeper', '.launch', 'sepolia-progress.json');
 const MIN_BALANCE_WEI = 5n * 10n ** 15n; // 0.005 ETH: the whole sequence costs a fraction of that at Sepolia's usual fees
 const DEVELOPER_SHARE_WEI = 50_000_000n * 10n ** 18n; // 5% of supply, what PostLaunch must find with the deployer
 const SEL = { balanceOf: '0x70a08231', openedAt: '0x38930203' };
@@ -252,7 +251,7 @@ function loadProgress() {
 }
 
 function saveProgress(p) {
-  mkdirSync(join(tmpdir(), 'pupate-sepolia'), { recursive: true });
+  mkdirSync(join(ROOT, 'keeper', '.launch'), { recursive: true });
   writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, 2));
 }
 

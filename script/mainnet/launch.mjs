@@ -17,7 +17,6 @@
 // OPERATOR, the wallet that pays IMD), optional ETHERSCAN_API_KEY (source verification),
 // MAX_BASE_FEE_GWEI (default 1: no transaction is sent above it). Nothing secret is ever printed.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { POOL_KEY, ROOT, castLocal, fmtEth, fmtGwei, readDotEnv, run } from '../local/common.mjs';
 import { createImd } from '../../keeper/lib/imd.mjs';
@@ -36,8 +35,9 @@ const MAINNET = {
 };
 const REPO_URL = 'https://github.com/pupate-IMD/PUPATE';
 const IMD_API = process.env.IMD_API || 'https://api.imd.fun';
-const PROGRESS_FILE = join(tmpdir(), 'pupate-mainnet', 'progress.json');
+/** Progress lives inside the project (ignored by git), never in the shared temp directory. */
 const LAUNCH_DIR = join(ROOT, 'keeper', '.launch');
+const PROGRESS_FILE = join(LAUNCH_DIR, 'progress.json');
 const ATTESTATION_FILE = join(LAUNCH_DIR, 'first-attestation.json');
 const ADDRESSES_FILE = join(ROOT, 'keeper', 'addresses.mainnet.json');
 const LAUNCH_JSON = join(ROOT, 'launch.json');
@@ -429,6 +429,7 @@ async function ready(p, { gasGuard = true } = {}) {
     throw new Error(`base fee ${fmtGwei(baseFee)} is above the ${MAX_BASE_FEE_GWEI} gwei cap; wait, or raise MAX_BASE_FEE_GWEI knowingly`);
   }
   if (balance < 2n * 10n ** 15n) throw new Error(`the deployer holds ${fmtEth(balance)}; keep at least 0.002 ETH for gas`);
+  await verifyProgress(p, deployer);
   return deployer;
 }
 
@@ -529,10 +530,33 @@ function loadProgress() {
 }
 
 function saveProgress(p) {
-  mkdirSync(join(tmpdir(), 'pupate-mainnet'), { recursive: true });
-  writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, 2));
   mkdirSync(LAUNCH_DIR, { recursive: true });
-  writeFileSync(join(LAUNCH_DIR, 'progress.json'), JSON.stringify(p, null, 2));
+  writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, 2));
+}
+
+/**
+ * The progress file is only a note to self; before a step acts on it, the pre-launch addresses are
+ * checked against forge's own broadcast record and against the chain, so a tampered or stale file
+ * cannot steer a transaction at the wrong contract.
+ */
+async function verifyProgress(p, deployer) {
+  if (!p.cocoon) return;
+  const file = join(ROOT, 'broadcast', 'DeployPreLaunch.s.sol', String(CHAIN_ID), 'run-latest.json');
+  if (existsSync(file)) {
+    const json = JSON.parse(readFileSync(file, 'utf8'));
+    const deployed = Object.fromEntries(json.transactions.filter((t) => t.contractAddress).map((t) => [t.contractName, t.contractAddress.toLowerCase()]));
+    for (const [name, want] of [['Cocoon', p.cocoon], ['FloorFeed', p.feed], ['TimelockController', p.timelock]]) {
+      if (deployed[name] && deployed[name] !== want.toLowerCase()) throw new Error(`progress names ${name} ${want}, but the broadcast record has ${deployed[name]}`);
+    }
+  }
+  const attester = call(p.feed, 'attester()(address)')[0];
+  if (attester.toLowerCase() !== MAINNET.attester.toLowerCase()) throw new Error(`FloorFeed ${p.feed} has attester ${attester}, not IMD's`);
+  const owner = call(p.cocoon, 'owner()(address)')[0].toLowerCase();
+  if (owner !== deployer.toLowerCase() && owner !== p.timelock.toLowerCase()) throw new Error(`Cocoon ${p.cocoon} is owned by ${owner}, neither the deployer nor the timelock`);
+  if (p.hook) {
+    const sink = call(p.hook, 'sink()(address)')[0];
+    if (sink.toLowerCase() !== p.cocoon.toLowerCase()) throw new Error(`hook ${p.hook} has sink ${sink}, not Cocoon`);
+  }
 }
 
 const pad = (address) => address.slice(2).toLowerCase().padStart(64, '0');
