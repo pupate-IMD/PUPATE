@@ -2,16 +2,17 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Contracts } from "./Contracts";
 import { DOCS, docHref } from "@/lib/docs";
-import { PreviewBar } from "./PreviewBar";
+import { InsideBar } from "./InsideBar";
 import { TopBar } from "./TopBar";
 
-/// The frame around every page of the simulated protocol: the bar, the preview strip, the page
-/// and the footer.
-export function Shell({ children }: { children: ReactNode }) {
+/// The frame around every page. The front layer (home, how it works, work) is the bar, the page and
+/// the footer. The technical layer adds the "Under the hood" strip: its own navigation and, before
+/// launch, the note that every figure is a sample.
+export function Shell({ children, layer = "front" }: { children: ReactNode; layer?: "front" | "inside" }) {
   return (
     <>
       <TopBar />
-      <PreviewBar />
+      {layer === "inside" ? <InsideBar /> : null}
       <main>{children}</main>
       <Contracts />
     </>

@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "Record · Pupate" };
 
 export default function Page() {
   return (
-    <Shell>
+    <Shell layer="inside">
       <Record />
       <DocLink slug="control" />
     </Shell>

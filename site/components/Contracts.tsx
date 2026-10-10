@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 const KNOWN = [
@@ -28,28 +29,49 @@ function Copy({ text }: { text: string }) {
   );
 }
 
+/// The footer: the ways out, and the contract addresses folded away until someone wants them.
 export function Contracts() {
   return (
-    <footer className="wrap">
-      <div className="serif">Pupate</div>
-      <div className="addresses">
-        {KNOWN.map((c) => (
-          <div className="addr" key={c.address}>
-            <span className="k">{c.name}</span>
-            <a className="a num" href={`https://etherscan.io/address/${c.address}`} target="_blank" rel="noreferrer">
-              {c.address}
-            </a>
-            <Copy text={c.address} />
-          </div>
-        ))}
-        {PENDING.map((name) => (
-          <div className="addr" key={name}>
-            <span className="k">{name}</span>
-            <span className="a faint">listed here with verified source once deployed</span>
-          </div>
-        ))}
+    <footer className="wrap foot">
+      <div className="foot-row">
+        <span className="serif">Pupate</span>
+        <nav className="foot-links" aria-label="Elsewhere">
+          <Link href="/how/">How it works</Link>
+          <Link href="/docs/">Docs</Link>
+          <a href="https://github.com/pupate-IMD/PUPATE" target="_blank" rel="noreferrer">
+            GitHub
+          </a>
+          <a href="https://x.com/pupateIMD" target="_blank" rel="noreferrer">
+            X
+          </a>
+          <a href="https://imd.fun" target="_blank" rel="noreferrer">
+            Built on IMD
+          </a>
+        </nav>
       </div>
-      <div>Built with the IMD swarm, reviewed independently. Source on GitHub.</div>
+      <details className="foot-contracts">
+        <summary>Contracts</summary>
+        <div className="addresses">
+          {KNOWN.map((c) => (
+            <div className="addr" key={c.address}>
+              <span className="k">{c.name}</span>
+              <a className="a num" href={`https://etherscan.io/address/${c.address}`} target="_blank" rel="noreferrer">
+                {c.address}
+              </a>
+              <Copy text={c.address} />
+            </div>
+          ))}
+          {PENDING.map((name) => (
+            <div className="addr" key={name}>
+              <span className="k">{name}</span>
+              <span className="a faint">listed here with verified source once deployed</span>
+            </div>
+          ))}
+        </div>
+      </details>
+      <div className="dim">
+        Built with the IMD swarm, reviewed independently. This site describes a mechanism; it makes no statement about returns.
+      </div>
     </footer>
   );
 }

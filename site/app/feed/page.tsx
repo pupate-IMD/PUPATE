@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Feed · Pupate" };
 
 export default function Page() {
   return (
-    <Shell>
+    <Shell layer="inside">
       <Launch />
       <Feed />
       <DocLink slug="oracle" />

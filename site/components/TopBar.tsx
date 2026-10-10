@@ -5,16 +5,23 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ConnectWallet } from "./ConnectWallet";
 
+/// Four doors. Everything technical sits behind the last one; InsideBar names those pages.
 const PAGES = [
-  { href: "/flow/", label: "Flow" },
-  { href: "/feed/", label: "Feed" },
-  { href: "/cocoon/", label: "Cocoon" },
+  { href: "/#buy", label: "Buy" },
+  { href: "/how/", label: "How it works" },
   { href: "/work/", label: "Work" },
-  { href: "/emerge/", label: "Emerge" },
-  { href: "/steps/", label: "Steps" },
-  { href: "/record/", label: "Record" },
-  { href: "/docs/", label: "Docs" },
+  { href: "/inside/", label: "Under the hood" },
 ];
+
+/// The paths of the technical layer, framed by Shell's "inside" variant.
+export const INSIDE = ["/inside", "/flow", "/feed", "/cocoon", "/emerge", "/steps", "/record", "/seat", "/docs"];
+
+function activeDoor(path: string): string | null {
+  if (path.startsWith("/how")) return "/how/";
+  if (path.startsWith("/work")) return "/work/";
+  if (INSIDE.some((p) => path.startsWith(p))) return "/inside/";
+  return null;
+}
 
 function effectiveDark(): boolean {
   if (typeof document === "undefined") return false;
@@ -28,8 +35,7 @@ export function TopBar() {
   const [open, setOpen] = useState(false);
   const path = usePathname();
   useEffect(() => setDark(effectiveDark()), []);
-  // A seat sheet belongs to the cocoon.
-  const here = path.startsWith("/seat") ? "/cocoon/" : path;
+  const active = activeDoor(path);
 
   function toggleTheme() {
     const next = dark ? "light" : "dark";
@@ -60,22 +66,13 @@ export function TopBar() {
         </Link>
         <nav className={`nav ${open ? "open" : ""}`} aria-label="Sections">
           {PAGES.map((p) => {
-            const active = here.startsWith(p.href.slice(0, -1));
+            const on = active === p.href;
             return (
-              <Link
-                key={p.href}
-                href={p.href}
-                className={active ? "active" : undefined}
-                aria-current={active ? "page" : undefined}
-                onClick={() => setOpen(false)}
-              >
+              <Link key={p.href} href={p.href} className={on ? "active" : undefined} aria-current={on ? "page" : undefined} onClick={() => setOpen(false)}>
                 {p.label}
               </Link>
             );
           })}
-          <a href="https://imd.fun/docs/" target="_blank" rel="noreferrer">
-            Built on IMD
-          </a>
         </nav>
         <div className="right">
           <button className="iconbtn" onClick={toggleTheme} aria-label={dark ? "Switch to light" : "Switch to dark"}>

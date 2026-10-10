@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Seat · Pupate" };
 
 export default function SeatPage() {
   return (
-    <Shell>
+    <Shell layer="inside">
       <Suspense fallback={<div className="wrap section dim">Loading the sheet…</div>}>
         <SeatSheet />
       </Suspense>
