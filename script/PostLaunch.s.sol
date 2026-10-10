@@ -22,6 +22,7 @@ import {PupateVesting} from "../src/PupateVesting.sol";
 ///   DEVELOPER                beneficiary of the vesting
 ///   QUESTION_HASH            `questionHash` of the oracle request made with FloorFeed as consumer
 ///   VESTING_START            unix time the 12-month vesting starts (defaults to now)
+///   VESTING                  a vesting contract an earlier, interrupted run already deployed (optional)
 ///   POOL_FEE, TICK_SPACING   the launch pool's (default 12500 and 60)
 contract PostLaunch is Script {
     function run() external {
@@ -39,19 +40,24 @@ contract PostLaunch is Script {
         vm.startBroadcast();
         address deployer = msg.sender;
 
+        // Every step checks the chain first, so a run that stopped halfway (a lagging node, a dropped
+        // transaction) is simply run again and continues where it left off.
         PoolKey memory key = PoolKey(
             CurrencyLibrary.ADDRESS_ZERO, Currency.wrap(address(token)), fee, tickSpacing, IHooks(hook)
         );
-        cocoon.wire(key);
+        if (!cocoon.wired()) cocoon.wire(key);
 
-        PupateVesting vesting =
-            new PupateVesting(IERC20Minimal(address(token)), developer, vestingStart, 365 days);
+        // VESTING reuses the contract an earlier attempt deployed; otherwise a fresh one.
+        address existing = vm.envOr("VESTING", address(0));
+        PupateVesting vesting = existing != address(0)
+            ? PupateVesting(existing)
+            : new PupateVesting(IERC20Minimal(address(token)), developer, vestingStart, 365 days);
         uint256 allocation = token.balanceOf(deployer);
         if (allocation != 0) token.transfer(address(vesting), allocation);
 
-        feed.setQuestion(questionHash);
-        feed.transferOwnership(timelock);
-        cocoon.transferOwnership(timelock);
+        if (feed.questionHash() == bytes32(0)) feed.setQuestion(questionHash);
+        if (feed.owner() == deployer) feed.transferOwnership(timelock);
+        if (cocoon.owner() == deployer) cocoon.transferOwnership(timelock);
         vm.stopBroadcast();
 
         console2.log("PupateVesting     ", address(vesting));
