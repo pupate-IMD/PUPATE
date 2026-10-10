@@ -581,3 +581,25 @@ footer .serif { color: var(--ink); font-size: 16px; }
   .lead, .stat .s, .stage .s, .swap .note, .card .lead, .work-card .lead, .work-table th, .work-table td, .keeper .links, .node .s, .auction .s, .docs-aside, .doc-card .dim, .move p { font-size: 12px; }
   .front .lede { font-size: 15px; }
 }
+
+/* --- the buy page */
+.buy-page { padding-block: 40px 0; }
+.buy-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: start; }
+.buy-grid > * { min-width: 0; }
+.buy-grid h1 { font-size: clamp(32px, 4.4vw, 50px); line-height: 1.05; margin-top: 8px; max-width: 16ch; text-wrap: balance; }
+.buy-grid .lede { margin-top: 14px; font-size: 14px; }
+.buy-steps { counter-reset: s; list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 64ch; }
+.buy-steps li { position: relative; padding-left: 40px; color: var(--dim); }
+.buy-steps li b { color: var(--ink); font-weight: 500; }
+.buy-steps li::before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 0; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--ink); font-family: var(--serif); font-size: 15px; color: var(--ink); }
+.buy-notes { margin: 0; padding-left: 18px; display: grid; gap: 8px; max-width: 64ch; color: var(--dim); }
+.buy-notes b { color: var(--ink); font-weight: 500; }
+.buy-addr { padding: 14px 16px; display: grid; gap: 10px; }
+.addr-line { font-size: 14px; overflow-wrap: anywhere; }
+.buy-addr .cta { display: flex; gap: 8px; flex-wrap: wrap; }
+.empty a, .buy-page p a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hair); text-underline-offset: 3px; }
+.empty a:hover, .buy-page p a:hover { color: var(--jade-ink); }
+@media (max-width: 860px) {
+  .buy-grid { grid-template-columns: 1fr; gap: 28px; }
+  .buy-grid > :first-child { order: 2; }
+}

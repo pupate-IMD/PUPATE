@@ -7,7 +7,7 @@ import { ConnectWallet } from "./ConnectWallet";
 
 /// Four doors. Everything technical sits behind the last one; InsideBar names those pages.
 const PAGES = [
-  { href: "/#buy", label: "Buy" },
+  { href: "/buy/", label: "Buy" },
   { href: "/how/", label: "How it works" },
   { href: "/work/", label: "Work" },
   { href: "/inside/", label: "Under the hood" },
@@ -17,6 +17,7 @@ const PAGES = [
 export const INSIDE = ["/inside", "/flow", "/feed", "/cocoon", "/emerge", "/steps", "/record", "/seat", "/docs"];
 
 function activeDoor(path: string): string | null {
+  if (path.startsWith("/buy")) return "/buy/";
   if (path.startsWith("/how")) return "/how/";
   if (path.startsWith("/work")) return "/work/";
   if (INSIDE.some((p) => path.startsWith(p))) return "/inside/";
