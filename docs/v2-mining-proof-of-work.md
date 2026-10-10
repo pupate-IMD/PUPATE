@@ -62,8 +62,16 @@ Cocoon, PupateHook, PupateToken, FloorFeed are not touched. The Cards only read 
 
 - Editions per seat (33?), fee per epoch (flat, or rising like WORKERS), epoch length, target cadence,
   per-wallet cap, whether unsolved epochs roll over.
-- Secondary royalty (WORKERS: 0 on mint, 5% on resale): if any, it should go to the burn pot, not a
-  treasury, to keep "no treasury" true.
+- Secondary royalty: **5% on resale, to the developer treasury** (owner decision, 2026-10-10). The token
+  stays keyless; the card market is the developer's revenue, stated plainly on the Mine page. Enforced
+  with a creator-token transfer validator (whitelisted operators and a Seaport zone of our own),
+  since ERC-2981 alone is a signal marketplaces may ignore.
+- Mint fee: **in PUPATE, always, and burned** (owner decision, 2026-10-10). Miners must buy PUPATE in
+  the pool to mint, which pays the tax and feeds the vault; the fee itself leaves supply. This is the
+  flywheel: trade → tax → seats → cards to mine → PUPATE bought and burned → fewer tokens, more seats.
+- Art: the binary-outline language of the brand (every contour a line of 0s and 1s seeded by the seat
+  number, jade digits for the wing, a gold band), on-chain SVG with a two-glyph font; prototype in
+  brand/previews/ (not tracked).
 - Which seats are mineable: only seats the vault holds now (scarce, live) or any seat it ever held
   (a growing catalogue). Holding-only keeps the mining tied to the vault's present work.
 
