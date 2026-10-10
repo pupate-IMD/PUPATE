@@ -4,12 +4,14 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { formatEther } from "viem";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { breakdown, buyTax, eth, int, pct, sellTax } from "@/lib/sim";
+import { breakdown, buyTax, eth, int, pct, receiveEstimate, sellTax } from "@/lib/sim";
 import { SLIPPAGE_BPS, useDispatch, useQuote, useSim } from "./SimContext";
 
-/// The one thing most visitors came for. Before launch it says so plainly; live, it is the swap,
-/// with the tax in a sentence rather than a breakdown (the breakdown is on the Feed page).
-export function BuyPanel() {
+/// The one thing most visitors came for. Live, it is the swap, with the tax in a sentence rather
+/// than a breakdown (the breakdown is on the Feed page). Before launch the home page shows a plain
+/// "not live yet" card, and the Buy page shows this same panel in preview: real controls, sample
+/// figures, nothing sent.
+export function BuyPanel({ preview = false }: { preview?: boolean }) {
   const s = useSim();
   const dispatch = useDispatch();
   const { openConnectModal } = useConnectModal();
@@ -17,12 +19,14 @@ export function BuyPanel() {
   useEffect(() => setAmount(s.buying ? "0.1" : "1000000"), [s.buying]);
   const live = s.live;
   const quote = useQuote(amount, s.buying);
-  if (!live) return <Soon />;
+  if (!live && !preview) return <Soon />;
 
+  const sim = !live;
   const value = parseFloat(amount.replace(",", "."));
   const b = s.buying ? breakdown(s, value) : null;
-  const estimate =
-    quote.out === null
+  const estimate = sim
+    ? receiveEstimate(s, value)
+    : quote.out === null
       ? quote.loading
         ? "…"
         : "no quote"
@@ -30,7 +34,7 @@ export function BuyPanel() {
         ? `${int(Number(formatEther(quote.out)))} PUPATE`
         : `${Number(formatEther(quote.out)).toLocaleString("en-US", { maximumFractionDigits: 6 })} ETH`;
   const opening = buyTax(s) > sellTax(s);
-  const busy = !!live.pending;
+  const busy = !!live?.pending;
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -42,8 +46,14 @@ export function BuyPanel() {
     <form className="panel swap buy" id="buy" onSubmit={submit}>
       <div className="head">
         <span className="serif">{s.buying ? "Buy PUPATE" : "Sell PUPATE"}</span>
-        <span className="label">ETH / PUPATE · Ethereum</span>
+        <span className="label">{sim ? "Preview · not live" : "ETH / PUPATE · Ethereum"}</span>
       </div>
+      {sim ? (
+        <div className="buy-warn">
+          <b>Nothing is live yet.</b> This is the real panel running against sample figures, so you can see how a trade will
+          look. Nothing is sent, and there is no contract address until launch.
+        </div>
+      ) : null}
       <div className="tabs" role="group" aria-label="Direction">
         <button type="button" aria-pressed={s.buying} onClick={() => dispatch({ type: "direction", buying: true })}>
           Buy
@@ -78,11 +88,13 @@ export function BuyPanel() {
         {b ? ` · ${eth(b.tax, b.tax < 0.01 ? 5 : 4)} to the vault on this trade` : ""}
       </div>
       <button className="go" type="submit" disabled={busy}>
-        {!s.wallet ? "Connect wallet" : busy ? "Sending…" : s.buying ? "Buy PUPATE" : "Sell PUPATE"}
+        {!s.wallet ? "Connect wallet" : busy ? "Sending…" : sim ? (s.buying ? "Simulate the buy" : "Simulate the sell") : s.buying ? "Buy PUPATE" : "Sell PUPATE"}
       </button>
       <p className="note">
-        A real trade through Uniswap&apos;s router into the launch pool. Selling asks for two one-time approvals (Permit2). Where
-        every part of the ETH goes is laid out on the <Link href="/feed/">Feed page</Link>.
+        {sim
+          ? "Until the contracts are live, a trade here only changes the sample figures on this site. At launch this exact panel sends a real swap through Uniswap's router into the launch pool."
+          : "A real trade through Uniswap's router into the launch pool. Selling asks for two one-time approvals (Permit2)."}{" "}
+        Where every part of the ETH goes is laid out on the <Link href="/feed/">Feed page</Link>.
       </p>
     </form>
   );
@@ -102,8 +114,8 @@ function Soon() {
         <a className="btn primary" href="https://x.com/pupateIMD" target="_blank" rel="noreferrer">
           Follow @pupateIMD
         </a>
-        <Link className="btn" href="/how/">
-          How it works
+        <Link className="btn" href="/buy/">
+          Try the buy panel
         </Link>
       </div>
     </div>

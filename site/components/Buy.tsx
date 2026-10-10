@@ -40,7 +40,7 @@ export function Buy() {
           <p className="lede">
             {live
               ? "A swap into the launch pool, on Ethereum, paired with ETH. Six percent of the ETH side goes into the vault; the rest buys your PUPATE at the pool price."
-              : "There is no token and no contract address yet. When the launch happens, the panel on this page becomes the swap, and the address appears here and on @pupateIMD. Until then, anything that calls itself PUPATE is not."}
+              : "There is no token and no contract address yet. The panel on this page is the real swap, running against sample figures so you can see how a trade will look; nothing is sent. At launch it switches to the live pool, and the address appears here and on @pupateIMD. Until then, anything that calls itself PUPATE is not."}
           </p>
 
           <h2 className="serif sub-h">How to buy, in three steps</h2>
@@ -105,7 +105,7 @@ export function Buy() {
             Want to understand what you are buying first? <Link href="/how/">How it works →</Link>
           </p>
         </div>
-        <BuyPanel />
+        <BuyPanel preview />
       </div>
     </section>
   );
