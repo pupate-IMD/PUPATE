@@ -92,11 +92,12 @@ Holds the seat pot, the burn pot, and the seats. Functions are callable by anyon
 
 **Buying.** `buySeat(order)` fulfils a Seaport 1.6 listing when all of these hold:
 
-- the item is one token of the target collection, in full (no partial fills),
+- the item is one token of the target collection, in full (no partial fills), offered by someone other than Cocoon, and not already in the vault (such a seat is adopted),
 - every consideration item is native ETH, with a non-zero amount, paid to someone other than Cocoon,
 - the consideration array is exactly the order's original one, so a fulfiller cannot append tips that Seaport would pay from the price,
 - a fresh floor report exists,
 - the price (the highest the order can ask) is at most 105% of the floor,
+- what is actually paid, once Seaport has charged the price of the moment, is at least half the floor,
 - the seat pot covers the price plus the caller reward.
 
 The caller receives 0.5% of what was actually spent, from the seat pot.

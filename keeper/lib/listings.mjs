@@ -100,12 +100,14 @@ export function orderPrice(p) {
 
 /**
  * Every rule of Cocoon._checkOrder plus Seaport's time window, so a bad listing is dropped before
- * it costs an eth_call. Returns { ok, reason, tokenId, price }.
+ * it costs an eth_call. A seat the vault already holds is in `heldIds` (the on-chain check reads the
+ * collection as well). Returns { ok, reason, tokenId, price }.
  */
 export function checkOrder(order, { collection, cocoon, floorWei, fresh, toleranceBps, heldIds = new Set(), now }) {
   const p = order.parameters;
   const bad = (reason) => ({ ok: false, reason, tokenId: null, price: 0n });
   if (!p || !Array.isArray(p.offer) || !Array.isArray(p.consideration)) return bad('BadOrder: malformed');
+  if (isAddressEqual(p.offerer, cocoon)) return bad('BadOrder: the offerer is Cocoon');
   if (p.offer.length !== 1 || p.consideration.length === 0) return bad('BadOrder: offer/consideration count');
   if (BigInt(p.totalOriginalConsiderationItems) !== BigInt(p.consideration.length)) return bad('BadOrder: consideration length != original');
   if (BigInt(order.numerator ?? 1n) !== 1n || BigInt(order.denominator ?? 1n) !== 1n) return bad('BadOrder: partial fill fraction');
@@ -127,6 +129,8 @@ export function checkOrder(order, { collection, cocoon, floorWei, fresh, toleran
   if (now !== undefined) {
     const t = BigInt(now);
     if (t < p.startTime || t >= p.endTime) return { ok: false, reason: 'InvalidTime', tokenId, price };
+    // Cocoon measures this one on what it actually pays, which is the price of the moment.
+    if (currentPrice(p, t) < BigInt(floorWei) / 2n) return { ok: false, reason: 'PriceUnderHalfTheFloor', tokenId, price };
   }
   if (p.orderType === OrderType.FULL_RESTRICTED && isAddressEqual(p.zone, OPENSEA_SIGNED_ZONE)) {
     return { ok: false, reason: 'zone needs extraData', tokenId, price };
