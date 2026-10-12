@@ -8,6 +8,8 @@
 //   node script/mainnet/developer.mjs set-beneficiary <address>   PupateVesting.setBeneficiary: releases pay <address>
 //   node script/mainnet/developer.mjs claim                       Cocoon.claimDeveloper: pay what has accrued
 //   node script/mainnet/developer.mjs release                     PupateVesting.release: pay what has vested
+//   node script/mainnet/developer.mjs move-eth <address> [eth]    send this wallet's ETH to <address>, all but a
+//                                                                 gas reserve (KEEP_ETH, default 0.01) unless [eth] says how much
 //
 // setDeveloper may only be called by the current developer, setBeneficiary only by the current
 // beneficiary; claim and release may be called by anyone and always pay the recorded address.
@@ -29,7 +31,7 @@ if (A.chainId !== 1) fail(`${ADDRESSES_FILE} is for chain ${A.chainId}`);
 
 const cmd = process.argv[2] || 'status';
 const arg = process.argv[3];
-const commands = { status, 'set-developer': setDeveloper, 'set-beneficiary': setBeneficiary, claim, release };
+const commands = { status, 'set-developer': setDeveloper, 'set-beneficiary': setBeneficiary, claim, release, 'move-eth': moveEth };
 if (!commands[cmd]) fail(`unknown command ${cmd}; one of: ${Object.keys(commands).join(', ')}`);
 Promise.resolve()
   .then(() => commands[cmd]())
@@ -110,6 +112,31 @@ async function release() {
   console.log(`PupateVesting.release(): ${fmtPupate(releasable)} to the beneficiary ${beneficiary}`);
   const tx = send(A.vesting, 'release()');
   console.log(`released\n${link(tx)}`);
+}
+
+/** Plain ETH from this wallet to a wallet of the developer's choosing: what claims paid here before the
+ *  developer moved, less what the keeper needs for gas. */
+async function moveEth() {
+  const to = target(arg);
+  const me = wallet();
+  const balance = BigInt(run('cast', ['balance', me, '--rpc-url', RPC]).stdout.trim());
+  const keep = BigInt(Math.round(Number(env('KEEP_ETH') || 0.01) * 1e18));
+  const asked = process.argv[4];
+  let amount;
+  if (asked !== undefined) {
+    if (!/^d+(.d+)?$/.test(asked)) throw new Error(`the amount must be a number of ETH, not ${asked}`);
+    amount = BigInt(Math.round(Number(asked) * 1e18));
+    if (amount + keep > balance) throw new Error(`${fmtEth(amount)} would leave less than the ${fmtEth(keep)} the keeper needs for gas (balance ${fmtEth(balance)})`);
+  } else {
+    if (balance <= keep) throw new Error(`the balance ${fmtEth(balance)} is not above the ${fmtEth(keep)} kept for gas; nothing to move`);
+    amount = balance - keep;
+  }
+  console.log(`${fmtEth(amount)} from ${me} to ${to}, keeping ${fmtEth(keep)} for the keeper's gas`);
+  const r = run('cast', ['send', to, '--value', amount.toString(), '--rpc-url', RPC, '--private-key', KEY, '--json'], { quiet: true });
+  if (r.status !== 0) throw new Error(`the transfer failed: ${scrub(r.stdout + r.stderr).slice(0, 600)}`);
+  const receipt = JSON.parse(r.stdout);
+  console.log(`sent
+${link(receipt.transactionHash)}`);
 }
 
 // ------------------------------------------------------------------ helpers
