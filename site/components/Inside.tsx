@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FieldLog } from "./FieldLog";
 import { VaultSheet } from "./Hero";
 import { Stages } from "./Stages";
@@ -16,7 +17,7 @@ export function Inside() {
             <p className="lede">
               Everything the front page summarises, with the figures: where the money goes, the vault&apos;s seats, the sales and
               burns, the public steps, the record, and the documentation. For the people and agents who would rather check than
-              trust.
+              trust. To run a duty yourself, with the reward where there is one, there is the <Link href="/run/">Run page</Link>.
             </p>
           </div>
           <VaultSheet />

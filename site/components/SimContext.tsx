@@ -150,6 +150,24 @@ export function SimProvider({ children }: { children: ReactNode }) {
     [client, address, run, note, writeContractAsync, sendTransactionAsync],
   );
 
+  /// Takes the IMD auction: approves the vault for the IMD it asks right now, then delivers it for the ETH lot.
+  const takeImd = useCallback(
+    async (a: Addresses) => {
+      if (!client || !address) return;
+      await run("Take the IMD auction", async () => {
+        const demand = await client.readContract({ address: a.cocoon, abi: cocoonAbi, functionName: "imdDemand" });
+        const allowance = await client.readContract({ address: a.imd, abi: erc20Abi, functionName: "allowance", args: [address, a.cocoon] });
+        if (allowance < demand) {
+          note("Approving IMD for the vault.");
+          const h = await writeContractAsync({ address: a.imd, abi: erc20Abi, functionName: "approve", args: [a.cocoon, demand], chainId: TARGET_CHAIN_ID });
+          await client.waitForTransactionReceipt({ hash: h });
+        }
+        return writeContractAsync({ address: a.cocoon, abi: cocoonAbi, functionName: "takeImdAuction", chainId: TARGET_CHAIN_ID });
+      });
+    },
+    [client, address, run, note, writeContractAsync],
+  );
+
   const takeAuction = useCallback(
     async (a: Addresses, s: SimState) => {
       if (!client || !address || !s.live) return;
@@ -161,20 +179,9 @@ export function SimProvider({ children }: { children: ReactNode }) {
         });
         return;
       }
-      if (s.live.imdAuction) {
-        await run("Take the IMD auction", async () => {
-          const demand = await client.readContract({ address: a.cocoon, abi: cocoonAbi, functionName: "imdDemand" });
-          const allowance = await client.readContract({ address: a.imd, abi: erc20Abi, functionName: "allowance", args: [address, a.cocoon] });
-          if (allowance < demand) {
-            note("Approving IMD for the vault.");
-            const h = await writeContractAsync({ address: a.imd, abi: erc20Abi, functionName: "approve", args: [a.cocoon, demand], chainId: TARGET_CHAIN_ID });
-            await client.waitForTransactionReceipt({ hash: h });
-          }
-          return writeContractAsync({ address: a.cocoon, abi: cocoonAbi, functionName: "takeImdAuction", chainId: TARGET_CHAIN_ID });
-        });
-      }
+      if (s.live.imdAuction) await takeImd(a);
     },
-    [client, address, run, note, writeContractAsync],
+    [client, address, run, takeImd, writeContractAsync],
   );
 
   const dispatch = useCallback(
@@ -209,6 +216,14 @@ export function SimProvider({ children }: { children: ReactNode }) {
         case "takeAuction":
           void takeAuction(A, state);
           return;
+        case "takeImdAuction":
+          void takeImd(A);
+          return;
+        case "settleSeat":
+          void run(`Settle seat ${pad4(a.id)}`, () =>
+            writeContractAsync({ address: A.cocoon, abi: cocoonAbi, functionName: "settleSeat", args: [BigInt(a.id)], chainId: TARGET_CHAIN_ID }),
+          );
+          return;
         case "buySeat":
           note("Buying a seat needs a Seaport listing at or under the tolerance. The keeper finds one; any agent can, with skill.md.");
           return;
@@ -220,7 +235,7 @@ export function SimProvider({ children }: { children: ReactNode }) {
           return;
       }
     },
-    [addresses, state, run, swap, takeAuction, note, writeContractAsync],
+    [addresses, state, run, swap, takeAuction, takeImd, note, writeContractAsync],
   );
 
   return (

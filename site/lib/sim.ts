@@ -61,6 +61,22 @@ export interface Caller {
   reward: number;
 }
 
+/// One run of a public step, for the Run page's "Who ran it": a flush, a seat purchase or a burn.
+export interface Run {
+  kind: "flush" | "buy" | "burn";
+  /// "block 26,177,948" live; "day 21" or "min 8" in the preview.
+  when: string;
+  /// The caller, shortened; `address` is the full one when the chain gave it.
+  who: string;
+  address?: string;
+  /// The ETH the step moved: flushed, spent on the seat, or spent on the burn.
+  eth: number;
+  /// The PUPATE a burn destroyed; 0 for the other steps.
+  pupate: number;
+  reward: number;
+  tx?: string;
+}
+
 /// What the chain says beyond the figures, when the site runs against deployed contracts.
 export interface LiveMeta {
   chainId: number;
@@ -80,6 +96,9 @@ export interface LiveMeta {
   imdAuction: { lotEth: number; demandImd: number; startedAt: number } | null;
   /// The token of the open harvest auction, if one is running.
   harvestToken: `0x${string}` | null;
+  /// Seats on the books that the vault no longer owns: their listing filled and settleSeat is due.
+  settleDue: number[];
+  burnImpactBps: number;
   /// A transaction in flight, described for the log; null when idle.
   pending: string | null;
 }
@@ -108,6 +127,8 @@ export interface SimState {
   log: LogEntry[];
   history: HistoryPoint[];
   callers: Caller[];
+  /// The last runs of the public steps, newest first.
+  runs: Run[];
   /// Present in live mode only.
   live?: LiveMeta;
 }
@@ -154,6 +175,11 @@ export function preset(name: "steady" | "launch"): SimState {
       auction: null,
       history: [],
       callers: [{ who: "0x71c4…0be2", flush: 3, buy: 0, burn: 0, reward: 0 }],
+      runs: [
+        { kind: "flush", when: "min 11", who: "0x71c4…0be2", eth: 1.05, pupate: 0, reward: 0 },
+        { kind: "flush", when: "min 8", who: "0x71c4…0be2", eth: 1.12, pupate: 0, reward: 0 },
+        { kind: "flush", when: "min 4", who: "0x71c4…0be2", eth: 1.31, pupate: 0, reward: 0 },
+      ],
     };
   }
   return {
@@ -190,6 +216,14 @@ export function preset(name: "steady" | "launch"): SimState {
       { who: "0x71c4…0be2", flush: 212, buy: 5, burn: 31, reward: 0.1184 },
       { who: "0xa90e…77d1", flush: 64, buy: 3, burn: 12, reward: 0.0621 },
       { who: "0x3d05…c4f8", flush: 9, buy: 1, burn: 4, reward: 0.0192 },
+    ],
+    runs: [
+      { kind: "buy", when: "day 23", who: "0xa90e…77d1", eth: 2.84, pupate: 0, reward: 0.0142 },
+      { kind: "flush", when: "day 23", who: "0x71c4…0be2", eth: 0.31, pupate: 0, reward: 0 },
+      { kind: "burn", when: "day 21", who: "0x71c4…0be2", eth: 0.057, pupate: 3_960_000, reward: 0.00029 },
+      { kind: "flush", when: "day 21", who: "0xa90e…77d1", eth: 0.27, pupate: 0, reward: 0 },
+      { kind: "burn", when: "day 17", who: "0x3d05…c4f8", eth: 0.061, pupate: 4_210_000, reward: 0.0003 },
+      { kind: "flush", when: "day 17", who: "0x71c4…0be2", eth: 0.22, pupate: 0, reward: 0 },
     ],
   };
 }
@@ -310,10 +344,12 @@ export type Action =
   | { type: "flush" }
   | { type: "buySeat" }
   | { type: "sellSeat"; id: number }
+  | { type: "settleSeat"; id: number }
   | { type: "burn" }
   | { type: "burnTick" }
   | { type: "startAuction" }
   | { type: "takeAuction" }
+  | { type: "takeImdAuction" }
   | { type: "wallet"; address: string | null }
   | { type: "direction"; buying: boolean }
   | { type: "swap"; amount: number; raw?: string }
@@ -335,6 +371,9 @@ function credit(s: SimState, kind: "flush" | "buy" | "burn", reward: number): Ca
   const row = found ?? { who, flush: 0, buy: 0, burn: 0, reward: 0 };
   const next = { ...row, [kind]: row[kind] + 1, reward: row.reward + reward };
   return found ? s.callers.map((c) => (c === found ? next : c)) : [...s.callers, next];
+}
+function logRun(s: SimState, r: Pick<Run, "kind" | "eth" | "pupate" | "reward">): Run[] {
+  return [{ ...r, when: stamp(s), who: s.wallet ?? YOU }, ...s.runs].slice(0, 40);
 }
 
 export function reduce(s: SimState, a: Action): SimState {
@@ -384,6 +423,7 @@ export function reduce(s: SimState, a: Action): SimState {
         burnPot: s.burnPot + strategy * (1 - m.seatBps),
         hookWaiting: 0,
         callers: credit(s, "flush", 0),
+        runs: logRun(s, { kind: "flush", eth: amount, pupate: 0, reward: 0 }),
       };
       return withToast(
         next,
@@ -401,6 +441,7 @@ export function reduce(s: SimState, a: Action): SimState {
         seatPot: s.seatPot - price - reward,
         seats: [...s.seats, seat(id, price, 0, 0, "working")],
         callers: credit(s, "buy", reward),
+        runs: logRun(s, { kind: "buy", eth: price, pupate: 0, reward }),
       };
       return withToast(
         next,
@@ -436,6 +477,7 @@ export function reduce(s: SimState, a: Action): SimState {
         sold: s.sold.map((r) => (r === waiting ? { ...r, burned: got } : r)),
         burnCooldown: 5,
         callers: credit(s, "burn", reward),
+        runs: logRun(s, { kind: "burn", eth: spend, pupate: got, reward }),
       };
       return withToast(
         next,
@@ -463,6 +505,12 @@ export function reduce(s: SimState, a: Action): SimState {
         `Took ${int(s.auction.lot)} ${s.auction.token} for ${eth(price, 4)}. The ETH went to the seat pot.`,
       );
     }
+
+    case "settleSeat":
+      return withToast(s, `Seat ${pad4(a.id)} is still on the vault's books. Settling is for a seat whose listing has filled; in the preview, seats sell as days pass.`);
+
+    case "takeImdAuction":
+      return withToast(s, "The preview runs no IMD auction. Live, the taker delivers IMD to the dead address and is paid the ETH lot.");
 
     case "wallet": {
       const short = a.address ? `${a.address.slice(0, 6)}…${a.address.slice(-4)}` : null;

@@ -12,6 +12,9 @@ export const erc20Abi = parseAbi([
   "function symbol() view returns (string)",
 ]);
 
+/// The one ERC-721 read the site makes: who holds a seat, to tell a sold seat from a held one.
+export const erc721Abi = parseAbi(["function ownerOf(uint256 tokenId) view returns (address)"]);
+
 export const permit2Abi = parseAbi([
   "function allowance(address owner, address token, address spender) view returns (uint160 amount, uint48 expiration, uint48 nonce)",
   "function approve(address token, address spender, uint160 amount, uint48 expiration)",

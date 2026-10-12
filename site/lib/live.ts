@@ -4,8 +4,8 @@
 
 import { formatEther, isAddressEqual, type Address, type Hex, type PublicClient } from "viem";
 import type { Addresses } from "./addresses";
-import { cocoonAbi, erc20Abi, feedAbi, hookAbi, poolManagerAbi } from "./abi";
-import { SUPPLY, type Auction, type Caller, type HistoryPoint, type LiveMeta, type Sale, type Seat, type SimState } from "./sim";
+import { cocoonAbi, erc20Abi, erc721Abi, feedAbi, hookAbi, poolManagerAbi } from "./abi";
+import { SUPPLY, type Auction, type Caller, type HistoryPoint, type LiveMeta, type Run, type Sale, type Seat, type SimState } from "./sim";
 
 const MULTICALL3: Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
 const SECONDS_PER_BLOCK = 12;
@@ -34,6 +34,7 @@ export type LiveSnapshot = Pick<
   | "burnCooldown"
   | "history"
   | "callers"
+  | "runs"
 > & { live: LiveMeta };
 
 interface RawLog {
@@ -149,6 +150,18 @@ export async function loadLive(client: PublicClient, a: Addresses): Promise<Live
     seats.push({ id: Number(id), cost: f(cost), day: Math.max(0, Math.floor((now - Number(boughtAt)) / 86400)), jobs: 0, status: "held", boughtAt: Number(boughtAt) });
   });
 
+  // Seats on the books that the vault no longer holds: a buyer took the listing and settleSeat is
+  // due. The keeper also reads Seaport's fill status, which covers a seat sent straight back; the
+  // owner alone covers the common case. A failed ownerOf (a burned token) counts as gone, as it does there.
+  const owners = seats.length
+    ? await client.multicall({
+        allowFailure: true,
+        multicallAddress: MULTICALL3,
+        contracts: seats.map((x) => ({ address: a.collection, abi: erc721Abi, functionName: "ownerOf" as const, args: [BigInt(x.id)] as const })),
+      })
+    : [];
+  const settleDue = seats.filter((_, i) => owners[i].status !== "success" || !isAddressEqual(owners[i].result as Address, a.cocoon)).map((x) => x.id);
+
   // Sales: a settled seat, priced by the ETH Seaport sent in before it was settled (first unmatched).
   const boughtAtOf = new Map<bigint, { cost: bigint; block: bigint }>();
   for (const l of [...only(cocoonLogs, "SeatBought"), ...only(cocoonLogs, "SeatAdopted")]) boughtAtOf.set(big(l.args.tokenId), { cost: big(l.args.cost), block: l.blockNumber });
@@ -208,6 +221,25 @@ export async function loadLive(client: PublicClient, a: Addresses): Promise<Live
   const senders = await Promise.all(flushes.map((l) => client.getTransaction({ hash: l.transactionHash }).then((t) => t.from).catch(() => null)));
   for (const from of senders) if (from) credit(short(from), "flush", 0n);
 
+  // The last runs of the steps, newest first, for the Run page's "Who ran it". A flush names no
+  // caller in its event, so the transaction's sender stands for it.
+  const whenOf = (n: bigint) => `block ${Number(n).toLocaleString("en-US")}`;
+  const runRows: (Run & { block: bigint; index: number })[] = [];
+  for (const l of only(cocoonLogs, "SeatBought")) {
+    const who = addr(l.args.caller);
+    runRows.push({ kind: "buy", when: whenOf(l.blockNumber), who: short(who), address: who, eth: f(big(l.args.cost)), pupate: 0, reward: f(big(l.args.reward)), tx: l.transactionHash, block: l.blockNumber, index: l.logIndex });
+  }
+  for (const l of burns) {
+    const who = addr(l.args.caller);
+    runRows.push({ kind: "burn", when: whenOf(l.blockNumber), who: short(who), address: who, eth: f(big(l.args.ethSpent)), pupate: f(big(l.args.pupateBurned)), reward: f(big(l.args.reward)), tx: l.transactionHash, block: l.blockNumber, index: l.logIndex });
+  }
+  flushes.forEach((l, i) => {
+    const from = senders[i];
+    runRows.push({ kind: "flush", when: whenOf(l.blockNumber), who: from ? short(from) : "unknown", address: from ?? undefined, eth: f(big(l.args.amount)), pupate: 0, reward: 0, tx: l.transactionHash, block: l.blockNumber, index: l.logIndex });
+  });
+  runRows.sort((x, y) => (x.block === y.block ? y.index - x.index : Number(y.block - x.block)));
+  const runs: Run[] = runRows.slice(0, 40).map(({ block: _b, index: _i, ...r }) => r);
+
   // History by day since the open: supply burned and seats held.
   const history: HistoryPoint[] = [];
   const day = openedAt ? Math.max(0, Math.floor((now - openedAt) / 86400)) : 0;
@@ -260,6 +292,7 @@ export async function loadLive(client: PublicClient, a: Addresses): Promise<Live
     burnCooldown: lastBurn ? Math.max(0, lastBurn + burnSpacing - blockNumber) : 0,
     history,
     callers: [...byCaller.values()],
+    runs,
     live: {
       chainId: a.chainId,
       block: blockNumber,
@@ -283,6 +316,8 @@ export async function loadLive(client: PublicClient, a: Addresses): Promise<Live
             }
           : null,
       harvestToken,
+      settleDue,
+      burnImpactBps: Number(params.burnImpactBps),
       pending: null,
     },
   };

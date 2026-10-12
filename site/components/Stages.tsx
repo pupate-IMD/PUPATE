@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { duties, readyCount } from "@/lib/duties";
 import { buyTax, canBurn, canBuySeat, canFlush, eth, int, pct } from "@/lib/sim";
 import { Flash } from "./Flash";
 import { useSim } from "./SimContext";
@@ -9,6 +10,7 @@ import { useSim } from "./SimContext";
 export function Stages() {
   const s = useSim();
   const ready = [canFlush(s), canBuySeat(s), canBurn(s)].filter(Boolean).length;
+  const dutiesReady = readyCount(duties(s));
   const cards = [
     { href: "/flow/", title: "Flow", fig: eth(s.taxCollected, 1), s: "tax collected so far, and where every part of it went" },
     { href: "/feed/", title: "Feed", fig: `${pct(buyTax(s))} tax`, s: "the trade, the full breakdown of the ETH, and the oracle check" },
@@ -16,6 +18,7 @@ export function Stages() {
     { href: "/emerge/", title: "Emerge", fig: `${int(s.burned)} burned`, s: "seats that sold, the PUPATE their sale destroyed, the auctions" },
     { href: "/steps/", title: "Steps", fig: `${ready} of 3 ready`, s: "the public functions anyone can run, and the skill file for agents" },
     { href: "/record/", title: "Record", fig: `${s.callers.length} callers`, s: "supply over time, seats over time, who has been running the steps" },
+    { href: "/run/", title: "Run", fig: `${dutiesReady} ready`, s: "the vault's duties by the keeper's rules, which are ready now, and who ran them last" },
     { href: "/work/", title: "Work", fig: "proof of work", s: "what the seats actually do in the swarm, from IMD's records" },
     { href: "/docs/", title: "Docs", fig: "8 pages", s: "how it works, the seats, the oracle, every parameter, who controls what" },
   ];

@@ -5,12 +5,13 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ConnectWallet } from "./ConnectWallet";
 
-/// Four doors. Everything technical sits behind the last one; InsideBar names those pages.
+/// The doors. Everything technical sits behind the last one; InsideBar names those pages.
 const PAGES = [
   { href: "/buy/", label: "Buy" },
   { href: "/how/", label: "How it works" },
   { href: "/work/", label: "Work" },
   { href: "/mine/", label: "Mine" },
+  { href: "/run/", label: "Run" },
   { href: "/inside/", label: "Under the hood" },
 ];
 
@@ -22,6 +23,7 @@ function activeDoor(path: string): string | null {
   if (path.startsWith("/how")) return "/how/";
   if (path.startsWith("/work")) return "/work/";
   if (path.startsWith("/mine")) return "/mine/";
+  if (path.startsWith("/run")) return "/run/";
   if (INSIDE.some((p) => path.startsWith(p))) return "/inside/";
   return null;
 }

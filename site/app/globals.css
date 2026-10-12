@@ -634,3 +634,47 @@ footer .serif { color: var(--ink); font-size: 16px; }
   line-height: 1.45;
   color: var(--muted, #9a9a9a);
 }
+
+/* --- run the vault: one row per duty, decided by the keeper's rules, and who ran them */
+.run-page { padding-block: 40px 0; }
+.run-head { display: grid; gap: 10px; max-width: 78ch; }
+.run-head h1 { font-size: clamp(32px, 4.4vw, 50px); line-height: 1.05; margin-top: 4px; }
+.run-head .lede { margin: 4px 0 0; font-size: 14px; max-width: 72ch; }
+.run-note { border-left: 3px solid var(--gold); background: var(--paper-2); padding: 10px 14px; font-size: 12px; color: var(--dim); max-width: 72ch; }
+.run-note b { color: var(--ink); font-weight: 500; }
+.run-sum { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.duties { display: grid; margin-top: 28px; border-top: 1px solid var(--hair); }
+.duty { display: grid; grid-template-columns: 96px minmax(0, 1fr) 200px; gap: 8px 28px; padding: 20px 0; border-bottom: 1px solid var(--hair); align-items: start; }
+.duty > * { min-width: 0; }
+.duty .state { display: inline-flex; align-items: center; gap: 8px; font-size: var(--label); letter-spacing: var(--track); text-transform: uppercase; color: var(--dim); padding-top: 8px; white-space: nowrap; }
+.duty .state i { width: 8px; height: 8px; background: var(--faint); flex: none; }
+.duty.ready .state { color: var(--jade-ink); }
+.duty.ready .state i { background: var(--jade); }
+.duty.manual .state { color: var(--gold-ink); }
+.duty.manual .state i { background: var(--gold); }
+.duty.off .state i { background: transparent; border: 1px solid var(--faint); }
+.duty .t { font-family: var(--serif); font-size: 26px; line-height: 1.1; }
+.duty .now { margin-top: 6px; max-width: 64ch; }
+.duty .rows { display: grid; max-width: 440px; margin-top: 6px; }
+.duty .lead { padding: 4px 0; font-size: 12px; }
+.duty .s { color: var(--dim); font-size: 12px; margin-top: 8px; max-width: 64ch; }
+.duty .s b { color: var(--ink); font-weight: 500; }
+.duty .s a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hair); text-underline-offset: 3px; }
+.duty .s a:hover { color: var(--jade-ink); }
+.duty .act { display: grid; gap: 8px; padding-top: 4px; }
+.duty .act .btn { width: 100%; }
+.cmd { margin-top: 10px; max-width: 64ch; }
+.cmd summary { cursor: pointer; font-size: 10px; text-transform: uppercase; letter-spacing: var(--track); color: var(--dim); }
+.cmd summary:hover { color: var(--ink); }
+.cmd code { display: block; margin: 8px 0 6px; padding: 8px 10px; border: 1px solid var(--hair); background: var(--paper-2); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.runs td .chip { margin-left: 8px; }
+.runs td a { color: var(--ink); }
+.runs td a:hover { color: var(--jade-ink); }
+@media (max-width: 860px) {
+  .duty { grid-template-columns: 1fr; gap: 6px; padding: 16px 0; }
+  .duty .state { padding-top: 0; }
+  .duty .act { padding-top: 6px; }
+}
+@media (max-width: 480px) {
+  .duty .s, .run-note { font-size: 12px; }
+}
