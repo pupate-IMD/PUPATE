@@ -287,7 +287,24 @@ export async function burn(ctx, s) {
   return acted(await tx.run(d.label, { address: a.cocoon, abi: cocoonAbi, functionName: 'burn' }));
 }
 
-// ------------------------------------------------------------------ f. auctions
+// ------------------------------------------------------------------ f. the developer's share
+
+/** claimDeveloper runs when the developer's accrued share is at least MIN_CLAIM_WEI. Anyone may call it;
+ *  it always pays the developer address the vault records, never the caller. */
+export function claimDecision(cfg, s) {
+  if (s.pots.dev === 0n) return { ready: false, why: 'claim: nothing accrued' };
+  if (s.pots.dev < cfg.minClaimWei) return { ready: false, why: `claim: ${fmtEth(s.pots.dev)} < MIN_CLAIM_WEI ${fmtEth(cfg.minClaimWei)}` };
+  return { ready: true, why: `${fmtEth(s.pots.dev)} accrued for the developer`, label: `claim ${fmtEth(s.pots.dev)} for the developer` };
+}
+
+export async function claim(ctx, s) {
+  const { cfg, a, tx } = ctx;
+  const d = claimDecision(cfg, s);
+  if (!d.ready) return idle(d.why);
+  return acted(await tx.run(d.label, { address: a.cocoon, abi: cocoonAbi, functionName: 'claimDeveloper' }));
+}
+
+// ------------------------------------------------------------------ g. auctions
 
 /** startAuction, per HARVEST_TOKENS entry: a balance, no running auction, not PUPATE or the seats. */
 export function harvestDecisions(cfg, s) {

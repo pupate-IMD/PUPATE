@@ -158,6 +158,7 @@ export function loadConfig(argv = []) {
     minFlushWei: wei(env('MIN_FLUSH_WEI'), parseEther('0.005')),
     minBurnWei: wei(env('MIN_BURN_WEI'), parseEther('0.01')),
     minImdAuctionWei: wei(env('MIN_IMD_AUCTION_WEI'), parseEther('0.01')),
+    minClaimWei: wei(env('MIN_CLAIM_WEI'), parseEther('0.01')),
     gasPriceCapWei: BigInt(Math.round(num(env('GAS_PRICE_CAP_GWEI'), 30) * 1e9)),
     txTimeoutSec: num(env('TX_TIMEOUT'), 180),
     logChunk: num(env('LOG_CHUNK'), 50_000),

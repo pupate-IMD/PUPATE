@@ -20,7 +20,7 @@
 // Environment: see keeper/README.md. Keys, RPC URLs and API keys are never printed.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { auctions, burn, buy, flush, report, settle } from '../lib/actions.mjs';
+import { auctions, burn, buy, claim, flush, report, settle } from '../lib/actions.mjs';
 import { createClients, createTx, revertReason } from '../lib/chain.mjs';
 import { describeConfig, loadConfig } from '../lib/config.mjs';
 import { log, setTick, warn } from '../lib/log.mjs';
@@ -164,6 +164,7 @@ async function tick(ctx, n) {
       ['buy', buy],
       ['burn', burn],
       ['auctions', auctions],
+      ['claim', claim],
     ];
     for (const [name, fn] of steps) {
       let r = null;
