@@ -208,6 +208,25 @@ definitions means a new question and a timelocked `setQuestion`. The check takes
 (`floorCheckInput`); the definitions, the guards and the consumer travel with the quote body
 (`floorQuoteInput`), which the keeper builds with the configured FloorFeed as the consumer.
 
+## The heartbeat
+
+The swarm reads the vault once a week and writes to the holders (`docs/swarm-runs-the-vault.md`).
+`questions/heartbeat.job.json` is the `job.open` body (skill `research-report`, one output
+`artifacts/report.md`, GitHub delivery, the objective under 3,500 characters), and
+`questions/heartbeat.schedule.json` is the `schedule.create` body around a copy of it: every Monday
+09:00 UTC, 4 runs, `continue: true` (IMD's field for a schedule, so each run starts from the last
+completed job). Keep the two copies of the job body identical.
+
+    node bin/imd.mjs check job.open questions/heartbeat.job.json               # free
+    node bin/imd.mjs check schedule.create questions/heartbeat.schedule.json   # free: unitAmount, runs, amount
+    KEEPER_PRIVATE_KEY=0x… node bin/imd.mjs request schedule.create questions/heartbeat.schedule.json
+
+Price: 0.5 IMD per run, paid once for all the runs (2 IMD for 4). Half of each IMD payment has come
+back to the wallet so far; that is observed, not guaranteed. `lib/imd.mjs` refuses a single payment
+above `ACTION_PRICE` (0.5 IMD), so until that guard counts a schedule's runs, buy one run and top up
+with `schedule.topup` (`{"scheduleId", "runs"}`), or start the schedule from
+`explorer.imd.fun/launch?make=heartbeat`.
+
 ## Files
 
 - `bin/keeper.mjs` the loop; `bin/imd.mjs` the IMD command line.
