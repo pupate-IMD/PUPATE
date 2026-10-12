@@ -626,3 +626,11 @@ footer .serif { color: var(--ink); font-size: 16px; }
   .mine-grid > :first-child { order: 2; }
   .card-preview { position: static; }
 }
+
+/* why the panel has no quote: one quiet line under the estimate */
+.swap .hint {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted, #9a9a9a);
+}

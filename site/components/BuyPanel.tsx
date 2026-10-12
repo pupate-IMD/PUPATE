@@ -76,6 +76,7 @@ export function BuyPanel({ preview = false }: { preview?: boolean }) {
         <div className="row">
           <span className="out num">{estimate}</span>
         </div>
+        {!sim && quote.out === null && !quote.loading && quote.reason ? <p className="hint">{quote.reason}</p> : null}
       </div>
       {opening ? (
         <div className="buy-warn">

@@ -250,7 +250,7 @@ export function useAddresses(): Addresses | null {
 }
 
 /// What the pool would give right now for an amount typed into the swap panel. Live mode only.
-export function useQuote(amountText: string, buying: boolean): { out: bigint | null; loading: boolean } {
+export function useQuote(amountText: string, buying: boolean): { out: bigint | null; loading: boolean; reason: string | null } {
   const a = useAddresses();
   const client = usePublicClient({ chainId: TARGET_CHAIN_ID });
   let amountIn = 0n;
@@ -267,5 +267,20 @@ export function useQuote(amountText: string, buying: boolean): { out: bigint | n
     staleTime: 5_000,
     retry: 0,
   });
-  return { out: amountIn > 0n ? (q.data ?? null) : 0n, loading: q.isFetching && q.data === undefined };
+  // Why the pool gave no quote, in words. The quoter names the pool when a swap would run out of
+  // liquidity (NotEnoughLiquidity, 0x7a5ed734): for a sell that means the pool holds no ETH yet, which
+  // is every launch pool before its first buy.
+  let reason: string | null = null;
+  if (q.error && amountIn > 0n) {
+    const text = String((q.error as { shortMessage?: string }).shortMessage ?? q.error.message ?? "") + JSON.stringify(q.error);
+    const dry = /7a5ed734|NotEnoughLiquidity/i.test(text);
+    reason = buying
+      ? dry
+        ? "The pool cannot fill this much in one trade. Try a smaller amount."
+        : "The pool gave no quote for this amount."
+      : dry
+        ? "No ETH in the pool yet: nobody has bought. Selling works after the first buy."
+        : "The pool gave no quote for this amount.";
+  }
+  return { out: amountIn > 0n ? (q.data ?? null) : 0n, loading: q.isFetching && q.data === undefined, reason };
 }
