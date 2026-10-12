@@ -150,9 +150,13 @@ keeper itself would look (a fresh floor and a seat pot), which keeps the OpenSea
 
 ### Untested
 
-- **OpenSea source.** `lib/listings.mjs::listingsFromOpenSea` maps `/api/v2/orders/ethereum/seaport/listings`
-  (`protocol_data.parameters` + `signature`) to the AdvancedOrder, but no API key was available here.
-  Run it with `DRY_RUN=1` first; it prints what it would buy.
+- **OpenSea source**, tested against the live collection on 2026-10-13. OpenSea retired the
+  `orders/{chain}/seaport/listings` route (it answers 405). `lib/listings.mjs::listingsFromOpenSea` now resolves
+  the collection's slug from its contract (`/api/v2/chain/{chain}/contract/{address}`), reads the cheapest
+  active listing of each seat from `/api/v2/listings/collection/{slug}/best` (ETH, Seaport 1.6 only), and,
+  because those routes carry no signature, `fulfillmentFromOpenSea` asks `POST /api/v2/listings/fulfillment_data`
+  for it at the moment of buying, with Cocoon as the fulfiller, and refuses an order whose parameters differ from
+  the listing that was checked. Run it with `DRY_RUN=1` first; it prints what it would buy.
 - **The paid IMD path, past its last free step.** `lib/oracle.mjs::imdAttestation` uses the same client as
   `bin/imd.mjs request`: a check in the short form, a quote of the full body, the Permit2 payment and the
   EIP-712 quote approval signed by the keeper's own account, admission, then the oracle request named in

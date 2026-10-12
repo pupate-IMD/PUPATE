@@ -196,31 +196,81 @@ export function listingsFromFile(file) {
   }));
 }
 
-/**
- * OpenSea API v2: the collection's Seaport listings, cheapest first. UNTESTED in this environment
- * (no key). Only Seaport 1.6 orders are kept; OpenSea's numbers are strings and its `counter` is
- * dropped (Cocoon takes OrderParameters, not OrderComponents).
- */
-export async function listingsFromOpenSea({ apiKey, api, chain, collection, seaport, limit = 50, fetchImpl = fetch }) {
-  if (!apiKey) throw new Error('OPENSEA_API_KEY is not set');
-  const url =
-    `${api}/api/v2/orders/${chain}/seaport/listings?asset_contract_address=${collection}` +
-    `&order_by=eth_price&order_direction=asc&limit=${limit}`;
+const slugCache = new Map();
+
+async function openseaGet(fetchImpl, apiKey, url) {
   const res = await fetchImpl(url, { headers: { accept: 'application/json', 'x-api-key': apiKey } });
   if (!res.ok) throw new Error(`OpenSea ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const body = await res.json();
-  const out = [];
-  for (const o of body.orders || []) {
-    const pd = o.protocol_data;
-    if (!pd?.parameters) continue;
-    if (o.protocol_address && !isAddressEqual(o.protocol_address, seaport)) continue;
-    if (o.cancelled || o.finalized || o.side === 'bid') continue;
-    out.push({
-      source: `opensea:${o.order_hash || ''}`,
-      parameters: normalizeParameters(pd.parameters),
-      signature: pd.signature || '0x',
-      currentPrice: o.current_price ? BigInt(o.current_price) : undefined,
-    });
+  return res.json();
+}
+
+/** The collection's OpenSea slug, from its contract address; remembered for the process. */
+export async function openseaSlug({ apiKey, api, chain, collection, fetchImpl = fetch }) {
+  const key = `${chain}:${collection.toLowerCase()}`;
+  if (!slugCache.has(key)) {
+    const body = await openseaGet(fetchImpl, apiKey, `${api}/api/v2/chain/${chain}/contract/${collection}`);
+    if (!body.collection) throw new Error('OpenSea knows no collection for this contract');
+    slugCache.set(key, body.collection);
   }
-  return out;
+  return slugCache.get(key);
+}
+
+/**
+ * OpenSea API v2: the cheapest active listing of each seat ("best" listings), cheapest first, up to
+ * `pages` pages of `limit`. Only Seaport 1.6 orders priced in ETH are kept. OpenSea's numbers are
+ * strings and its listing routes carry no signature: `fulfillmentFromOpenSea` fetches it for the one
+ * order about to be bought. Each entry keeps its order hash and protocol address for that call.
+ */
+export async function listingsFromOpenSea({ apiKey, api, chain, collection, seaport, limit = 100, pages = 2, fetchImpl = fetch }) {
+  if (!apiKey) throw new Error('OPENSEA_API_KEY is not set');
+  const slug = await openseaSlug({ apiKey, api, chain, collection, fetchImpl });
+  const out = [];
+  let next = null;
+  for (let page = 0; page < pages; page++) {
+    const url = `${api}/api/v2/listings/collection/${slug}/best?limit=${limit}${next ? `&next=${encodeURIComponent(next)}` : ''}`;
+    const body = await openseaGet(fetchImpl, apiKey, url);
+    for (const o of body.listings || []) {
+      const pd = o.protocol_data;
+      if (!pd?.parameters) continue;
+      if (o.protocol_address && !isAddressEqual(o.protocol_address, seaport)) continue;
+      if (o.price?.current?.currency && o.price.current.currency !== 'ETH') continue;
+      // The best-listings route returns live listings; OpenSea names their status "active" today.
+      if (o.status && !/^(active|listed|open)$/i.test(o.status)) continue;
+      out.push({
+        source: `opensea:${o.order_hash || ''}`,
+        parameters: normalizeParameters(pd.parameters),
+        signature: pd.signature || '0x',
+        orderHash: o.order_hash || null,
+        protocolAddress: o.protocol_address || seaport,
+        currentPrice: o.price?.current?.value ? BigInt(o.price.current.value) : undefined,
+      });
+    }
+    next = body.next || null;
+    if (!next) break;
+  }
+  return out.sort((x, y) => (x.currentPrice ?? orderPrice(x.parameters)) < (y.currentPrice ?? orderPrice(y.parameters)) ? -1 : 1);
+}
+
+/**
+ * The signature (and the parameters as OpenSea will have Seaport see them) of one listing, for one
+ * fulfiller. OpenSea returns the order ready to send; Cocoon takes the parameters and the signature.
+ */
+export async function fulfillmentFromOpenSea({ apiKey, api, chain, orderHash, protocolAddress, fulfiller, fetchImpl = fetch }) {
+  if (!apiKey) throw new Error('OPENSEA_API_KEY is not set');
+  const res = await fetchImpl(`${api}/api/v2/listings/fulfillment_data`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json', 'x-api-key': apiKey },
+    body: JSON.stringify({ listing: { hash: orderHash, chain, protocol_address: protocolAddress }, fulfiller: { address: fulfiller } }),
+  });
+  if (!res.ok) throw new Error(`OpenSea fulfillment ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const body = await res.json();
+  const order = body.fulfillment_data?.orders?.[0];
+  if (!order?.parameters) throw new Error('OpenSea fulfillment data carries no order');
+  return { parameters: normalizeParameters(order.parameters), signature: order.signature || '0x', raw: body.fulfillment_data };
+}
+
+/** True when two normalised parameter sets describe the same offer, consideration and window. */
+export function sameOrder(a, b) {
+  const j = (p) => JSON.stringify(p, (k, v) => (typeof v === 'bigint' ? v.toString() : v));
+  return j(a) === j(b);
 }

@@ -9,7 +9,7 @@
 import { isAddressEqual } from 'viem';
 import { cocoonAbi, erc20Abi, feedAbi, hookAbi, seaportAbi } from './abi.mjs';
 import { MULTICALL3 } from './chain.mjs';
-import { checkOrder, listingsFromFile, listingsFromOpenSea, toAdvancedOrder, toComponents } from './listings.mjs';
+import { checkOrder, fulfillmentFromOpenSea, listingsFromFile, listingsFromOpenSea, sameOrder, toAdvancedOrder, toComponents } from './listings.mjs';
 import { fmtDuration, fmtEth, log, short } from './log.mjs';
 import { attestedFloor, imdAttestation, localAttestation, reportDue, verifyAttestation } from './oracle.mjs';
 
@@ -218,7 +218,8 @@ export async function scanListings(ctx, s) {
     const [isValidated, isCancelled, totalFilled, totalSize] = statuses[i];
     if (isCancelled) x.skip = 'order cancelled on Seaport';
     else if (totalSize !== 0n && totalFilled >= totalSize) x.skip = 'order already filled';
-    else if ((!x.l.signature || x.l.signature === '0x') && !isValidated) x.skip = 'no signature and not validated on-chain';
+    else if ((!x.l.signature || x.l.signature === '0x') && !isValidated && !x.l.orderHash) x.skip = 'no signature and not validated on-chain';
+    else if ((!x.l.signature || x.l.signature === '0x') && !isValidated) x.needsSignature = true; // OpenSea hands it over at fulfilment
   });
   scan.tryList = tryList;
   const first = tryList.find((x) => !x.skip);
@@ -247,7 +248,26 @@ export async function buy(ctx, s) {
       log(`skip buySeat ${tag}: ${skip}`);
       continue;
     }
-    const res = await tx.run(`buySeat ${tag}`, { address: a.cocoon, abi: cocoonAbi, functionName: 'buySeat', args: [toAdvancedOrder(l), []] });
+    let order = l;
+    if (scan.tryList.find((x) => x.l === l)?.needsSignature) {
+      // The signature comes from OpenSea for this fulfiller; the parameters must be the ones checked.
+      try {
+        const f = await fulfillmentFromOpenSea({ apiKey: ctx.cfg.openseaApiKey, api: ctx.cfg.openseaApi, chain: ctx.cfg.openseaChain, orderHash: l.orderHash, protocolAddress: l.protocolAddress, fulfiller: a.cocoon });
+        if (!sameOrder(f.parameters, l.parameters)) {
+          log(`skip buySeat ${tag}: OpenSea's fulfilment order differs from the listing checked`);
+          continue;
+        }
+        if (!f.signature || f.signature === '0x') {
+          log(`skip buySeat ${tag}: OpenSea returned no signature`);
+          continue;
+        }
+        order = { ...l, signature: f.signature };
+      } catch (e) {
+        log(`skip buySeat ${tag}: ${e.message}`);
+        continue;
+      }
+    }
+    const res = await tx.run(`buySeat ${tag}`, { address: a.cocoon, abi: cocoonAbi, functionName: 'buySeat', args: [toAdvancedOrder(order), []] });
     if (res.status === 'sent') {
       cache.seats[c.tokenId.toString()] = { held: true, cost: c.price.toString(), block: Number(res.receipt.blockNumber), event: 'SeatBought' };
       ctx.persist();
