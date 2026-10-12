@@ -8,7 +8,9 @@ import { useSim } from "./SimContext";
 /// The vault's specimen sheet: the figures of the moment, on the overview page under the hood.
 export function VaultSheet() {
   const s = useSim();
-  const progress = Math.min(s.seatPot / nextSeatPrice(s), 1);
+  // Without a reference price there is no next seat to measure against.
+  const target = nextSeatPrice(s);
+  const progress = target > 0 ? Math.min(s.seatPot / target, 1) : 0;
   const ripest = s.seats.reduce((best, x) => (ripeness(x) > ripeness(best) ? x : best), s.seats[0]);
   return (
     <aside className="panel sheet" aria-label="The vault">
@@ -18,8 +20,8 @@ export function VaultSheet() {
       </div>
       <div>
         <div className="fig num">
-          {pct(progress)}
-          <small>of the next seat</small>
+          {target > 0 ? pct(progress) : "–"}
+          <small>{target > 0 ? "of the next seat" : "no reference price yet"}</small>
         </div>
         <div className="meter" role="img" aria-label="Seat pot against the reference price" style={{ marginTop: 14 }}>
           <i style={{ ["--w" as string]: `${(progress * 100).toFixed(1)}%` }} />
