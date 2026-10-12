@@ -43,8 +43,27 @@ export const UNISWAP = {
   },
 } as const satisfies Record<number, { poolManager: Address; universalRouter: Address; quoter: Address }>;
 
-// Filled at launch (mainnet) and at the rehearsal (Sepolia). Null keeps the chain in preview mode.
-export const MAINNET: Addresses | null = null;
+/// Ethereum mainnet, IMD launch #1434 of 2026-10-12 (launch transaction
+/// 0xac7aff89cdf23f126631da73106cd3aef33c812fd39eace00fafb8e257e522b3, block 26177488). The vault and
+/// the feed were deployed before it (keeper/addresses.mainnet.json, docs/deployment.md).
+export const MAINNET: Addresses | null = {
+  chainId: 1,
+  fromBlock: 26161806,
+  token: "0x59fb66660626a6a2c7e0e1a39af1367d09ed92b0",
+  hook: "0xb5e544166144a590e171bf0350e8f227858318cc",
+  cocoon: "0x54993066369e57a49215f6fc2D9911a8e5a57a79",
+  feed: "0x5A215aa9883cEfE5fa74085ba66288388b83700C",
+  timelock: "0x8bE826082c0FbAeC485048aA26ef42aC147898EC",
+  vesting: "0xF0fe8B9a80366469F7FE6C82dF61330b3682B048",
+  poolManager: UNISWAP[1].poolManager,
+  universalRouter: UNISWAP[1].universalRouter,
+  quoter: UNISWAP[1].quoter,
+  permit2: PERMIT2,
+  collection: COLLECTION,
+  imd: IMD,
+  seaport: SEAPORT,
+  poolKey: { fee: 12500, tickSpacing: 60 },
+};
 
 /// The Sepolia rehearsal of 2026-10-10 (script/sepolia/up.mjs): the real contracts against a mock
 /// collection and a mock IMD, the pool opened by the local launch factory. Test figures, not Pupate.

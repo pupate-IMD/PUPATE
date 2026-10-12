@@ -79,7 +79,33 @@ timelock.
 - IMD pays the launch transaction up to `gasCeilingWei` = 0.05 ETH on mainnet. Measured on the local mainnet fork (`script/local/`): token deploy 415,644 gas, hook deploy through the CREATE2 factory 1,390,744, pool open + single-sided seed in one transaction 289,486, about 2.1M in all before IMD's own factory overhead. At 2.1M the ceiling holds up to ~24 gwei; budget for 3.5M (~14 gwei) to be safe, and launch while the base fee is well under that.
 - Rehearse locally first: `node script/local/up.mjs` deploys the whole stack on an anvil fork of mainnet and `cd site && npx --yes tsx scripts/fork-e2e.ts` exercises the site's live modules against it (buy and sell through the Universal Router, flush).
 
-## Mainnet, in progress (2026-10-10)
+## Mainnet: live (2026-10-12)
+
+IMD launch #1434 deployed the token and the hook and opened the pool in one transaction,
+`0xac7aff89cdf23f126631da73106cd3aef33c812fd39eace00fafb8e257e522b3` (block 26177488, 16:08:23 UTC), after
+every admission check passed: provenance, findings, independent review, bytecode, manifest, protected
+invariants, economics. `post` then wired the vault, vested the launch wallet's 5% and handed FloorFeed and
+Cocoon to the timelock; `finish` wrote `keeper/addresses.mainnet.json`.
+
+| Contract | Address |
+|---|---|
+| PupateToken (PUPATE) | `0x59fb66660626a6a2c7e0e1a39af1367d09ed92b0` |
+| PupateHook | `0xb5e544166144a590e171bf0350e8f227858318cc` |
+| Cocoon | `0x54993066369e57a49215f6fc2D9911a8e5a57a79` |
+| FloorFeed | `0x5A215aa9883cEfE5fa74085ba66288388b83700C` |
+| TimelockController | `0x8bE826082c0FbAeC485048aA26ef42aC147898EC` |
+| PupateVesting | `0xF0fe8B9a80366469F7FE6C82dF61330b3682B048` |
+| IMD's MerkleDistributor (the swarm's 10%) | `0x15a2eb86e71f9c85c9cfb21ca4aeadb58793cbd7` |
+| Pool | ETH / PUPATE, fee 12500, tick spacing 60, id `0xd4cd0ab2c332b918dae711bbb0a7ac24cd5dd80dabbd3c92c196388c45eca8a7` |
+
+IMD's record: `https://explorer.imd.fun/token/0x59fb66660626a6a2c7e0e1a39af1367d09ed92b0` and the job
+`https://explorer.imd.fun/jobs/6e0f859e-9d6f-4384-8457-0c4e0cf85f93`. The first floor report was not
+sent: the attestation bought that morning had gone stale by the time the third attempt went live, so
+FloorFeed holds no report yet and the vault splits deposits in NEUTRAL mode until one is bought (0.5 IMD,
+of which IMD has returned half each time so far). The three attempts cost 1.5 IMD paid and 0.75 IMD
+returned, plus the gas of three vault deployments.
+
+## Mainnet, the road there (2026-10-10 to 2026-10-12)
 
 `script/mainnet/launch.mjs pre` ran on 2026-10-10 from the deployer `0x7A2B112aF54419ed0B18e051027f3142C13441D9`
 (also `DEVELOPER` and `OPERATOR`), base fee 0.063 gwei:

@@ -76,7 +76,7 @@ nothing can raise it.
 ├── site/          the website — Next.js static export, RainbowKit; simulates the protocol until launch
 ├── docs/          the spec, independent reviews, phase-0 findings, deployment, plans
 ├── brand/         logo, banner and social image
-└── launch.json    IMD launch manifest (draft)
+└── launch.json    IMD launch manifest, as launched (#1434)
 ```
 
 ## Build and run
