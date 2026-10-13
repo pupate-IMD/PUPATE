@@ -13,7 +13,7 @@ export function Mine() {
           <p className="lede">
             Chrysalis Cards are Pupate&apos;s proof-of-work layer. Your browser mines a solution; the solution lets you mint one
             card of a seat the vault holds, paid in PUPATE that is burned. When that seat sells, your card turns into its
-            butterfly. <b>Not live yet:</b> it opens after the token launch, once the vault holds its first seat.
+            butterfly. <b>Not live yet:</b> it opens once the vault holds its first seat.
           </p>
 
           <h2 className="serif sub-h">How it will work</h2>
@@ -90,7 +90,7 @@ export function Mine() {
           </p>
 
           <div className="empty" style={{ marginTop: 24 }}>
-            Not live. Mining opens after the token launch and the first cocoon; the date and the schedule will be posted here
+            Not live. Mining opens after the first cocoon; the date and the schedule will be posted here
             and on{" "}
             <a href="https://x.com/pupateIMD" target="_blank" rel="noreferrer">
               @pupateIMD
