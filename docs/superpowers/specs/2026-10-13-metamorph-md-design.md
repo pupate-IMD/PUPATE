@@ -179,7 +179,7 @@ No two cards draw the same. Three layers vary:
 
 - **Per seat:** the wing geometry, vein count, spot count, dots, rings and jade tone are the site's
   `traits(seat)` (`site/lib/seat.ts`), reproduced in integer arithmetic so the chain and the site draw the
-  same butterfly for the same seat. All 333 editions of a seat share its silhouette and tone, the way all
+  same butterfly for the same seat. All 303 editions of a seat share its silhouette and tone, the way all
   photographs of one specimen share its shape.
 - **Per edition:** the shell's form (teardrop 40%, pear 22%, spindle 22%, round 16%), the palette within the
   brand colours (classic 55%, inverted 20%, ember 12%, mono 10%, gilt 3%), the halo of digit rings behind the
