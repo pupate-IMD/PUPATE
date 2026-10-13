@@ -1,119 +1,258 @@
-import Link from "next/link";
+"use client";
 
-/// The proof-of-work layer, announced before it exists: what Chrysalis Cards are, how mining and
-/// minting will work, how the price climbs, and where the fees go. Nothing here is live; the page
-/// says so in its first and last lines.
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { EPOCH_ONE_BITS, type Power, fmtHashes, fmtRate } from "@/lib/miner/job";
+import { type Found, useMiner } from "@/lib/miner/useMiner";
+import { Incubator } from "./Incubator";
+import { useSim } from "./SimContext";
+
+/// The epoch-one figures of the spec, shown before the contracts exist; live, every one is read from the chain.
+const PRICE = "50,000";
+const EPOCHS = 11;
+const SUPPLY = 3333;
+const PREVIEW_CARDS = [1, 12, 57, 133, 240];
+const METER = 48;
+
+const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+/// Which preview card a practice hash "mints": the hash picks, as it will live.
+function cardFor(f: Found): { id: number; src: string; title: string; gilt: boolean } {
+  const id = PREVIEW_CARDS[parseInt(f.digest.slice(-2), 16) % PREVIEW_CARDS.length];
+  return { id, src: `/cards/metamorph/c-${id}.svg`, title: `Metamorph.md #${id} · seat identity.md #1376${f.gilt ? " · gilt" : ""}`, gilt: f.gilt };
+}
+
+/// A row of digits that fills as the search approaches the hashes a hit takes on average.
+function Meter({ hashes, expected, seed }: { hashes: number; expected: number; seed: string }) {
+  const bits = seed ? parseInt(seed.slice(2, 14), 16).toString(2).padStart(METER, "0").slice(0, METER) : "0".repeat(METER);
+  const filled = expected > 0 ? Math.min(METER, Math.floor((hashes / expected) * METER)) : 0;
+  return (
+    <div className="meter" aria-hidden="true">
+      <span className="done">{bits.slice(0, filled)}</span>
+      <span className="left">{bits.slice(filled)}</span>
+    </div>
+  );
+}
+
+/// The mine, as a specimen bench: the drawing of the card being searched for, the readings beside it,
+/// the controls as instruments, and underneath the field notes and the drawer of what was mined. Before
+/// the contracts exist every run is a practice run: the hashing is real, the mint is a line in the notes.
 export function Mine() {
+  const s = useSim();
+  const { openConnectModal } = useConnectModal();
+  const { state: m, start, stop, setPower, setAuto, mintPending } = useMiner();
+  const wallet = s.wallet;
+  const [reveal, setReveal] = useState<ReturnType<typeof cardFor> | null>(null);
+  const seen = useRef<number>(0);
+  const sinceFound = useRef(0);
+
+  // A found hash shows its card in the incubator for a breath, then the search is drawn again.
+  useEffect(() => {
+    const f = m.found[0];
+    if (!f || f.n === seen.current) return;
+    seen.current = f.n;
+    sinceFound.current = m.hashes;
+    setReveal(cardFor(f));
+    const t = window.setTimeout(() => setReveal(null), 2800);
+    return () => window.clearTimeout(t);
+  }, [m.found, m.hashes]);
+
+  const active = m.running || !!m.pending;
+  const expectedHashes = 2 ** m.bits;
+  const expectedSeconds = m.rate > 0 ? expectedHashes / m.rate : null;
+  const rateText = fmtRate(m.rate);
+  const [rateNumber, rateUnit] = m.running ? [rateText.replace(/ .*/, ""), rateText.replace(/^\S+ /, "")] : ["0", "H/s"];
+
+  const state = m.pending
+    ? "A hash is waiting. Mint it, or let auto-mint send the next one by itself."
+    : m.running
+      ? expectedSeconds
+        ? `Mining. A hash takes about ${expectedSeconds < 90 ? `${Math.max(1, Math.round(expectedSeconds))} seconds` : `${Math.round(expectedSeconds / 60)} minutes`} on this machine at ${m.bits} bits.`
+        : "Mining. Measuring this machine."
+      : wallet
+        ? "Not mining. Start when you are ready; a practice run costs nothing."
+        : "Not mining. Connect a wallet, or practice without one.";
+
+  function primary() {
+    if (m.running) return { label: "Stop mining", onClick: stop };
+    if (m.pending) return { label: "Mint it now (practice)", onClick: mintPending };
+    if (!wallet) return { label: "Connect wallet", onClick: () => openConnectModal?.() };
+    return { label: "Start mining (practice)", onClick: () => start({ miner: wallet as `0x${string}` }) };
+  }
+  const cta = primary();
+  const cards = m.found.map((f) => ({ f, c: cardFor(f) }));
+
   return (
     <section className="wrap mine-page" aria-label="Mine">
-      <div className="mine-grid">
+      <header className="bench-head">
         <div>
-          <div className="label gold">Mine · after the first cocoon</div>
           <h1 className="serif">Mine a card of a seat that works.</h1>
-          <p className="lede">
-            Chrysalis Cards are Pupate&apos;s proof-of-work layer. Your browser mines a solution; the solution lets you mint one
-            card of a seat the vault holds, paid in PUPATE that is burned. When that seat sells, your card turns into its
-            butterfly. <b>Not live yet:</b> it opens once the vault holds its first seat.
+          <p className="mine-lede">
+            Your machine searches for a hash under the target. Find one, pay the mint in PUPATE, and the hash picks which
+            seat your card comes from. Lucky hashes come out gilt.
           </p>
-
-          <h2 className="serif sub-h">How it will work</h2>
-          <ol className="buy-steps">
-            <li>
-              <b>Pick a seat the vault holds.</b> Each seat has a limited run of cards, 33 per round. Sold seats close their run.
-            </li>
-            <li>
-              <b>Mine.</b> Your browser searches for a hash under the epoch&apos;s target, on a CPU or, if you run it hard, a GPU.
-              A solution is bound to your wallet; nobody else can use it.
-            </li>
-            <li>
-              <b>Mint, in PUPATE.</b> The fee is burned, every card makes the token scarcer. To pay it you buy PUPATE in the pool,
-              and that trade pays the 6% tax that buys more seats.
-            </li>
-            <li>
-              <b>Watch it change.</b> A card is a chrysalis while the vault holds the seat, and becomes its butterfly, on-chain, the
-              moment the seat sells.
-            </li>
-          </ol>
-
-          <h2 className="serif sub-h">Harder and dearer as it goes</h2>
-          <p className="dim mine-p">
-            Difficulty and the mint price both rise by epoch, one epoch every fixed number of cards. Early miners work less and
-            pay less; late miners work more and burn more. The schedule is public and written into the contract.
-          </p>
-          <table className="mine-table">
-            <thead>
-              <tr>
-                <th>Epoch</th>
-                <th>Difficulty</th>
-                <th>Mint price</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>1</td>
-                <td>base</td>
-                <td>base, in PUPATE</td>
-              </tr>
-              <tr>
-                <td>2</td>
-                <td>higher</td>
-                <td>× 1.25</td>
-              </tr>
-              <tr>
-                <td>3 …</td>
-                <td>higher again</td>
-                <td>× 1.25 each epoch</td>
-              </tr>
-            </tbody>
-          </table>
-          <p className="dim mine-p">The exact numbers are set when the contracts are built and reviewed, and published here before mining opens.</p>
-
-          <h2 className="serif sub-h">Fees, plainly</h2>
-          <ul className="buy-notes">
-            <li>
-              <b>Mint:</b> paid in PUPATE, burned in full. No treasury takes a cut of a mint.
-            </li>
-            <li>
-              <b>Resale:</b> 5% to the developer, enforced on-chain rather than left to the marketplace&apos;s goodwill. It pays for
-              the oracle reports, the servers and the work around the project.
-            </li>
-            <li>
-              The token&apos;s vault is untouched by any of this. It still has no keys, and cards only read it.
-            </li>
-          </ul>
-
-          <h2 className="serif sub-h">Rarity from real work</h2>
-          <p className="dim mine-p">
-            A card&apos;s traits follow what its seat actually did in the swarm, read from IMD&apos;s records: a seat that took and
-            passed more jobs makes a rarer card. The proof of work in the hash is spent on a proof of work by a seat. That is
-            the part no hash-only project can copy.
-          </p>
-
-          <div className="empty" style={{ marginTop: 24 }}>
-            Not live. Mining opens after the first cocoon; the date and the schedule will be posted here
-            and on{" "}
-            <a href="https://x.com/pupateIMD" target="_blank" rel="noreferrer">
-              @pupateIMD
-            </a>
-            . Until then there is nothing to mine and nothing to mint.
+          <span className="chip gold">Preview · contracts not live</span>
+        </div>
+        <dl className="readings" aria-label="The mine today">
+          <div>
+            <dt>mint price</dt>
+            <dd>
+              {PRICE} PUPATE <span className="dim">· epoch 1 of {EPOCHS}</span>
+            </dd>
           </div>
-          <p className="dim" style={{ marginTop: 20 }}>
-            The seats these cards will be drawn from: <Link href="/work/">Work →</Link> · the design in full:{" "}
-            <a href="https://github.com/pupate-IMD/PUPATE/blob/main/docs/v2-mining-proof-of-work.md" target="_blank" rel="noreferrer">
-              v2 design on GitHub ↗
-            </a>
+          <div>
+            <dt>difficulty</dt>
+            <dd>
+              ≈ {fmtHashes(expectedHashes)} hashes <span className="dim">· {EPOCH_ONE_BITS} bits</span>
+            </dd>
+          </div>
+          <div>
+            <dt>minted</dt>
+            <dd>
+              0 <span className="dim">of {SUPPLY.toLocaleString("en-US")}</span>
+            </dd>
+          </div>
+          <div>
+            <dt>wallet</dt>
+            <dd>{wallet ? short(wallet) : <span className="dim">not connected</span>}</dd>
+          </div>
+          <div>
+            <dt>PUPATE</dt>
+            <dd>
+              <span className="dim">—</span>{" "}
+              <Link className="chip jade" href="/buy/">
+                Buy
+              </Link>
+            </dd>
+          </div>
+        </dl>
+      </header>
+
+      <div className={`panel bench ${m.running ? "on" : ""}`}>
+        <Incubator sample={m.sample} running={m.running && !m.pending} reveal={reveal} />
+
+        <div className="instruments">
+          <p className="state">
+            <span className={`status-dot ${m.running ? "on" : ""}`} aria-hidden="true" /> {state}
+          </p>
+          <div className="rate">
+            <span className="serif num">{rateNumber}</span>
+            <span className="unit">{rateUnit}</span>
+            {m.running ? <span className="tried dim">{fmtHashes(m.hashes)} hashes tried</span> : null}
+          </div>
+
+          <label className="ruler">
+            <span className="k">power</span>
+            <input type="range" min={25} max={100} step={25} value={m.power} onChange={(e) => setPower(Number(e.target.value) as Power)} aria-valuetext={`${m.power} percent`} />
+            <span className="v num">{m.power}%</span>
+          </label>
+          <div className="instrument">
+            <span className="k">engine</span>
+            <span className="v">
+              CPU, {m.threads} thread{m.threads > 1 ? "s" : ""}
+              <button type="button" className="switch" disabled title="The GPU engine is being built; it will verify every hit on the CPU first">
+                GPU not yet
+              </button>
+            </span>
+          </div>
+          <div className="instrument">
+            <span className="k">auto-mint</span>
+            <span className="v">
+              <button type="button" className={`switch ${m.auto ? "on" : ""}`} aria-pressed={m.auto} onClick={() => setAuto(!m.auto)}>
+                {m.auto ? "on" : "off"}
+              </button>
+              <span className="dim"> {m.auto ? "a found hash is sent to your wallet to sign" : "a found hash waits for you"}</span>
+            </span>
+          </div>
+
+          <div className="actions">
+            <button type="button" className="btn mine-cta" onClick={cta.onClick}>
+              {cta.label}
+            </button>
+            {!active && !wallet ? (
+              <button type="button" className="mine-alt" onClick={() => start()}>
+                or practice without a wallet
+              </button>
+            ) : null}
+          </div>
+          <p className="fine dim">
+            Live, you approve PUPATE once and every mint opens your wallet to sign. Closing the tab stops mining.
           </p>
         </div>
 
-        <figure className="card-preview">
-          {/* The prototype render; the live cards are drawn on-chain from the seat's number. */}
-          <img src="/cards/prototype-1376.svg" alt="Prototype Chrysalis Card of seat 1376: a chrysalis whose every contour is a line of 0s and 1s, a jade wing inside, a gold band, in a dark card frame" width={1080} height={1080} />
-          <figcaption className="dim">
-            Prototype of card No. 1376, in the cocoon. Every contour is a line of 0s and 1s seeded by the seat&apos;s number; the
-            wing inside is the butterfly it becomes.
-          </figcaption>
-        </figure>
+        <div className="search">
+          <span className="k">search</span>
+          <Meter hashes={Math.max(0, m.hashes - sinceFound.current)} expected={expectedHashes} seed={m.sample ?? ""} />
+          <span className="v dim">
+            {m.found.length} found{m.found.some((f) => f.gilt) ? `, ${m.found.filter((f) => f.gilt).length} gilt` : ""}
+          </span>
+        </div>
       </div>
+
+      <div className="bench-foot">
+        <section className="notes" aria-label="Field notes">
+          <h2 className="serif">Field notes</h2>
+          <ul>
+            {m.log.map((l, i) => (
+              <li key={`${l.at}-${i}`} className={l.tone}>
+                <span className="at">{l.at}</span>
+                <span>{l.text}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="drawer" aria-label="Cards mined this session">
+          <h2 className="serif">This session&apos;s cards</h2>
+          {cards.length === 0 ? (
+            <p className="dim">The cards you mine appear here, chrysalis first. Which seat they come from is the hash&apos;s choice.</p>
+          ) : (
+            <ul>
+              {cards.slice(0, 8).map(({ f, c }) => (
+                <li key={f.n}>
+                  <img src={c.src} alt={c.title} width={180} height={180} loading="lazy" />
+                  <span className={c.gilt ? "gold" : undefined}>
+                    #{c.id}
+                    {c.gilt ? " · gilt" : ""}
+                    {!f.minted ? " · waiting" : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+
+      <section className="after" aria-label="After the mint">
+        <h2 className="serif">Cards never stop working.</h2>
+        <div className="after-grid">
+          <figure>
+            <img src="/cards/metamorph/c-1.svg" alt="Metamorph.md #1, the holotype of seat 1376, in the cocoon" width={360} height={360} loading="lazy" />
+            <figcaption>
+              <b>Stake it.</b> 70% of every mint goes to the stakers, paid in IMD. No lock, unstake whenever you like.
+            </figcaption>
+          </figure>
+          <figure>
+            <img src="/cards/metamorph/b-12.svg" alt="Metamorph.md #12 emerged as its butterfly" width={360} height={360} loading="lazy" />
+            <figcaption>
+              <b>Watch it emerge.</b> When the vault sells the seat, the card turns into its butterfly by itself, and earns double while staked.
+            </figcaption>
+          </figure>
+          <figure>
+            <img src="/cards/metamorph/c-240.svg" alt="Metamorph.md #240 of seat 1376" width={360} height={360} loading="lazy" />
+            <figcaption>
+              <b>One in sixteen comes out gilt.</b> A hash well under the target paints the card gold. The hash decides; nobody picks.
+            </figcaption>
+          </figure>
+        </div>
+        <p className="mine-foot dim">
+          Preview: the contracts are not live. A practice run hashes for real and mints nothing. 303 cards per seat the vault holds,
+          3,333 in all; the price rises each epoch of 303 mints. 30% of every mint goes to the developer. The design in full:{" "}
+          <a href="https://github.com/pupate-IMD/PUPATE/blob/main/docs/superpowers/specs/2026-10-13-metamorph-md-design.md" target="_blank" rel="noreferrer">
+            Metamorph MD on GitHub ↗
+          </a>
+        </p>
+      </section>
     </section>
   );
 }
