@@ -33,6 +33,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     error NothingMineable();
     error BadAnchor();
     error BadBits();
+    error BadPoolKey();
     error NotASolution();
     error SeatNotHeld();
     error Staked();
@@ -115,9 +116,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         uint16 edition;
         bool gilt;
         uint40 mintedAt;
+        uint96 paid;
         address miner;
         bytes32 work;
-        uint96 paid;
     }
 
     struct Stake {
@@ -175,6 +176,12 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
                 || address(poolManager_) == address(0) || address(art_) == address(0)
         ) revert ZeroAddress();
         if (minBits_ == 0 || minBits_ > 200) revert BadBits();
+        // The conversion trades in two pools: ETH/PUPATE on the launch hook, and ETH/IMD.
+        if (
+            !pupateKey_.currency0.isAddressZero() || Currency.unwrap(pupateKey_.currency1) != address(pupate_)
+                || address(pupateKey_.hooks) != address(hook_) || !imdKey_.currency0.isAddressZero()
+                || Currency.unwrap(imdKey_.currency1) != address(imd_)
+        ) revert BadPoolKey();
         COCOON = cocoon_;
         HOOK = hook_;
         PUPATE = pupate_;
@@ -213,8 +220,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         return blockhash(blockNumber);
     }
 
-    /// @notice The current epoch, 1 to 11: one per 303 mints.
+    /// @notice The current epoch, 1 to 11: one per 303 mints; a sold-out collection stays in the last.
     function epoch() public view returns (uint16) {
+        if (totalMinted >= MAX_SUPPLY) return uint16(MAX_SUPPLY / EPOCH);
         return totalMinted / EPOCH + 1;
     }
 
@@ -301,8 +309,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
 
     // The mint, the stages, the staking, the conversion and the duties follow in later tasks.
 
-    function tokenURI(uint256 id) public view override returns (string memory) {
-        id;
+    function tokenURI(uint256) public pure override returns (string memory) {
         return "";
     }
 

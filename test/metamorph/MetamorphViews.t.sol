@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
+import {Currency} from "v4-core/src/types/Currency.sol";
+import {PoolKey} from "v4-core/src/types/PoolKey.sol";
+import {IERC20Minimal} from "../../src/interfaces/IERC20Minimal.sol";
+import {IERC721Minimal} from "../../src/interfaces/IERC721Minimal.sol";
+import {IMetamorphArt} from "../../src/interfaces/IMetamorphArt.sol";
 import {MetamorphFixture} from "./MetamorphFixture.sol";
 import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
 
@@ -33,6 +39,12 @@ contract MetamorphViewsTest is MetamorphFixture {
         assertEq(md.priceAt(3), 78_125 ether);
         assertEq(md.priceAt(11), 465_661_287_307_739_257_812_500);
         assertEq(md.mintPrice(), 50_000 ether);
+        // The 3,333rd and last mint is made at totalMinted = 3,332, still in epoch 11, and a sold-out
+        // collection stays in epoch 11 too: priceAt(11) is the last price the contract can ever charge.
+        uint16 lastEpoch = (md.MAX_SUPPLY() - 1) / md.EPOCH() + 1;
+        assertEq(lastEpoch, 11);
+        assertEq(md.MAX_SUPPLY() / md.EPOCH(), lastEpoch);
+        assertEq(md.priceAt(lastEpoch), 465_661_287_307_739_257_812_500);
     }
 
     function test_workHashIsTheSpecsPreimage() public view {
@@ -72,5 +84,85 @@ contract MetamorphViewsTest is MetamorphFixture {
         _sell(1376);
         assertEq(md.notedSeats().length, 1);
         assertEq(md.mineableSeats().length, 0);
+    }
+
+    function test_filledButUnsettledSeatIsNotMineable() public {
+        vm.prank(address(cocoon));
+        collection.transferFrom(address(cocoon), other, 1376); // filled, nobody has settled
+        assertEq(md.mineableSeats().length, 0);
+        _giveSeat(42);
+        vm.prank(address(cocoon));
+        collection.transferFrom(address(cocoon), other, 42);
+        vm.expectRevert(MetamorphMD.SeatNotHeld.selector);
+        md.noteSeat(42);
+    }
+
+    function test_seatInTheWalletButOffTheBooksIsNotMineable() public {
+        collection.mint(address(cocoon), 77); // donated, not adopted
+        vm.expectRevert(MetamorphMD.SeatNotHeld.selector);
+        md.noteSeat(77);
+        _sell(1376);
+        vm.prank(other);
+        collection.transferFrom(other, address(cocoon), 1376); // sent straight back
+        assertEq(md.mineableSeats().length, 0);
+        cocoon.adopt(1376); // a new round
+        assertEq(md.mineableSeats().length, 1);
+    }
+
+    function test_burnedSeatIsNotMineable() public {
+        vm.prank(address(cocoon));
+        collection.burn(1376);
+        assertEq(md.mineableSeats().length, 0);
+    }
+
+    function test_constructorRefusesBadBitsAndBadKeys() public {
+        vm.expectRevert(MetamorphMD.BadBits.selector);
+        _deploy(0);
+        vm.expectRevert(MetamorphMD.BadBits.selector);
+        _deploy(201);
+
+        // The five facts the constructor checks about the two pool keys, each broken on its own.
+        PoolKey memory launch = key;
+        launch.hooks = IHooks(address(0)); // not the hook it was given
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(launch, imdKey);
+
+        launch = key;
+        launch.currency0 = Currency.wrap(address(imd)); // not quoted in ETH
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(launch, imdKey);
+
+        launch = key;
+        launch.currency1 = Currency.wrap(address(imd)); // not PUPATE
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(launch, imdKey);
+
+        PoolKey memory imdPool = imdKey;
+        imdPool.currency0 = Currency.wrap(address(token)); // not quoted in ETH
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(key, imdPool);
+
+        imdPool = imdKey;
+        imdPool.currency1 = Currency.wrap(address(token)); // not IMD
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(key, imdPool);
+    }
+
+    function _deployWithKeys(PoolKey memory pupateKey_, PoolKey memory imdKey_)
+        private
+        returns (MetamorphMD)
+    {
+        return new MetamorphMD(
+            cocoon,
+            hook,
+            token,
+            IERC20Minimal(address(imd)),
+            IERC721Minimal(address(collection)),
+            manager,
+            pupateKey_,
+            imdKey_,
+            IMetamorphArt(address(art)),
+            1
+        );
     }
 }
