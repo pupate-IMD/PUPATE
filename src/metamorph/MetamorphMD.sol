@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/src/interfaces/callback/IUnlockCallback.sol";
+import {FullMath} from "v4-core/src/libraries/FullMath.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
@@ -176,11 +177,11 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
                 || address(poolManager_) == address(0) || address(art_) == address(0)
         ) revert ZeroAddress();
         if (minBits_ == 0 || minBits_ > 200) revert BadBits();
-        // The conversion trades in two pools: ETH/PUPATE on the launch hook, and ETH/IMD.
+        // The conversion trades in two pools: ETH/PUPATE on the launch hook, and ETH/IMD, which has no hook.
         if (
             !pupateKey_.currency0.isAddressZero() || Currency.unwrap(pupateKey_.currency1) != address(pupate_)
                 || address(pupateKey_.hooks) != address(hook_) || !imdKey_.currency0.isAddressZero()
-                || Currency.unwrap(imdKey_.currency1) != address(imd_)
+                || Currency.unwrap(imdKey_.currency1) != address(imd_) || address(imdKey_.hooks) != address(0)
         ) revert BadPoolKey();
         COCOON = cocoon_;
         HOOK = hook_;
@@ -275,6 +276,82 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         emit SeatNoted(seat);
     }
 
+    // ------------------------------------------------------------------ the mint
+
+    /// @notice Mint with a proof for `anchor` (a block 1 to 50 behind) and `nonce`. The hash picks the
+    /// seat; the fee is `mintPrice()` in PUPATE, 70% to the pot and 30% to the developer; then the
+    /// vault's due duties run and pay the caller.
+    function mint(uint256 anchor, uint256 nonce) external nonReentrant returns (uint256 id) {
+        if (totalMinted >= MAX_SUPPLY) revert SupplyExhausted();
+        bytes32 work = workHash(_anchor(anchor), msg.sender, nonce);
+        uint256 t = target;
+        if (uint256(work) >= t) revert NotASolution();
+        (uint256 seat, uint16 round) = _pick(uint256(work));
+        uint16 edition = ++editionsMinted[seat][round];
+
+        uint16 epoch_ = epoch();
+        uint256 price = priceAt(epoch_);
+        uint256 toPot = price * STAKER_BPS / BPS;
+        _pull(msg.sender, address(this), toPot);
+        _pull(msg.sender, COCOON.developer(), price - toPot);
+        pot += toPot;
+
+        id = ++totalMinted;
+        bool gilt = uint256(work) < (t >> 4);
+        cards[id] = Card(
+            uint32(seat), round, edition, gilt, uint40(block.timestamp), uint96(price), msg.sender, work
+        );
+        _mint(msg.sender, id);
+        emit Minted(id, seat, round, edition, msg.sender, work, gilt, price, epoch_);
+
+        prevWork = work;
+        _retarget();
+        lastMintAt = uint40(block.timestamp);
+        _duties(msg.sender);
+    }
+
+    /// @dev Runs the vault's due duties for a miner. Filled in by a later task.
+    function _duties(address) internal virtual {}
+
+    // ------------------------------------------------------------------ internals (mint)
+
+    function _anchor(uint256 anchor) private view returns (bytes32 h) {
+        if (anchor >= block.number || block.number - anchor > ANCHOR_WINDOW) revert BadAnchor();
+        h = blockhash(anchor);
+        if (h == bytes32(0)) revert BadAnchor();
+    }
+
+    function _pick(uint256 work) private view returns (uint256 seat, uint16 round) {
+        uint256[] memory open = mineableSeats();
+        if (open.length == 0) revert NothingMineable();
+        seat = open[work % open.length];
+        (,,,,,, round) = COCOON.seats(seat);
+    }
+
+    /// @dev Every mint moves the target toward one mint per `TARGET_INTERVAL`, by at most ×4 or ÷4, and
+    /// never above the epoch's ceiling. Reads `epoch()` after `totalMinted` moved, so the ceiling of the
+    /// epoch the next mint belongs to applies. FullMath keeps `target × elapsed` from overflowing at a
+    /// low floor (the test suite runs at one bit).
+    function _retarget() private {
+        uint256 elapsed = block.timestamp - lastMintAt;
+        uint256 next;
+        if (elapsed >= 4 * TARGET_INTERVAL) {
+            next = target > type(uint256).max / 4 ? type(uint256).max : target * 4;
+        } else if (elapsed * 4 <= TARGET_INTERVAL) {
+            next = target / 4;
+        } else {
+            next = FullMath.mulDiv(target, elapsed, TARGET_INTERVAL);
+        }
+        uint256 cap = _ceiling(epoch());
+        if (next > cap) next = cap;
+        target = next;
+        emit Retargeted(next);
+    }
+
+    function _pull(address from, address to, uint256 amount) private {
+        if (!PUPATE.transferFrom(from, to, amount)) revert TransferFailed();
+    }
+
     // ------------------------------------------------------------------ internals (reads)
 
     /// @dev Held by the vault right now: on its books and in its wallet. Returns the current round.
@@ -307,7 +384,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         }
     }
 
-    // The mint, the stages, the staking, the conversion and the duties follow in later tasks.
+    // The stages, the staking, the conversion and the duties follow in later tasks.
 
     function tokenURI(uint256) public pure override returns (string memory) {
         return "";
@@ -315,11 +392,5 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
 
     function unlockCallback(bytes calldata) external pure returns (bytes memory) {
         revert UnexpectedCallback();
-    }
-
-    /// @dev Stub: the fixture's `_mintAs` calls `mint`, so the signature must exist before the mint task
-    /// replaces this with the real one.
-    function mint(uint256, uint256) external pure returns (uint256) {
-        revert();
     }
 }

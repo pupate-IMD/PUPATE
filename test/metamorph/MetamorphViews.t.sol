@@ -121,7 +121,7 @@ contract MetamorphViewsTest is MetamorphFixture {
         vm.expectRevert(MetamorphMD.BadBits.selector);
         _deploy(201);
 
-        // The five facts the constructor checks about the two pool keys, each broken on its own.
+        // The six facts the constructor checks about the two pool keys, each broken on its own.
         PoolKey memory launch = key;
         launch.hooks = IHooks(address(0)); // not the hook it was given
         vm.expectRevert(MetamorphMD.BadPoolKey.selector);
@@ -144,6 +144,11 @@ contract MetamorphViewsTest is MetamorphFixture {
 
         imdPool = imdKey;
         imdPool.currency1 = Currency.wrap(address(token)); // not IMD
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(key, imdPool);
+
+        imdPool = imdKey;
+        imdPool.hooks = IHooks(address(hook)); // the ETH/IMD pool is hookless
         vm.expectRevert(MetamorphMD.BadPoolKey.selector);
         _deployWithKeys(key, imdPool);
     }
