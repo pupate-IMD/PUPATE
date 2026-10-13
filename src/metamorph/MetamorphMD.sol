@@ -360,6 +360,55 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         if (!PUPATE.transferFrom(from, to, amount)) revert TransferFailed();
     }
 
+    // ------------------------------------------------------------------ stages, royalty, metadata
+
+    /// @notice 0 while the vault holds the card's seat in the card's round, 1 after it no longer does,
+    /// or 90 days after the mint whatever happened. Computed, never stored.
+    function stageOf(uint256 id) public view returns (uint8) {
+        Card memory c = cards[id];
+        if (c.mintedAt == 0) revert NotMinted();
+        if (block.timestamp >= uint256(c.mintedAt) + BUTTERFLY_CEILING) return 1;
+        return _vaultHoldsRound(c.seat, c.round) ? 0 : 1;
+    }
+
+    /// @notice ERC-2981: 5% of every resale to the developer Cocoon names today.
+    function royaltyInfo(uint256, uint256 salePrice) external view returns (address, uint256) {
+        return (COCOON.developer(), salePrice * ROYALTY_BPS / BPS);
+    }
+
+    function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
+        return interfaceId == 0x2a55205a || super.supportsInterface(interfaceId);
+    }
+
+    function tokenURI(uint256 id) public view override returns (string memory) {
+        Card memory c = cards[id];
+        if (c.mintedAt == 0) revert NotMinted();
+        return ART.tokenURI(
+            IMetamorphArt.View({
+                id: id,
+                seat: c.seat,
+                round: c.round,
+                edition: c.edition,
+                stage: stageOf(id),
+                gilt: c.gilt,
+                epoch: _epochOf(id),
+                miner: c.miner,
+                mintedAt: c.mintedAt,
+                paid: c.paid
+            })
+        );
+    }
+
+    /// @dev The epoch a card was minted in: ids count from 1, 303 per epoch.
+    function _epochOf(uint256 id) private pure returns (uint16) {
+        return uint16((id - 1) / EPOCH + 1);
+    }
+
+    function _vaultHoldsRound(uint256 seat, uint16 round) private view returns (bool) {
+        (bool held, uint16 r) = _vaultHolds(seat);
+        return held && r == round;
+    }
+
     // ------------------------------------------------------------------ internals (reads)
 
     /// @dev Held by the vault right now: on its books and in its wallet. Returns the current round.
@@ -392,11 +441,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         }
     }
 
-    // The stages, the staking, the conversion and the duties follow in later tasks.
-
-    function tokenURI(uint256) public pure override returns (string memory) {
-        return "";
-    }
+    // The staking, the conversion and the duties follow in later tasks.
 
     function unlockCallback(bytes calldata) external pure returns (bytes memory) {
         revert UnexpectedCallback();
