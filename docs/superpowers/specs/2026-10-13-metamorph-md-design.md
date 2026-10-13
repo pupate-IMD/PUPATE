@@ -168,10 +168,18 @@ jade `#3ec28f`, gold `#d9a94b`, dim `#9aa89f`), with the stage in the middle:
 - **Butterfly:** the open wings of the site's emergence card (`site/components/EmergenceCard.tsx`): the
   upper and lower wing paths, veins and gold spots, mirrored, in the seat's jade tone.
 
-The wing geometry, vein count, spot count, dots, rings, tilt and tone are the site's `traits(seat)`
-(`site/lib/seat.ts`), reproduced in integer arithmetic so the chain and the site draw the same butterfly
-for the same seat. The digit strings are the bits of `keccak256(seat, round, edition, line)`, so every
-edition's contour differs. Text on the card: `METAMORPH.MD #<n> · PUPATE`, `seat identity.md #<seat>`, the stage label
+No two cards draw the same. Three layers vary:
+
+- **Per seat:** the wing geometry, vein count, spot count, dots, rings and jade tone are the site's
+  `traits(seat)` (`site/lib/seat.ts`), reproduced in integer arithmetic so the chain and the site draw the
+  same butterfly for the same seat. All 333 editions of a seat share its silhouette and tone, the way all
+  photographs of one specimen share its shape.
+- **Per edition:** the digit strings are the bits of `keccak256(seat, round, edition, line)`, so every
+  contour is a different line of 0s and 1s; the tilt (−6° to 6°), the density of the inner digit line, the
+  number of gold band digits, the scatter of the glow points and the six-digit specimen notes come from
+  the same seed, so two editions of one seat are told apart at thumbnail size, not only up close.
+- **Per tier and stage:** edition 1 has the double gold frame, 2–33 the gold corner; the stage decides
+  the whole drawing and the colour of the labels (jade until the butterfly, gold after). Text on the card: `METAMORPH.MD #<n> · PUPATE`, `seat identity.md #<seat>`, the stage label
 (`EGG`, `LARVA · 23 OF 64`, `IN THE COCOON`, `EMERGED`), `edition <n> of 333 · mined by 0x…`, the PUPATE
 paid, `pupate.fun`. The first edition carries a gold frame, editions two to thirty-three a gold corner.
 
