@@ -1,4 +1,4 @@
-# Chrysalis Cards: the proof-of-work layer
+# Metamorph MD: the proof-of-work layer
 
 **Date:** 2026-10-13 · **Status:** design approved in conversation (owner, 2026-10-13); this spec is for the
 owner's review before the implementation plan. Supersedes the fee and contract layout of
@@ -30,8 +30,17 @@ Owner's decisions, with their dates. Later ones override earlier ones.
 - **Four stages on one NFT (2026-10-12).** A card is a single ERC-721 token whose image and attributes
   follow its stage: Egg, Larva, Chrysalis, Butterfly. There is no separate token per stage and nothing is
   re-minted; the token id never changes.
-- **Only seats the vault holds now are mineable (2026-10-08),** 33 editions per seat per round.
-- **Price and difficulty rise per epoch (2026-10-12):** price ×1.25, difficulty retargeted.
+- **Only seats the vault holds now are mineable (2026-10-08).** **333 editions per seat per round, and a
+  collection of at most 3,333 cards (2026-10-13):** the first seat opens 333 cards at once; the collection
+  closes after ten seats' worth, finite like Identity MD's 1,999 without copying the number.
+- **Price and difficulty rise as the collection fills (2026-10-12, numbers 2026-10-13):** the difficulty
+  retargets every epoch of 33 eggs; the price steps ×1.25 every series of 333 eggs, so the last series costs
+  about nine times the first.
+- **Names (2026-10-13).** The collection is **Metamorph MD** (ERC-721 `name`), symbol **MMD**, in the
+  manner of Identity MD. Each token is named **`Metamorph.md #<n>`** where `n` is the token id, counted from 1
+  in mint order across all seats, the way `identity.md #994` is named by its id. The seat a card comes from,
+  its round and its edition are attributes and are drawn on the card; they are not part of the name. The
+  contracts are `MetamorphMD` and `MetamorphArt`; "chrysalis" is only the name of the third stage.
 - **No keys over the cards.** Every number below is a constant or an immutable set in the constructor.
   There is no owner, setter, pause, upgrade or withdraw.
 
@@ -41,9 +50,9 @@ Two contracts and one page.
 
 | Unit | Does | Depends on |
 |---|---|---|
-| `ChrysalisCards` (ERC-721) | The puzzle, the epochs, the fees, the four stages, `tokenURI`, ERC-2981 | Cocoon (read only), PupateToken (`transferFrom`), the identity.md collection (`ownerOf`), `ChrysalisArt` |
-| `ChrysalisArt` | Draws a card as SVG from its facts; pure, no storage | nothing |
-| Mine page + miner | Picks a seat, mines in Web Workers, mints, feeds, pupates, shows the visitor's cards | the site's live layer and wallet layer; `ChrysalisCards` |
+| `MetamorphMD` (ERC-721) | The puzzle, the epochs, the fees, the four stages, `tokenURI`, ERC-2981 | Cocoon (read only), PupateToken (`transferFrom`), the identity.md collection (`ownerOf`), `MetamorphArt` |
+| `MetamorphArt` | Draws a card as SVG from its facts; pure, no storage | nothing |
+| Mine page + miner | Picks a seat, mines in Web Workers, mints, feeds, pupates, shows the visitor's cards | the site's live layer and wallet layer; `MetamorphMD` |
 
 Cocoon, PupateHook, PupateToken, FloorFeed and the timelock are not changed and gain no new role.
 
@@ -61,11 +70,15 @@ digest is recorded so it cannot be submitted twice.
 An **epoch** is 33 eggs minted, across all seats. When the 33rd egg of an epoch is minted, the contract
 advances the epoch in the same transaction:
 
-- the mint price becomes ×1.25 of the previous epoch's;
 - the difficulty is retargeted by how long the epoch took against the target of 33 eggs in 19,800
   seconds (one egg per 10 minutes): `next = difficulty × 19,800 / elapsed`, clamped to no less than a
   quarter and no more than four times the previous difficulty, and never under the minimum difficulty;
 - the epoch's counters (eggs, per-wallet eggs, per-card feeds) start again.
+
+A **series** is 333 eggs, ten epochs. The mint price is `BASE_PRICE × 1.25^series`, where `series` is
+`totalMinted / 333`, so it steps up once per full series and never between. The collection closes when
+`totalMinted` reaches 3,333 (`MAX_SUPPLY`): the tenth series is the last and `mintEgg` reverts with
+`SupplyExhausted` after it. A seat's editions run out at 333 for its (seat, round) whatever the series.
 
 Feeding solutions do not count toward the epoch; only eggs do. The difficulty applies to every solution of
 the epoch, eggs and feeds alike.
@@ -74,7 +87,7 @@ the epoch, eggs and feeds alike.
 
 | Stage | Reached by | Pays |
 |---|---|---|
-| **Egg** | `mintEgg(seat, nonce)`: one solution, a seat the vault holds, editions left for (seat, round), the wallet's epoch cap not reached | the mint price in PUPATE, to the developer |
+| **Egg** | `mintEgg(seat, nonce)`: one solution, a seat the vault holds, editions left for (seat, round), supply left, the wallet's epoch cap not reached | the mint price in PUPATE, to the developer |
 | **Larva** | the first `feed(cardId, nonces[])`; each accepted solution adds one to the card's `work`; the card is *ripe* at 64 | gas only |
 | **Chrysalis** | `pupate(cardId)` by the card's owner (or an approved operator) once ripe; records `pupatedAt` | the mint price of the current epoch in PUPATE, to the developer |
 | **Butterfly** | computed, never sent: seven days after pupation **and** the vault no longer holds that (seat, round), or ninety days after pupation whatever happened to the seat | nothing |
@@ -93,10 +106,12 @@ is recorded and drawn (nothing else depends on it).
 
 | Constant | Value | Why |
 |---|---|---|
-| `EDITIONS` | 33 per (seat, round) | the owner's figure, already on the Mine page |
-| `EPOCH_EGGS` | 33 | one epoch per full edition's worth of eggs |
-| `BASE_PRICE` | 50,000 PUPATE | about $1.50 at launch-week prices; the ×1.25 schedule does the rest |
-| price growth | ×1.25 per epoch, exponent capped at 64 | 64 epochs is 2,112 eggs; the cap only prevents overflow |
+| `EDITIONS` | 333 per (seat, round) | the owner's figure of 2026-10-13 |
+| `MAX_SUPPLY` | 3,333 cards | ten seats' worth; the collection is finite |
+| `EPOCH_EGGS` | 33 | the difficulty's retarget interval |
+| `SERIES_EGGS` | 333 | the price's step interval, one seat's worth |
+| `BASE_PRICE` | 50,000 PUPATE | about $1.50 at launch-week prices |
+| price growth | ×1.25 per series, ten series at most | the last series is about ×9.3 the first, 372,529 PUPATE |
 | `INITIAL_DIFFICULTY` | 2^24 | about 17 million hashes, roughly 15 seconds on a laptop CPU in the browser |
 | `MIN_DIFFICULTY` | 2^20 | a floor so an idle network never becomes free |
 | retarget clamp | ÷4 to ×4 per epoch | the same bound Bitcoin uses |
@@ -110,11 +125,11 @@ is recorded and drawn (nothing else depends on it).
 
 ## Interfaces
 
-`ChrysalisCards`:
+`MetamorphMD`:
 
 - `mintEgg(uint256 seat, uint256 nonce)`, `feed(uint256 cardId, uint256[] calldata nonces)`,
   `pupate(uint256 cardId)`.
-- Views: `epoch()`, `difficulty()`, `target()`, `mintPrice()`, `eggsInEpoch()`, `epochStartedAt()`,
+- Views: `epoch()`, `series()`, `difficulty()`, `target()`, `mintPrice()`, `eggsInEpoch()`, `epochStartedAt()`,
   `editionsMinted(seat, round)`, `eggsMintedBy(epoch, wallet)`, `feedsIn(cardId, epoch)`, `cards(cardId)`
   (seat, round, edition, stage as stored, work, mintedEpoch, pupatedAt, miner, paid), `stageOf(cardId)`
   (with the butterfly rule applied), `isSolution(miner, seat, epoch, nonce)`, `mineable(seat)` (held by the
@@ -123,22 +138,22 @@ is recorded and drawn (nothing else depends on it).
 - Events: `EggMinted(cardId, seat, round, edition, miner, epoch, fee)`, `Fed(cardId, feeder, solutions,
   work)`, `Pupated(cardId, fee)`, `EpochAdvanced(epoch, difficulty, mintPrice)`. The butterfly has no event
   because it is not a transaction.
-- Errors: `SeatNotHeld`, `EditionsExhausted`, `WalletCapReached`, `CardCapReached`, `NotASolution`,
+- Errors: `SeatNotHeld`, `EditionsExhausted`, `SupplyExhausted`, `WalletCapReached`, `CardCapReached`, `NotASolution`,
   `SolutionUsed`, `WrongStage`, `NotRipe`, `NotCardOwner`, `NothingToFeed`, `ZeroAddress`.
-- Constructor: `(Cocoon cocoon, PupateToken token, IERC721Minimal collection, ChrysalisArt art)`, all
+- Constructor: `(Cocoon cocoon, PupateToken token, IERC721Minimal collection, MetamorphArt art)`, all
   immutable. The developer address is never stored; it is read from Cocoon at each payment and each
   royalty query, so it follows `Cocoon.setDeveloper`.
 
 The fee is `token.transferFrom(msg.sender, cocoon.developer(), fee)`; the miner approves the card contract
 once. If the transfer returns false or reverts, the mint or pupation reverts.
 
-`ChrysalisArt`:
+`MetamorphArt`:
 
 - `render(View calldata v) pure returns (string memory svg)` with `View = {seat, round, edition, stage,
-  work, ripeWork, miner, paid, mintedEpoch}`; `ChrysalisCards.tokenURI` wraps it as
+  work, ripeWork, miner, paid, mintedEpoch}`; `MetamorphMD.tokenURI` wraps it as
   `data:application/json;base64,…` with the image as `data:image/svg+xml;base64,…`.
 - If the renderer does not fit under the 24,576-byte contract limit in one piece, it is split into two
-  pure contracts (the chrysalis stages and the butterfly), both immutables of `ChrysalisCards`.
+  pure contracts (the chrysalis stages and the butterfly), both immutables of `MetamorphMD`.
 
 ## The drawing
 
@@ -156,17 +171,17 @@ jade `#3ec28f`, gold `#d9a94b`, dim `#9aa89f`), with the stage in the middle:
 The wing geometry, vein count, spot count, dots, rings, tilt and tone are the site's `traits(seat)`
 (`site/lib/seat.ts`), reproduced in integer arithmetic so the chain and the site draw the same butterfly
 for the same seat. The digit strings are the bits of `keccak256(seat, round, edition, line)`, so every
-edition's contour differs. Text on the card: `PUPATE · CHRYSALIS CARD`, `No. <seat>`, the stage label
-(`EGG`, `LARVA · 23 OF 64`, `IN THE COCOON`, `EMERGED`), `edition <n> of 33 · mined by 0x…`, the PUPATE
-paid, `pupate.fun`. The first edition carries a gold frame, editions two to five a gold corner.
+edition's contour differs. Text on the card: `METAMORPH.MD #<n> · PUPATE`, `seat identity.md #<seat>`, the stage label
+(`EGG`, `LARVA · 23 OF 64`, `IN THE COCOON`, `EMERGED`), `edition <n> of 333 · mined by 0x…`, the PUPATE
+paid, `pupate.fun`. The first edition carries a gold frame, editions two to thirty-three a gold corner.
 
-Attributes in the JSON: Seat, Round, Edition, Stage, Work, Epoch mined, Miner, Fees paid (PUPATE),
-Tier (Holotype for edition 1, Paratype for 2–5, Series for the rest), Tone.
+The JSON `name` is `Metamorph.md #<n>`; its `description` names the seat and the stage. Attributes: Seat, Round, Edition, Stage, Work, Epoch mined, Miner, Fees paid (PUPATE),
+Tier (Holotype for edition 1, Paratype for 2–33, Series for the rest), Tone.
 
 ## Rarity, in this version
 
-Rarity comes from facts the chain already has: the edition (1 of 33 is the holotype), the epoch of the
-mint (early epochs are cheap and few), the stage (an emerged butterfly can only exist for a seat the vault
+Rarity comes from facts the chain already has: the edition (1 of 333 is the holotype, the first 33 are
+paratypes), the series of the mint (the first series is the cheapest and there are ten), the stage (an emerged butterfly can only exist for a seat the vault
 really sold), the work recorded beyond ripeness, and the seat's own traits. The oracle work feed, later,
 adds the seat's accepted jobs while the vault held it; when it exists, a new card contract for the seats
 bought after it can scale the pupation threshold by that number. This contract's threshold stays 64.
@@ -176,7 +191,7 @@ bought after it can scale the pupation threshold by that number. This contract's
 - **Before deployment** the page keeps its present copy, corrected to say the fees go to the developer.
 - **Deployed, no seat held:** "Ready. Nothing to mine until the vault holds a seat", with the epoch, the
   price and the difficulty read live.
-- **Seat(s) held:** a seat picker (seat number, days held, editions left), the miner, the queue of found
+- **Seat(s) held:** a seat picker (seat number, days held, editions left of 333), the miner, the queue of found
   solutions, the Mint button, the visitor's cards with their live images, and per card the Feed and Pupate
   controls with the countdown to the butterfly.
 - **The miner** is a pool of Web Workers (`site/workers/miner.worker.ts`), default `hardwareConcurrency −
@@ -198,6 +213,7 @@ bought after it can scale the pupation threshold by that number. This contract's
 | epoch advanced between mining and sending | `NotASolution` | re-reads the epoch first; drops the stale queue and says why |
 | seat sold or re-bought between mining and minting | `SeatNotHeld` | re-reads `mineable(seat)` before sending |
 | editions ran out | `EditionsExhausted` | shows editions left live; disables Mint at zero |
+| the collection is complete | `SupplyExhausted` | shows "3,333 of 3,333" and keeps Feed and Pupate working |
 | wallet cap reached | `WalletCapReached` | shows "3 of 3 this epoch" |
 | not enough PUPATE | the token's `InsufficientBalance` | shows the price against the balance, links to Buy |
 | feeding a chrysalis or butterfly | `WrongStage` | hides Feed for those stages |
@@ -205,7 +221,8 @@ bought after it can scale the pupation threshold by that number. This contract's
 ## Testing
 
 - **Unit:** the puzzle at the boundary of the target; solutions bound to the sender, the seat and the
-  epoch; replay refused; editions, wallet and card caps; the price schedule (×1.25, exponent cap); the
+  epoch; replay refused; editions, supply, wallet and card caps; the price schedule (×1.25 per series of
+  333, flat inside a series, ten series); the
   retarget (fast epoch raises, slow epoch lowers, both clamped, floor respected); fees land on the
   developer and follow `setDeveloper`; the stage machine and every `WrongStage`; the butterfly rule
   (seven days and sold, ninety days regardless, re-bought seat counts as sold); `royaltyInfo`; `tokenURI`
@@ -214,7 +231,7 @@ bought after it can scale the pupation threshold by that number. This contract's
 - **Fuzz:** random nonces at high difficulty never pass; random caps and editions hold; the price never
   overflows.
 - **Invariants** (handler minting, feeding, pupating, selling seats through the fixture): every card has a
-  recorded solution digest; cards per (seat, round) never exceed 33; a card's stored stage never
+  recorded solution digest; cards per (seat, round) never exceed 333 and the total never exceeds 3,333; a card's stored stage never
   decreases; the developer's PUPATE received from the cards equals the sum of fees in events; PUPATE's
   total supply is unchanged by the cards (they burn nothing).
 - **Fork test** on a mainnet fork against the real Cocoon, token and collection: the vault is given a seat
@@ -226,7 +243,7 @@ bought after it can scale the pupation threshold by that number. This contract's
 
 ## Deployment and opening
 
-- `script/DeployChrysalis.s.sol` deploys `ChrysalisArt` then `ChrysalisCards` with the mainnet addresses,
+- `script/DeployMetamorph.s.sol` deploys `MetamorphArt` then `MetamorphMD` with the mainnet addresses,
   from the launch wallet, run by the owner. `script/mainnet/README.md` gains the step.
 - `keeper/addresses.mainnet.json` and `site/lib/addresses.ts` record `cards` and `art`; the Etherscan
   verification goes with the rest.
@@ -236,8 +253,9 @@ bought after it can scale the pupation threshold by that number. This contract's
 
 ## Public copy to change with this spec
 
-- Mine page: the fee line ("paid in PUPATE, burned in full. No treasury takes a cut") becomes "paid in
+- Mine page: "33 per round" becomes "333 per seat, 3,333 in all"; the fee line ("paid in PUPATE, burned in full. No treasury takes a cut") becomes "paid in
   PUPATE to the developer, who decides whether to burn or spend it; stated here so nobody is surprised".
+- The Mine page, the README and the site call the cards Metamorph MD; "Chrysalis Cards" goes.
 - README's Chrysalis line, the X thread's card post and `docs/v2-mining-proof-of-work.md` get a note that
   the fees go to the developer.
 
