@@ -301,12 +301,15 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         cards[id] = Card(
             uint32(seat), round, edition, gilt, uint40(block.timestamp), uint96(price), msg.sender, work
         );
-        _mint(msg.sender, id);
-        emit Minted(id, seat, round, edition, msg.sender, work, gilt, price, epoch_);
 
         prevWork = work;
         _retarget();
         lastMintAt = uint40(block.timestamp);
+
+        // Everything is written before the card is delivered: a contract miner's receiver hook runs against
+        // the finished mint, and the lock keeps it from minting again.
+        _mint(msg.sender, id);
+        emit Minted(id, seat, round, edition, msg.sender, work, gilt, price, epoch_);
         _duties(msg.sender);
     }
 
@@ -330,8 +333,11 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
 
     /// @dev Every mint moves the target toward one mint per `TARGET_INTERVAL`, by at most ×4 or ÷4, and
     /// never above the epoch's ceiling. Reads `epoch()` after `totalMinted` moved, so the ceiling of the
-    /// epoch the next mint belongs to applies. FullMath keeps `target × elapsed` from overflowing at a
-    /// low floor (the test suite runs at one bit).
+    /// epoch the next mint belongs to applies. FullMath keeps the product `target × elapsed` from
+    /// overflowing, but the quotient itself reaches 2^256 when the target sits near the top and the mint
+    /// came more than `TARGET_INTERVAL` late (the one-bit floor of the test suite; a mainnet floor of 20
+    /// bits has the room). That case saturates to the maximum first and the ceiling then caps it, so a
+    /// valid proof never reverts here.
     function _retarget() private {
         uint256 elapsed = block.timestamp - lastMintAt;
         uint256 next;
@@ -340,7 +346,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         } else if (elapsed * 4 <= TARGET_INTERVAL) {
             next = target / 4;
         } else {
-            next = FullMath.mulDiv(target, elapsed, TARGET_INTERVAL);
+            next = elapsed > TARGET_INTERVAL && target > type(uint256).max / elapsed * TARGET_INTERVAL
+                ? type(uint256).max
+                : FullMath.mulDiv(target, elapsed, TARGET_INTERVAL);
         }
         uint256 cap = _ceiling(epoch());
         if (next > cap) next = cap;
