@@ -1,21 +1,49 @@
 # Metamorph MD: the proof-of-work layer (v2)
 
-**Date:** 2026-10-13 · **Status:** v2 design approved in conversation (owner, 2026-10-13, evening); this spec
-is for the owner's review before the implementation plan. v2 replaces the four-stage, fee-to-developer design
-of the same morning after the owner studied [imdworkers.fun](https://imdworkers.fun/) and asked for its
-simplicity with Pupate's own flywheel. [`docs/v2-mining-proof-of-work.md`](../../v2-mining-proof-of-work.md)
-stays as the record of the idea.
+**Date:** 2026-10-13 · **Status:** v2 design approved in conversation (owner, 2026-10-13, evening), simplified
+the same night to the user-facing surface of [imdworkers.fun](https://imdworkers.fun/); this spec is for the
+owner's review before the implementation plan. v2 replaces the four-stage, fee-to-developer design of the
+same morning. [`docs/v2-mining-proof-of-work.md`](../../v2-mining-proof-of-work.md) stays as the record of
+the idea.
 
 ## Why
 
 Pupate's token is live and its vault has no operator. Metamorph MD gives the project a second thing to do
 with a browser besides trading: mine a card of a seat the vault holds. WORKERS proved that browser mining
 with a wallet-bound hash, a rising price and auto-mint is a form people understand in a minute. We take
-that form whole and change what it runs on: the fee is paid in PUPATE, so every mint buys PUPATE in the
-pool and pays the 6% tax that buys the next seat; what is mined is a seat that really works in the IMD
-swarm; the stakers' yield is paid in IMD out of real mint revenue, not out of an emission; and the mint
-transaction itself can run the vault's duties and be paid for it. No second token, no activation, no burn
-pool, no keys.
+that form whole, including how little it asks of the visitor, and change what it runs on: the fee is paid
+in PUPATE, so every mint buys PUPATE in the pool and pays the 6% tax that buys the next seat; what is
+mined is a seat that really works in the IMD swarm; the stakers' yield is paid in IMD out of real mint
+revenue, not out of an emission; and the mint transaction quietly runs the vault's duties and is paid for
+it. No second token, no activation, no burn pool, no keys, and nothing for the visitor to configure.
+
+## What the visitor sees and does
+
+This is the whole surface. Everything in the later sections happens underneath it.
+
+**The mine page.** A title ("Clock in."), one sentence: *Your machine searches for a hash under the target.
+Find one, pay the mint in PUPATE, and the hash picks which seat your card comes from. Lucky hashes come out
+gilt.* Four steps across the top: **1 Connect · 2 Approve PUPATE · 3 Mine · 4 Auto-mint**. On the left: the
+status light, the hash rate in large type, Engine CPU / GPU, Power 25 / 50 / 75 / 100 %, Auto-mint on / off,
+one main button (Connect wallet → Approve PUPATE → Start mining → Stop mining), and "or try a practice run".
+On the right: wallet, PUPATE balance with a Buy link, **Mint price: 62,500 PUPATE · epoch 2 of 11**, valid
+hashes this session, and the activity log. Above it, "The mine, in numbers": minted, epoch, price,
+difficulty as "≈ 1.0M hashes", network rate, percent minted, seconds since the last mint. Nothing else.
+
+**What happens when a hash is found.** With auto-mint on, the wallet opens to sign; one approval covers
+every mint. The log says `found a valid hash · sending the mint`, then `Metamorph.md #212 is yours · seat
+identity.md #1376 · mining the next one`. If someone else's mint landed first, the log says `someone minted
+first, your hash expired · mining again` and the miner continues by itself. If the mint also ran a vault
+duty, the log adds `your mint also burned 0.046 ETH of tax for the vault · you earned 0.00023 ETH`.
+
+**The workspace.** The visitor's cards with their live image and stage (in the cocoon / emerged, gilt),
+three buttons per selection: **Stake**, **Unstake**, **Claim IMD**, and one figure: IMD earned, not claimed.
+A line explains in one sentence: *70% of every mint goes to the stakers as IMD; an emerged butterfly earns
+double.* Plus the gallery of all 3,333 and a leaderboard. No conversion button, no refresh button, no
+locks, no weights to choose.
+
+**Words the visitor meets:** mine, hash, mint price, epoch (1 of 11), gilt, chrysalis / emerged, stake,
+claim IMD. Not: series, target, anchor, prevWork, retarget, pot, convert, refresh, duties.
 
 ## What WORKERS does, as read from its code
 
@@ -29,7 +57,7 @@ contracts are not verified, so the retarget and staking formulas below are ours,
 - **Difficulty** starts at 12 bits and its floor rises one bit per epoch; the site shows about 13.4 bits
   (≈10,800 hashes), so the hash is a formality and the fee is the gate.
 - **Epochs** of 370 mints (9 for the original 3,333), prices 0.25 → 0.5 → 0.75 → 1.25 → 1.75 → 2.5 → 3.25 → 4
-  → 5 IMD. Supply cut to 1,555.
+  → 5 IMD, shown to the visitor only as "epoch 5 of 9" beside the price. Supply cut to 1,555.
 - **The winning hash picks a random unminted worker**; **Overclocked = proof < target/16** (1 in 16).
 - **Miner:** hand-written keccak with a precomputed midstate (the first 136-byte block never changes), 40,000
   hashes per chunk, a benchmark to pick the thread count, a fully unrolled WebGPU shader, power 25–100%,
@@ -44,21 +72,22 @@ contracts are not verified, so the retarget and staking formulas below are ours,
 
 Owner's decisions, with their dates. Later ones override earlier ones.
 
-- **The WORKERS mechanism (2026-10-13 evening):** one valid proof is one mint; the work chain of anchor and
-  `prevWork`; the hash picks the seat; gilt at target/16; the four-step page (Connect, Approve, Mine,
-  Auto-mint) with CPU and GPU engines and a power control. Egg, larva, feeding and pupation are dropped.
+- **The WORKERS mechanism and surface (2026-10-13 evening, simplified the same night):** one valid proof is
+  one mint; the work chain of anchor and `prevWork`; the hash picks the seat; gilt at target/16; the
+  four-step page with CPU and GPU engines and a power control; one word, epoch, for the price step; no
+  knobs beyond engine, power and auto-mint. Egg, larva, feeding and pupation are dropped.
 - **Fee split 70 / 30 (2026-10-13):** 70% of every mint fee to the stakers, 30% to the treasury. The
   treasury is the developer's address as Cocoon records it, paid in PUPATE in the mint transaction.
 - **Stakers are paid in IMD (2026-10-13):** the stakers' 70% is held as PUPATE and converted in batches,
-  by a public bounded `convert()`, into IMD through the PUPATE/ETH pool and the ETH/IMD pool; stakers claim
-  IMD. Chosen over conversion inside each mint (gas and MEV per mint) and over PUPATE rewards with a swap
-  button in the site.
+  by a public bounded `convert()` that the keeper and the mints themselves trigger, into IMD through the
+  PUPATE/ETH pool and the ETH/IMD pool; stakers claim IMD. Chosen over conversion inside each mint (gas and
+  MEV per mint) and over PUPATE rewards with a swap button in the site.
 - **Staking without time locks (2026-10-13):** stake and unstake at will, equal weights, except that an
-  emerged butterfly weighs 2×. A staked card is locked in place (transfers revert) rather than moved into
-  the contract, so it stays visible in the wallet.
-- **Mining runs the vault (2026-10-13):** a mint may also execute a due vault duty (flush, burn, convert);
-  the caller rewards go to the miner. Opt-in per mint, never allowed to fail the mint.
-- **The fuel is PUPATE (2026-10-13):** the mint price is in PUPATE, 50,000 at the start, ×1.25 per series of
+  emerged butterfly weighs 2×, applied automatically. A staked card is locked in place (transfers revert)
+  rather than moved into the contract, so it stays visible in the wallet.
+- **Mining runs the vault (2026-10-13):** when gas is cheap and a duty is due, a mint also executes it
+  (flush, burn, convert) and the caller rewards go to the miner. Automatic; it can never fail the mint.
+- **The fuel is PUPATE (2026-10-13):** the mint price is in PUPATE, 50,000 in epoch 1, ×1.25 per epoch of
   303 mints.
 - **Supply (2026-10-13):** 303 cards per seat and round, 3,333 cards in all (11 × 303), only for seats the
   vault holds.
@@ -77,9 +106,10 @@ Owner's decisions, with their dates. Later ones override earlier ones.
 
 | Unit | Does | Depends on |
 |---|---|---|
-| `MetamorphMD` (ERC-721) | the work chain and the mint, the seat pick, the fee split, the reward pot and `convert()`, staking and IMD claims, the vault duties, the two stages, `tokenURI`, ERC-2981 | Cocoon and PupateHook (reads, plus `burn()` and `flush()` when asked), PupateToken, IMD, the identity.md collection, the PoolManager (two pools), `MetamorphArt` |
+| `MetamorphMD` (ERC-721) | the work chain and the mint, the seat pick, the fee split, the reward pot and `convert()`, staking and IMD claims, the vault duties, the two stages, `tokenURI`, ERC-2981 | Cocoon and PupateHook (reads, plus `burn()` and `flush()` when due), PupateToken, IMD, the identity.md collection, the PoolManager (two pools), `MetamorphArt` |
 | `MetamorphArt` | draws a card as SVG from its facts; pure | nothing |
-| the Mine page and the miner | the four steps, the engines, auto-mint, the workspace (cards, stake, claim) | the site's live and wallet layers; `MetamorphMD` |
+| the mine page and the workspace | the surface above | the site's live and wallet layers; `MetamorphMD` |
+| the keeper's `convert` duty | converts the pot on the same thresholds, so it never waits on a miner | `MetamorphMD` |
 
 Cocoon, PupateHook, PupateToken, FloorFeed and the timelock are not changed and gain no new role.
 `MetamorphMD` is an ordinary caller of their public functions.
@@ -98,76 +128,81 @@ kept for later, and every mint voids every proof that was being searched for. Th
 laid out so that its first 136 bytes are constant while mining (the keccak midstate trick); only the nonce
 changes.
 
-`mint(uint256 anchor, uint256 nonce, bool runDuties)`:
+`mint(uint256 anchor, uint256 nonce)`, the only call a miner makes:
 
 1. checks supply, the proof, and that the vault holds at least one seat with editions left;
 2. picks the seat: the held seats with editions left, in ascending token id, indexed by `work % count`
-   (read from Cocoon: `heldCount()`, the held set, `seats(id).held`, `seats(id).round`, and the
-   collection's `ownerOf`); the edition is the next for that (seat, round);
+   (read from Cocoon: the held set, `seats(id).held`, `seats(id).round`, and the collection's `ownerOf`);
+   the edition is the next for that (seat, round);
 3. takes the fee: `transferFrom(msg.sender, this, price × 70%)` into the reward pot and
    `transferFrom(msg.sender, cocoon.developer(), price × 30%)`;
 4. mints token `n = totalMinted + 1` to `msg.sender` with `gilt = uint256(work) < target >> 4`;
-5. records `prevWork = work`, retargets, advances the series if due;
-6. if `runDuties`, tries the vault duties (below) and forwards what they paid to `msg.sender`.
+5. records `prevWork = work`, retargets, advances the epoch if due;
+6. runs the vault duties that are due, if `block.basefee ≤ DUTY_MAX_BASEFEE` (2 gwei), and forwards what
+   they paid to `msg.sender`.
 
 `workHash(bytes32 anchorHash, address miner, uint256 nonce) view` returns the proof the contract would
 compute, for the miner's self-test; `anchorHash(uint256 block) view` returns `blockhash` or zero.
 
-### Difficulty and price
+### Epochs, price and difficulty
 
-- **Retarget every mint** toward `TARGET_INTERVAL` (90 seconds): `target = target × elapsed /
-  TARGET_INTERVAL`, where `elapsed` is the time since the previous mint, clamped between a quarter and four
-  times the previous target, and never above the series' ceiling `type(uint256).max >> (MIN_BITS +
-  series)`: the difficulty floor is 20 bits in the first series and rises one bit per series. At the
-  start the target is the first series' ceiling (20 bits, about a million hashes).
-- **Price:** `BASE_PRICE × 1.25^series`, `series = totalMinted / 303`; eleven series, the last about ×9.3
-  the first. `mintPrice()` is read by the page before every mint.
+- **An epoch is 303 mints,** one seat's worth; there are eleven. The visitor sees "epoch 2 of 11" beside
+  the price and nothing more.
+- **Price per epoch:** 50,000 → 62,500 → 78,125 → 97,656 → 122,070 → 152,588 → 190,735 → 238,419 → 298,023
+  → 372,529 → 465,661 PUPATE (`BASE_PRICE × 1.25^(epoch−1)`, `epoch = totalMinted / 303 + 1`).
+- **Difficulty retargets every mint,** silently, toward `TARGET_INTERVAL` (90 seconds): `target = target ×
+  elapsed / TARGET_INTERVAL` with `elapsed` the time since the previous mint, clamped between a quarter
+  and four times the previous target, and never above the epoch's ceiling `type(uint256).max >> (MIN_BITS
+  + epoch − 1)`: the floor is 20 bits in epoch 1 and rises one bit per epoch. At the start the target is
+  the ceiling (about a million hashes). The page shows it only as "≈ 1.0M hashes" and an ETA.
 - **The pace this sets:** at most about forty mints an hour network-wide whatever the demand; demand shows
   up as difficulty, not throughput. At steady demand the collection takes at least three and a half days
   to mint out.
 
 ### The vault duties
 
-With `runDuties`, after the mint and inside the same transaction, `MetamorphMD` tries in order, each in a
-`try` with a gas allowance so that a failure never reverts the mint:
+Inside the mint, after the card is minted, when the base fee is at most 2 gwei, `MetamorphMD` tries in
+order, each in a `try` with a gas allowance so that a failure never reverts the mint:
 
 1. `PupateHook.flush()` when the hook's claims are at least `MIN_FLUSH` (0.005 ETH);
 2. `Cocoon.burn()` when the burn pot is at least `MIN_BURN` (0.01 ETH) and the spacing allows; the 0.5%
    caller reward arrives in ETH and is forwarded to the miner;
-3. `convert()` (below) when the reward pot is at least `MIN_CONVERT` (the current mint price ×2); the 0.5%
-   caller reward arrives in IMD and is forwarded to the miner.
+3. `convert()` (below) when the reward pot is at least `MIN_CONVERT` (twice the current mint price); the
+   0.5% caller reward arrives in IMD and is forwarded to the miner.
 
-The page turns `runDuties` on by default when the base fee is under 2 gwei and a duty is due, and shows
-the expected reward beside the mint. `MetamorphMD` has a `receive()` for the vault's ETH and never keeps
-any: whatever ETH it holds at the end of a call goes to the caller.
+The page shows nothing about this before the mint; the log reports what happened and what it paid.
+`MetamorphMD` has a `receive()` for the vault's ETH and never keeps any: whatever ETH it holds at the end
+of a call goes to the caller. `dutiesDue()` is a view for the keeper and the log.
 
 ## The fee, the pot and the stakers
 
 - **Split:** 70% of each fee to the reward pot (PUPATE held by `MetamorphMD`), 30% to `cocoon.developer()`
   at once. Nothing else ever leaves the pot except through `convert()`.
-- **`convert()`, public, bounded:** sells the pot's PUPATE for ETH in the PUPATE/ETH pool with the price
-  limit Cocoon's `burn` uses, mirrored for a sale (`sqrtPrice × sqrt(1 − CONVERT_IMPACT)`, 5%), then buys
-  IMD with that ETH in the ETH/IMD pool (currency0 ETH, currency1 IMD, fee 10,000, tick spacing 200, no
-  hook, pool id `0xb07d640f…abfb3`, about $2.6M of liquidity on 2026-10-13) under the same bound, both in
-  one `unlock`. The IMD bought, less `CALLER_REWARD` (0.5%) to the caller, is credited to the stakers'
-  accumulator. What the bound leaves unsold stays in the pot for the next call. The sale pays the hook's
-  6% tax to the vault like any sale, and that is wanted: the stakers' rewards pay for the next seat.
-- **Stakers earn IMD** through the usual accumulator: `accIMDPerWeight` grows by `IMD × 1e18 /
-  totalWeight` on every conversion; a staker's pending is `weight × acc − debt`. `claim()` pays the pending
-  IMD. If `totalWeight` is zero when a conversion lands, that IMD goes to `cocoon.developer()`, so nothing
-  waits in the contract for a staker who may never come.
-- **`stake(ids)`, `unstake(ids)`, `claim()`, `refresh(ids)`:** staking settles pending, locks the cards
-  (transfers revert with `Staked`), and adds their weight: 1 for a chrysalis, 2 for a butterfly, as the
-  stage reads at that moment. `refresh` re-reads the stage of staked cards and raises their weight after
-  emergence, settling first. Unstaking settles and unlocks. There is no lock period and no custody change.
+- **`convert()`, public, bounded, never a button:** sells the pot's PUPATE for ETH in the PUPATE/ETH pool
+  with the price limit Cocoon's `burn` uses, mirrored for a sale (`sqrtPrice × sqrt(1 − CONVERT_IMPACT)`,
+  5%), then buys IMD with that ETH in the ETH/IMD pool (currency0 ETH, currency1 IMD, fee 10,000, tick
+  spacing 200, no hook, pool id `0xb07d640f…abfb3`, about $2.6M of liquidity on 2026-10-13) under the same
+  bound, both in one `unlock`. The IMD bought, less `CALLER_REWARD` (0.5%) to the caller, is credited to
+  the stakers' accumulator. What the bound leaves unsold stays in the pot for the next call. The sale pays
+  the hook's 6% tax to the vault like any sale, and that is wanted: the stakers' rewards pay for the next
+  seat. The keeper calls it on the same thresholds as the mints do.
+- **Stakers earn IMD** through the usual accumulator, kept per card: `accIMDPerWeight` grows by `IMD × 1e18
+  / totalWeight` on every conversion; a staked card's pending is `weight × acc − debt`. If `totalWeight` is
+  zero when a conversion lands, that IMD goes to `cocoon.developer()`, so nothing waits in the contract for
+  a staker who may never come.
+- **`stake(ids)`, `unstake(ids)`, `claim(ids)`:** staking settles and locks the cards (transfers revert with
+  `Staked`) at weight 1 for a chrysalis and 2 for a butterfly as the stage reads then. Every later touch of
+  a card (claim, unstake, or a stake of other cards by the same owner) re-reads its stage and raises the
+  weight to 2 after emergence, settling first; the visitor never asks for it. Unstaking settles and unlocks.
+  No lock period, no custody change. The page calls `claim` with all of the visitor's staked cards.
 - **Royalty:** `royaltyInfo` returns `cocoon.developer()` and 5% of the sale price.
 
 ## The card's two stages
 
 | Stage | When | Weight when staked |
 |---|---|---|
-| **Chrysalis** | from the mint | 1 |
-| **Butterfly** | computed on every read: the vault no longer holds the card's (seat, round), that is `seats(seat).held` is false, or `round` differs (the vault bought the seat again), or the collection's `ownerOf(seat)` is not Cocoon; or 90 days have passed since the mint whatever happened to the seat | 2 after `refresh` |
+| **Chrysalis** ("in the cocoon") | from the mint | 1 |
+| **Butterfly** ("emerged") | computed on every read: the vault no longer holds the card's (seat, round), that is `seats(seat).held` is false, or `round` differs (the vault bought the seat again), or the collection's `ownerOf(seat)` is not Cocoon; or 90 days have passed since the mint whatever happened to the seat | 2, applied on the next touch |
 
 Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card can be stuck.
 
@@ -177,17 +212,18 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
 |---|---|---|
 | `EDITIONS` | 303 per (seat, round) | 11 × 303 = 3,333 |
 | `MAX_SUPPLY` | 3,333 | the collection is finite |
-| `SERIES` | 303 mints | one seat's worth; price and difficulty floor step here |
+| `EPOCH` | 303 mints | one seat's worth; price and difficulty floor step here; "epoch n of 11" on the page |
 | `BASE_PRICE` | 50,000 PUPATE | about $1.50 at launch-week prices |
-| price growth | ×1.25 per series, eleven series | the last series about 465,661 PUPATE |
+| price growth | ×1.25 per epoch, eleven epochs | the last about 465,661 PUPATE |
 | `TARGET_INTERVAL` | 90 s | about forty mints an hour at most |
-| `MIN_BITS` | 20 in series 1, +1 per series (constructor, 20 on mainnet) | the difficulty floor; about a million hashes at the start |
+| `MIN_BITS` | 20 in epoch 1, +1 per epoch (constructor, 20 on mainnet) | the difficulty floor; about a million hashes at the start |
 | retarget clamp | ÷4 to ×4 per mint | the same bound Bitcoin uses, applied per mint |
 | `ANCHOR_WINDOW` | 50 blocks | about ten minutes on Ethereum; `blockhash` reaches 256 |
 | gilt | `work < target >> 4` | 1 in 16, the Overclocked rule |
 | fee split | 70% pot, 30% treasury | the owner's figures |
 | `CONVERT_IMPACT` | 500 bps | the vault's burn bound, mirrored |
 | `CALLER_REWARD` | 50 bps | the vault's figure, for `convert` |
+| `DUTY_MAX_BASEFEE` | 2 gwei | duties ride along only when gas is cheap |
 | `MIN_FLUSH`, `MIN_BURN`, `MIN_CONVERT` | 0.005 ETH, 0.01 ETH, 2 × price | the keeper's thresholds |
 | butterfly ceiling | 90 days from the mint | no card waits forever for a sale |
 | staking weights | chrysalis 1, butterfly 2 | yield follows the vault's success |
@@ -197,24 +233,24 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
 
 `MetamorphMD`:
 
-- `mint(uint256 anchor, uint256 nonce, bool runDuties)`, `convert()`, `stake(uint256[] ids)`,
-  `unstake(uint256[] ids)`, `claim()`, `refresh(uint256[] ids)`.
-- Views: `target()`, `bits()` (for display), `prevWork()`, `lastMintAt()`, `series()`, `mintPrice()`,
+- `mint(uint256 anchor, uint256 nonce)`, `convert()`, `stake(uint256[] ids)`, `unstake(uint256[] ids)`,
+  `claim(uint256[] ids)`.
+- Views: `target()`, `bits()` (for display), `prevWork()`, `lastMintAt()`, `epoch()`, `mintPrice()`,
   `totalMinted()`, `editionsMinted(seat, round)`, `mineableSeats()` (the held seats with editions left, in
   pick order), `workHash(anchorHash, miner, nonce)`, `anchorHash(block)`, `cards(id)` (seat, round, edition,
-  gilt, mintedAt, miner, work), `stageOf(id)`, `pot()`, `pendingIMD(staker)`, `stakeOf(id)` (staker, weight),
+  gilt, mintedAt, miner, work), `stageOf(id)`, `pot()`, `pendingIMD(ids)`, `stakeOf(id)` (staker, weight),
   `totalWeight()`, `dutiesDue()` (flush, burn, convert as booleans with the expected rewards), `tokenURI`,
   `royaltyInfo`, `supportsInterface` (ERC-165, 721, 721Metadata, 2981).
-- Events: `Minted(id, seat, round, edition, miner, work, gilt, price, series)`, `Retargeted(target)`,
+- Events: `Minted(id, seat, round, edition, miner, work, gilt, price, epoch)`, `Retargeted(target)`,
   `Converted(pupateSold, ethBought, imdBought, caller, reward)`, `Staked(id, staker, weight)`,
-  `Unstaked(id, staker)`, `Claimed(staker, imd)`, `Refreshed(id, weight)`, `DutyRun(kind, paid)`.
+  `Unstaked(id, staker)`, `Claimed(staker, imd)`, `Reweighed(id, weight)`, `DutyRun(kind, paid)`.
 - Errors: `SupplyExhausted`, `NothingMineable`, `BadAnchor`, `NotASolution`, `StaleWork`, `Staked`,
   `NotStaked`, `NotCardOwner`, `NothingToConvert`, `NothingBought`, `ZeroAddress`.
 - Constructor: `(Cocoon cocoon, PupateHook hook, PupateToken pupate, IERC20 imd, IERC721Minimal collection,
   IPoolManager poolManager, PoolKey pupateKey, PoolKey imdKey, MetamorphArt art, uint8 minBits)`, all
-  immutable. `minBits` is the first series' difficulty floor: 20 on mainnet, 1 in the test suite so that
-  proofs can be found inside a test (about every other nonce passes). The developer address is never
-  stored; it is read from Cocoon at each payment and each royalty query.
+  immutable. `minBits` is epoch 1's difficulty floor: 20 on mainnet, 1 in the test suite so that proofs can
+  be found inside a test (about every other nonce passes). The developer address is never stored; it is
+  read from Cocoon at each payment and each royalty query.
 
 `MetamorphArt`: `render(View calldata v) pure returns (string memory svg)` with `View = {seat, round,
 edition, stage, gilt, miner, mintedAt}`; `tokenURI` wraps it as `data:application/json;base64,…` with the
@@ -257,76 +293,68 @@ and one small line at the bottom, `seat identity.md #<seat> · edition <e> of 30
 paid and the site's name are attributes only; the drawing sits centred in the space that leaves.
 
 The JSON `name` is `Metamorph.md #<n>`; its `description` names the seat and the stage. Attributes: Seat,
-Round, Edition, Stage, Gilt, Series, Miner, Price paid (PUPATE), Tier (Holotype for edition 1, Paratype for
+Round, Edition, Stage, Gilt, Epoch, Miner, Price paid (PUPATE), Tier (Holotype for edition 1, Paratype for
 2–33, Series for the rest), Form, Palette, Halo, Signal, Density, Tone.
 
 ## Rarity
 
-From the chain itself: the edition (1 of 303 is the holotype, the first 33 paratypes), the series (the first
+From the chain itself: the edition (1 of 303 is the holotype, the first 33 paratypes), the epoch (the first
 is the cheapest; there are eleven), gilt (1 in 16, from the proof), the stage (a butterfly can only exist
 for a seat the vault really sold), and the seat's own traits. The oracle work feed, later, adds the seat's
 accepted jobs while the vault held it as an attribute and, in a later contract, as a staking weight.
 
-## The Mine page and the miner
+## The miner, underneath the page
 
-- **Steps, as WORKERS lays them out:** 1 Connect, 2 Approve PUPATE (one unlimited approval), 3 Mine, 4
-  Auto-mint. The left panel: the status light, the hash rate in large type, engine CPU / GPU, power 25 / 50
-  / 75 / 100%, auto-mint on / off, the main button, "or try a practice run" (a practice job at the same
-  layout and real speed, before deployment and for anyone curious). The right panel: wallet, PUPATE balance
-  with a Buy link, mint price and series, valid hashes this session, and the activity log. A line under the
-  button says what runDuties will do and pay for the next mint.
-- **The miner:** a hand-written keccak-f[1600] core with 32-bit lanes and the midstate of the constant
-  first block, 40,000 hashes per chunk per worker, a one-second benchmark to pick the thread count, a fully
-  unrolled WebGPU shader for the GPU engine (one nonce per thread, the same two-word target compare), the
-  power control as a duty cycle, and a self-test before the first job: the CPU core's digest must equal
-  viem's keccak of the same `abi.encode`, the contract's `workHash()` view, and the GPU's hit must verify on
-  the CPU core. The spike of 2026-10-13 measured the generic JS keccak at about 42,000 hashes per second
-  per thread; the hand-written core is the budget's basis and is benchmarked in the plan's first task.
-- **Jobs:** the page builds a job from `prevWork`, `target`, the newest usable anchor and the miner's
-  address; it polls every three seconds and rebuilds the job when `prevWork` changed ("someone minted first,
-  your hash expired · mining again"), the target changed, or the anchor is within ten blocks of expiring.
-  A found proof is minted at once when auto-mint is on, after rechecking price, allowance and balance; a
-  wallet rejection turns auto-mint off; a mint that lost its block is retried once and then re-mined.
-- **The workspace:** the visitor's cards with live images and stage, Stake / Unstake, pending IMD and
-  Claim, a Refresh button for cards that emerged while staked, the pot and a public Convert button with the
-  caller reward shown, and the collection's gallery.
-- **Before the first seat:** the page says "Ready. Nothing to mine until the vault holds a seat" with the
-  price, the difficulty floor and the practice run available.
-- `Addresses` gains `cards` and `art`; reads follow `site/lib/live.ts`, writes the wallet layer.
+- A hand-written keccak-f[1600] core with 32-bit lanes and the midstate of the constant first block, 40,000
+  hashes per chunk per worker, a one-second benchmark to pick the thread count, a fully unrolled WebGPU
+  shader for the GPU engine (one nonce per thread, the same two-word target compare), the power control
+  as a duty cycle, and a self-test before the first job: the CPU core's digest must equal viem's keccak of
+  the same `abi.encode`, the contract's `workHash()` view, and the GPU's hit must verify on the CPU core.
+  The spike of 2026-10-13 measured the generic JS keccak at about 42,000 hashes per second per thread; the
+  hand-written core is the budget's basis and is benchmarked in the plan's first task.
+- The page builds a job from `prevWork`, `target`, the newest usable anchor and the miner's address; it
+  polls every three seconds and rebuilds the job when `prevWork` changed, the target changed, or the anchor
+  is within ten blocks of expiring. A found proof is minted at once when auto-mint is on, after rechecking
+  price, allowance and balance; a wallet rejection turns auto-mint off; a mint that lost its block is
+  retried once and then re-mined. Closing the tab stops mining.
+- Before the first seat the page says "Ready. Nothing to mine until the vault holds a seat" with the price
+  and the practice run available. `Addresses` gains `cards` and `art`; reads follow `site/lib/live.ts`,
+  writes the wallet layer.
 
-## Errors the user can meet
+## Errors the visitor can meet
 
-| Case | Contract | Page |
+| Case | Contract | What the visitor sees |
 |---|---|---|
-| someone minted first | `StaleWork` | rebuilds the job, says so, keeps mining |
-| the anchor aged out | `BadAnchor` | rebuilds the job before it happens (ten-block margin) |
-| the target moved while sending | `NotASolution` | re-reads the target before sending; a lower target keeps old proofs valid, a higher one does not |
-| no seat held or none with editions left | `NothingMineable` | shows the state and the vault's seat pot |
-| the collection is complete | `SupplyExhausted` | shows 3,333 of 3,333; staking, claims and conversion keep working |
-| not enough PUPATE or allowance | the token's errors | shows the price against the balance, links to Buy or to Approve |
-| transferring a staked card | `Staked` | the marketplace shows the revert; the page says to unstake first |
+| someone minted first | `StaleWork` | the log line above; mining continues by itself |
+| the anchor aged out | `BadAnchor` | never, the job is rebuilt ten blocks early |
+| the target moved while sending | `NotASolution` | the log says the difficulty changed; mining continues |
+| no seat held or none with editions left | `NothingMineable` | "nothing to mine until the vault holds a seat" |
+| the collection is complete | `SupplyExhausted` | "3,333 of 3,333 minted"; staking and claims keep working |
+| not enough PUPATE or allowance | the token's errors | the price against the balance, a Buy or Approve button |
+| transferring a staked card | `Staked` | the marketplace shows the revert; the workspace says to unstake first |
 
 ## Testing
 
 - **Unit:** the proof at the boundary of the target; bound to the sender, the contract, the chain, the
   anchor and `prevWork`; stale anchors and future anchors refused; a mint voids open proofs; the seat pick
-  covers every mineable seat and skips exhausted ones; editions and supply; the price per series; the
-  retarget (fast mints raise the difficulty, slow ones lower it, both clamped, the floor rises per series);
+  covers every mineable seat and skips exhausted ones; editions and supply; the price per epoch; the
+  retarget (fast mints raise the difficulty, slow ones lower it, both clamped, the floor rises per epoch);
   the fee split to the pot and the developer, following `setDeveloper`; `convert` sells within the bound,
   credits the accumulator less the reward, sends IMD to the developer when nobody stakes, leaves the
-  remainder in the pot; staking settles correctly for two stakers across conversions; butterfly weight
-  after `refresh`; locked transfers; the vault duties run when due, never revert the mint, and forward
-  their rewards; the butterfly rule (sold, re-bought, 90 days); `royaltyInfo`; `tokenURI` valid with the
-  stage and gilt; the renderer deterministic; both contracts under 24,576 bytes.
+  remainder in the pot; staking settles correctly for two stakers across conversions; the butterfly weight
+  applied on the next touch; locked transfers; the vault duties run when due and cheap, never revert the
+  mint, and forward their rewards; the butterfly rule (sold, re-bought, 90 days); `royaltyInfo`;
+  `tokenURI` valid with the stage and gilt; the renderer deterministic; both contracts under 24,576 bytes.
 - **Fuzz:** random nonces at the floor never pass; random fee amounts split exactly; random stake and
   unstake sequences never pay more IMD than the contract holds.
-- **Invariants** (a handler minting with real proofs found off-chain in the test, converting, staking,
-  claiming, selling seats through the fixture): `prevWork` always equals the last mint's proof; cards per
-  (seat, round) never exceed 303 and the total 3,333; the pot equals 70% of fees minus what `convert` sold;
-  the sum of pending IMD never exceeds the IMD balance; the contract never holds ETH after a call.
+- **Invariants** (a handler minting with real proofs found in the test at `minBits = 1`, converting,
+  staking, claiming, selling seats through the fixture): `prevWork` always equals the last mint's proof;
+  cards per (seat, round) never exceed 303 and the total 3,333; the pot equals 70% of fees minus what
+  `convert` sold; the sum of pending IMD never exceeds the IMD balance; the contract never holds ETH after
+  a call.
 - **Fork test** on a mainnet fork against the real Cocoon, hook, token, IMD, collection and both pools: the
   vault is given a seat (a holder transfers it, Cocoon adopts it after a fresh floor is written into
-  FloorFeed's storage), a proof is mined in the test, minted with duties on, the pot is converted through
+  FloorFeed's storage), a proof is mined in the test, minted with a duty due, the pot is converted through
   the real pools, a staker claims IMD, and the butterfly appears after the seat is settled.
 - **Review:** an independent agent reviews both contracts and the tests without the design's reasoning, as
   the vault had; the mutation checks are repeated; the swap paths and the accumulator get a second pass.
@@ -336,16 +364,15 @@ accepted jobs while the vault held it as an attribute and, in a later contract, 
 
 - `script/DeployMetamorph.s.sol` deploys `MetamorphArt` then `MetamorphMD` with the mainnet addresses and
   both pool keys, from the launch wallet, run by the owner. `script/mainnet/README.md` gains the step.
-- `keeper/addresses.mainnet.json` and `site/lib/addresses.ts` record `cards` and `art`; the keeper gains a
-  `convert` duty (the same thresholds) so the pot never waits on a miner; Etherscan verification with the
-  rest.
-- The contracts may live before the first seat; the Mine page says so and switches on its own when the
+- `keeper/addresses.mainnet.json` and `site/lib/addresses.ts` record `cards` and `art`; the keeper gains the
+  `convert` duty; Etherscan verification with the rest.
+- The contracts may live before the first seat; the mine page says so and switches on its own when the
   vault holds a seat. The announcement is "contracts live, mining opens with the first seat".
 
 ## Public copy to change with this spec
 
-- Mine page: the fee line becomes "paid in PUPATE: 70% to the stakers, converted to IMD; 30% to the
-  developer"; "33 per round" becomes "303 per seat, 3,333 in all"; the four stages become two.
+- Mine page: rebuilt to the surface above; the fee line reads "paid in PUPATE: 70% to the stakers as IMD,
+  30% to the developer"; "33 per round" becomes "303 per seat, 3,333 in all"; the four stages become two.
 - The README, the site and the posts call the cards Metamorph MD; `docs/v2-mining-proof-of-work.md` gets a
   note pointing here.
 
