@@ -30,12 +30,18 @@ Owner's decisions, with their dates. Later ones override earlier ones.
 - **Four stages on one NFT (2026-10-12).** A card is a single ERC-721 token whose image and attributes
   follow its stage: Egg, Larva, Chrysalis, Butterfly. There is no separate token per stage and nothing is
   re-minted; the token id never changes.
-- **Only seats the vault holds now are mineable (2026-10-08).** **333 editions per seat per round, and a
-  collection of at most 3,333 cards (2026-10-13):** the first seat opens 333 cards at once; the collection
-  closes after ten seats' worth, finite like Identity MD's 1,999 without copying the number.
+- **Only seats the vault holds now are mineable (2026-10-08).** **303 editions per seat per round, and a
+  collection of exactly 3,333 cards (2026-10-13):** the first seat opens 303 cards at once; the collection
+  closes after eleven seats' worth (11 × 303), finite like Identity MD's 1,999 without copying the number.
+- **A minimal label on the image (2026-10-13).** The card prints only the collection mark, the number, the
+  stage and one line naming the seat and the edition; the miner, the fees and the site are attributes.
+  Chosen from side-by-side renders over the full specimen label and over no text at all.
+- **Every card visibly different (2026-10-13).** Beyond the digit strings, each edition draws its own shell
+  form, palette, halo, signal, density, tilt and size, so that all 3,333 are told apart at thumbnail size.
+  The owner reviewed a full render of the collection before this was fixed.
 - **Price and difficulty rise as the collection fills (2026-10-12, numbers 2026-10-13):** the difficulty
-  retargets every epoch of 33 eggs; the price steps ×1.25 every series of 333 eggs, so the last series costs
-  about nine times the first.
+  retargets every epoch of 33 eggs; the price steps ×1.25 every series of 303 eggs, one seat's worth; eleven
+  series, the last about 9.3 times the first.
 - **Names (2026-10-13).** The collection is **Metamorph MD** (ERC-721 `name`), symbol **MMD**, in the
   manner of Identity MD. Each token is named **`Metamorph.md #<n>`** where `n` is the token id, counted from 1
   in mint order across all seats, the way `identity.md #994` is named by its id. The seat a card comes from,
@@ -75,10 +81,11 @@ advances the epoch in the same transaction:
   quarter and no more than four times the previous difficulty, and never under the minimum difficulty;
 - the epoch's counters (eggs, per-wallet eggs, per-card feeds) start again.
 
-A **series** is 333 eggs, ten epochs. The mint price is `BASE_PRICE × 1.25^series`, where `series` is
-`totalMinted / 333`, so it steps up once per full series and never between. The collection closes when
-`totalMinted` reaches 3,333 (`MAX_SUPPLY`): the tenth series is the last and `mintEgg` reverts with
-`SupplyExhausted` after it. A seat's editions run out at 333 for its (seat, round) whatever the series.
+A **series** is 303 eggs, one seat's worth; the epochs of 33 eggs run independently of it. The mint price
+is `BASE_PRICE × 1.25^series`, where `series` is `totalMinted / 303`, so it steps up once per full series and
+never between. The collection closes when `totalMinted` reaches 3,333 (`MAX_SUPPLY`): the eleventh series
+is the last and `mintEgg` reverts with `SupplyExhausted` after it. A seat's editions run out at 303 for its
+(seat, round) whatever the series.
 
 Feeding solutions do not count toward the epoch; only eggs do. The difficulty applies to every solution of
 the epoch, eggs and feeds alike.
@@ -106,12 +113,12 @@ is recorded and drawn (nothing else depends on it).
 
 | Constant | Value | Why |
 |---|---|---|
-| `EDITIONS` | 333 per (seat, round) | the owner's figure of 2026-10-13 |
-| `MAX_SUPPLY` | 3,333 cards | ten seats' worth; the collection is finite |
+| `EDITIONS` | 303 per (seat, round) | the owner's figure of 2026-10-13: 11 × 303 = 3,333 |
+| `MAX_SUPPLY` | 3,333 cards | eleven seats' worth; the collection is finite |
 | `EPOCH_EGGS` | 33 | the difficulty's retarget interval |
-| `SERIES_EGGS` | 333 | the price's step interval, one seat's worth |
+| `SERIES_EGGS` | 303 | the price's step interval, one seat's worth |
 | `BASE_PRICE` | 50,000 PUPATE | about $1.50 at launch-week prices |
-| price growth | ×1.25 per series, ten series at most | the last series is about ×9.3 the first, 372,529 PUPATE |
+| price growth | ×1.25 per series, eleven series at most | the last series is about ×9.3 the first, 465,661 PUPATE |
 | `INITIAL_DIFFICULTY` | 2^24 | about 17 million hashes, roughly 15 seconds on a laptop CPU in the browser |
 | `MIN_DIFFICULTY` | 2^20 | a floor so an idle network never becomes free |
 | retarget clamp | ÷4 to ×4 per epoch | the same bound Bitcoin uses |
@@ -174,22 +181,29 @@ No two cards draw the same. Three layers vary:
   `traits(seat)` (`site/lib/seat.ts`), reproduced in integer arithmetic so the chain and the site draw the
   same butterfly for the same seat. All 333 editions of a seat share its silhouette and tone, the way all
   photographs of one specimen share its shape.
-- **Per edition:** the digit strings are the bits of `keccak256(seat, round, edition, line)`, so every
-  contour is a different line of 0s and 1s; the tilt (−6° to 6°), the density of the inner digit line, the
-  number of gold band digits, the scatter of the glow points and the six-digit specimen notes come from
-  the same seed, so two editions of one seat are told apart at thumbnail size, not only up close.
+- **Per edition:** the shell's form (teardrop 40%, pear 22%, spindle 22%, round 16%), the palette within the
+  brand colours (classic 55%, inverted 20%, ember 12%, mono 10%, gilt 3%), the halo of digit rings behind the
+  figure (none 50%, one ring 30%, two rings 15%, orbit 5%), the signal texture of small digits (none 45%,
+  column 25%, band 20%, rain 10%), the density of the contour digits (fine 30%, standard 50%, bold 20%), the
+  tilt (−12° to 12°), the size (90% to 110%), the shell's width and length, the band and the segment rings,
+  and for the butterfly a ±12% change of the seat's wing geometry with one vein and one spot more or fewer.
+  Every digit string is the bits of `keccak256(seat, round, edition, line)`. The weights are those of the
+  design reference (`brand/previews/metamorph/metamorph-gen.mjs`, untracked) and go into the contract
+  unchanged: a full 3,333-card render gave 2,324 distinct visible families, the largest of 10 cards, told
+  apart by proportions, tilt, size and digits.
 - **Per tier and stage:** edition 1 has the double gold frame, 2–33 the gold corner; the stage decides
-  the whole drawing and the colour of the labels (jade until the butterfly, gold after). Text on the card: `METAMORPH.MD #<n> · PUPATE`, `seat identity.md #<seat>`, the stage label
-(`EGG`, `LARVA · 23 OF 64`, `IN THE COCOON`, `EMERGED`), `edition <n> of 333 · mined by 0x…`, the PUPATE
-paid, `pupate.fun`. The first edition carries a gold frame, editions two to thirty-three a gold corner.
+  the whole drawing and the colour of the labels (jade until the butterfly, gold after). Text on the card is minimal: `METAMORPH.MD · PUPATE` small at the top left, the number `#<n>` large
+under it, the stage label at the top right (`EGG`, `LARVA · 23 OF 64`, `IN THE COCOON`, `EMERGED`), and one
+small line at the bottom, `seat identity.md #<seat> · edition <e> of 303`. The miner, the fees paid and the
+site's name are attributes only; the drawing sits centred in the space that leaves. The first edition carries a double gold frame, editions two to thirty-three a gold corner.
 
-The JSON `name` is `Metamorph.md #<n>`; its `description` names the seat and the stage. Attributes: Seat, Round, Edition, Stage, Work, Epoch mined, Miner, Fees paid (PUPATE),
-Tier (Holotype for edition 1, Paratype for 2–33, Series for the rest), Tone.
+The JSON `name` is `Metamorph.md #<n>`; its `description` names the seat and the stage. Attributes: Seat, Round, Edition, Stage, Work, Epoch mined, Series, Miner, Fees paid (PUPATE), Tier (Holotype
+for edition 1, Paratype for 2–33, Series for the rest), Form, Palette, Halo, Signal, Density, Tone.
 
 ## Rarity, in this version
 
-Rarity comes from facts the chain already has: the edition (1 of 333 is the holotype, the first 33 are
-paratypes), the series of the mint (the first series is the cheapest and there are ten), the stage (an emerged butterfly can only exist for a seat the vault
+Rarity comes from facts the chain already has: the edition (1 of 303 is the holotype, the first 33 are
+paratypes), the series of the mint (the first series is the cheapest and there are eleven), the stage (an emerged butterfly can only exist for a seat the vault
 really sold), the work recorded beyond ripeness, and the seat's own traits. The oracle work feed, later,
 adds the seat's accepted jobs while the vault held it; when it exists, a new card contract for the seats
 bought after it can scale the pupation threshold by that number. This contract's threshold stays 64.
@@ -199,7 +213,7 @@ bought after it can scale the pupation threshold by that number. This contract's
 - **Before deployment** the page keeps its present copy, corrected to say the fees go to the developer.
 - **Deployed, no seat held:** "Ready. Nothing to mine until the vault holds a seat", with the epoch, the
   price and the difficulty read live.
-- **Seat(s) held:** a seat picker (seat number, days held, editions left of 333), the miner, the queue of found
+- **Seat(s) held:** a seat picker (seat number, days held, editions left of 303), the miner, the queue of found
   solutions, the Mint button, the visitor's cards with their live images, and per card the Feed and Pupate
   controls with the countdown to the butterfly.
 - **The miner** is a pool of Web Workers (`site/workers/miner.worker.ts`), default `hardwareConcurrency −
@@ -230,7 +244,7 @@ bought after it can scale the pupation threshold by that number. This contract's
 
 - **Unit:** the puzzle at the boundary of the target; solutions bound to the sender, the seat and the
   epoch; replay refused; editions, supply, wallet and card caps; the price schedule (×1.25 per series of
-  333, flat inside a series, ten series); the
+  303, flat inside a series, eleven series); the
   retarget (fast epoch raises, slow epoch lowers, both clamped, floor respected); fees land on the
   developer and follow `setDeveloper`; the stage machine and every `WrongStage`; the butterfly rule
   (seven days and sold, ninety days regardless, re-bought seat counts as sold); `royaltyInfo`; `tokenURI`
@@ -239,7 +253,7 @@ bought after it can scale the pupation threshold by that number. This contract's
 - **Fuzz:** random nonces at high difficulty never pass; random caps and editions hold; the price never
   overflows.
 - **Invariants** (handler minting, feeding, pupating, selling seats through the fixture): every card has a
-  recorded solution digest; cards per (seat, round) never exceed 333 and the total never exceeds 3,333; a card's stored stage never
+  recorded solution digest; cards per (seat, round) never exceed 303 and the total never exceeds 3,333; a card's stored stage never
   decreases; the developer's PUPATE received from the cards equals the sum of fees in events; PUPATE's
   total supply is unchanged by the cards (they burn nothing).
 - **Fork test** on a mainnet fork against the real Cocoon, token and collection: the vault is given a seat
@@ -261,7 +275,7 @@ bought after it can scale the pupation threshold by that number. This contract's
 
 ## Public copy to change with this spec
 
-- Mine page: "33 per round" becomes "333 per seat, 3,333 in all"; the fee line ("paid in PUPATE, burned in full. No treasury takes a cut") becomes "paid in
+- Mine page: "33 per round" becomes "303 per seat, 3,333 in all"; the fee line ("paid in PUPATE, burned in full. No treasury takes a cut") becomes "paid in
   PUPATE to the developer, who decides whether to burn or spend it; stated here so nobody is surprised".
 - The Mine page, the README and the site call the cards Metamorph MD; "Chrysalis Cards" goes.
 - README's Chrysalis line, the X thread's card post and `docs/v2-mining-proof-of-work.md` get a note that
