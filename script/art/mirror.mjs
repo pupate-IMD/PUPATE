@@ -6,8 +6,9 @@
 //
 // It holds the traits (ArtTraits.sol): seeds, words, the fixed-point draws, the weighted picks, the digit
 // strings, the number formatter, the site's seat generator, the seat and card traits, the palette, the density
-// table and the table of sines; the chrysalis figure (MetamorphChrysalis.sol); and the butterfly figure
-// (MetamorphButterfly.sol).
+// table and the table of sines; the chrysalis figure (MetamorphChrysalis.sol); the butterfly figure
+// (MetamorphButterfly.sol); and the card around them (MetamorphArt.sol): the frame, the labels, the SVG, the JSON
+// and the token URI.
 //
 // Types follow the contract's: a value the contract keeps as uint256 or int256 (tenths, hundredths, words,
 // counts before they are narrowed) is a BigInt here; a uint8 or int8 field (an index into a table, a count,
@@ -25,6 +26,15 @@
 //                                         print that card's chrysalis figure (test/metamorph/art/Chrysalis.t.sol)
 //   node script/art/mirror.mjs figure butterfly <seat> <round> <edition> <gilt 0|1>
 //                                         print that card's butterfly figure (test/metamorph/art/Butterfly.t.sol)
+//   node script/art/mirror.mjs render <seat> <round> <edition> <stage> <gilt 0|1> <id> [paid] [miner] [epoch]
+//                                         print that card's SVG (test/metamorph/art/MetamorphArt.t.sol); paid in
+//                                         PUPATE wei (default 0), the miner as hex (the zero address), epoch (1)
+//   node script/art/mirror.mjs uri <seat> <round> <edition> <stage> <gilt 0|1> <id> [paid] [miner] [epoch]
+//                                         print that card's JSON, the text tokenURI encodes in base64
+//   node script/art/mirror.mjs digest <seat> <round> <edition> <stage> <gilt 0|1> <id> [paid] [miner] [epoch]
+//                                         print the byte length and keccak256 of that card's SVG and JSON
+//   node script/art/mirror.mjs worst      find the heaviest card (worstCard) and print its two stages' sizes and
+//                                         digests (test/metamorph/art/MetamorphArt.t.sol)
 
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
@@ -516,6 +526,260 @@ export function figureInputs(seat, round, edition, gilt) {
   return { t, st, c: colours(t.palette, gilt, st.tone), s: seed(seat, round, edition, 11) };
 }
 
+// ------------------------------------------------------------------ the card (MetamorphArt.sol)
+
+// A view is the token's IMetamorphArt.View: { id, seat, round, edition, stage, gilt, epoch, miner, mintedAt,
+// paid }, the numbers as Numbers or BigInts, the miner a hex string, paid in PUPATE wei. The drawing reads id,
+// seat, round, edition, stage and gilt; the JSON reads them all but mintedAt.
+
+const MONO = "Consolas, 'Courier New', monospace";
+const SERIF = "Georgia, 'Times New Roman', serif";
+
+/// Stage 0 is the chrysalis; stage 1, and any larger number, the butterfly.
+const isButterfly = (v) => Number(v.stage) !== 0;
+
+/// The grid: a hairline both ways every 60 px, 60..1020.
+function grid() {
+  let out = "";
+  for (let i = 60; i < 1080; i += 60) {
+    out += `<path d="M${i} 0V1080M0 ${i}H1080" stroke="${HAIR}" stroke-width="1" opacity="0.45"/>`;
+  }
+  return out;
+}
+
+/// The edge: the holotype's double gold frame, a hairline frame otherwise.
+function edge(tier) {
+  return tier === 0
+    ? `<rect x="48" y="48" width="984" height="984" fill="none" stroke="${GOLD}" stroke-width="3"/>` +
+        `<rect x="60" y="60" width="960" height="960" fill="none" stroke="${GOLD}" stroke-width="1" opacity="0.6"/>`
+    : `<rect x="48" y="48" width="984" height="984" fill="none" stroke="${HAIR}" stroke-width="2"/>`;
+}
+
+/// The corners: the paratype's gold corner at the bottom right and its ink one at the top left, the two ink
+/// corners otherwise.
+function corner(tier) {
+  return tier === 1
+    ? `<path d="M1032 1002V1032H1002" fill="none" stroke="${GOLD}" stroke-width="4"/>` +
+        `<path d="M48 78V48H78" fill="none" stroke="${INK}" stroke-width="4"/>`
+    : `<path d="M48 78V48H78M1032 1002V1032H1002" fill="none" stroke="${INK}" stroke-width="4"/>`;
+}
+
+/// The notes: nine dashed lines 56 apart from y 300, each labelled with six digits of line 11100 + i (the
+/// prototype's seed + 100 + i). Drawn only on a chrysalis without a halo.
+function notes(s) {
+  let out = "";
+  for (let i = 0; i < 9; i++) {
+    const y = 300 + i * 56;
+    out +=
+      `<path d="M300 ${y}H780" stroke="${HAIR}" stroke-width="1" stroke-dasharray="2 6"/>` +
+      `<text x="792" y="${y + 4}" font-family="${MONO}" font-size="12" fill="${DIM}">${bits(s, 11100 + i, 6)}</text>`;
+  }
+  return out;
+}
+
+/// One run of the signal: n digits of line 11200 + x + y (the prototype's seed + 200 + x + y) at (x, y),
+/// turned a quarter about that point when `rot`.
+const sig = (s, x, y, n, rot) =>
+  `<text x="${x}" y="${y}" font-family="${MONO}" font-size="13" letter-spacing="1" fill="${DIM}" opacity="0.5"` +
+  `${rot ? ` transform="rotate(90 ${x} ${y})"` : ""}>${bits(s, 11200 + x + y, n)}</text>`;
+
+/// The signal: two columns, two bands, or nine runs of rain; none otherwise. The rain's runs are drawn from the
+/// words of seed line 11300 (`rain`), three per run in the prototype's order: x = 100 + count(u, 860),
+/// y = 240 + count(u, 420), n = 8 + count(u, 14).
+function signal(kind, s, rain) {
+  if (kind === 1) return sig(s, 150, 250, 56, true) + sig(s, 176, 250, 56, true);
+  if (kind === 2) return sig(s, 92, 826, 92, false) + sig(s, 92, 844, 92, false);
+  if (kind !== 3) return "";
+  let out = "";
+  for (let i = 0; i < 9; i++) {
+    const x = 100 + Number(count(word(rain, 3 * i), 860));
+    const y = 240 + Number(count(word(rain, 3 * i + 1), 420));
+    const n = 8 + Number(count(word(rain, 3 * i + 2), 14));
+    out += sig(s, x, y, n, true);
+  }
+  return out;
+}
+
+/// A halo ring: the circle of radius R round the figure's centre (540, 584) as a path, and n digits of line
+/// 11000 + R (the prototype's seed + R) written along it.
+const ring = (s, R, size, n, fill, op) =>
+  `<path id="h${R}" d="M${540 - R} 584a${R} ${R} 0 1 1 ${2 * R} 0a${R} ${R} 0 1 1 ${-2 * R} 0" fill="none"/>` +
+  `<text font-family="${MONO}" font-size="${size}" letter-spacing="2" fill="${fill}" opacity="${op}">` +
+  `<textPath href="#h${R}">${bits(s, 11000 + R, n)}</textPath></text>`;
+
+/// The orbit's gold dot at deg tenths of a degree on the circle of radius 338 round (540, 584): cx = 540 +
+/// cos × 338 and cy = 584 + sin × 338 in tenths, each offset one product of the interpolated sine (sinCircle,
+/// hundred-thousandths) and 338 divided once by 10000, its magnitude rounded half up and the sign put on after.
+function orbitDot(deg) {
+  const cos = sinCircle(BigInt(deg) + 900n), sin = sinCircle(deg);
+  const dx = mulDiv(cos.mag, 338, 10000), dy = mulDiv(sin.mag, 338, 10000);
+  return (
+    `<circle cx="${f1(cos.neg ? 5400n - dx : 5400n + dx)}" cy="${f1(sin.neg ? 5840n - dy : 5840n + dy)}" ` +
+    `r="7" fill="${GOLD}"/>`
+  );
+}
+
+/// The halo: one ring of 306 (ring, orbit), two of 292 and 330 (double), and the orbit's dashed circle and gold
+/// dot; nothing otherwise.
+function halo(kind, deg, glow, s) {
+  let out = "";
+  if (kind === 1 || kind === 3) out += ring(s, 306, 14, 260, glow, "0.5");
+  if (kind === 2) out += ring(s, 292, 13, 250, glow, "0.5") + ring(s, 330, 11, 320, DIM, "0.45");
+  if (kind === 3) {
+    out +=
+      `<circle cx="540" cy="584" r="338" fill="none" stroke="${HAIR}" stroke-width="1" stroke-dasharray="3 9"/>` +
+      orbitDot(deg);
+  }
+  return out;
+}
+
+/// The glow dots: the density's count, each from four words of seed line 11050 (`d`) in the prototype's order:
+/// x = 90 + count(u, 900), y = 240 + count(u, 600), the radius 1.5..2.7 and the opacity 0.4..0.8 in tenths.
+function dots(n, glow, d) {
+  let out = "";
+  for (let i = 0; i < n; i++) {
+    const k = 4 * i;
+    const x = 90n + count(word(d, k), 900), y = 240n + count(word(d, k + 1), 600);
+    const r = between(word(d, k + 2), 15, 27, 1), op = between(word(d, k + 3), 4, 8, 1);
+    out += `<circle cx="${x}" cy="${y}" r="${f1(r)}" fill="${glow}" opacity="${f1(op)}" filter="url(#glow)"/>`;
+  }
+  return out;
+}
+
+/// The labels, minimal: the mark and the number at the top left, the stage at the top right (jade in the cocoon,
+/// gold emerged, " · GILT" after it on a gilt card), the seat and the edition at the bottom. The two newlines and
+/// their absence before the last line are the prototype's.
+function labels(v) {
+  const b = isButterfly(v);
+  return (
+    `<text x="92" y="122" font-family="${MONO}" font-size="24" letter-spacing="3" fill="${DIM}">` +
+    `METAMORPH.MD · PUPATE</text>\n` +
+    `<text x="92" y="204" font-family="${SERIF}" font-size="76" fill="${INK}">#${u(v.id)}</text>\n` +
+    `<text x="988" y="122" font-family="${MONO}" font-size="24" letter-spacing="3" text-anchor="end" ` +
+    `fill="${b ? GOLD : JADE}">${b ? "EMERGED" : "IN THE COCOON"}${v.gilt ? " · GILT" : ""}</text>` +
+    `<text x="92" y="984" font-family="${MONO}" font-size="24" letter-spacing="2" fill="${DIM}">` +
+    `seat identity.md #${u(v.seat)} · edition ${u(v.edition)} of 303</text>`
+  );
+}
+
+/// The card's SVG: the prototype's renderCard with the minimal labels, in its order: the filters, the paper, then
+/// the grid, the edge, the corners, the notes, the signal, the halo and the glow dots on one line, the figure
+/// (the chrysalis or the butterfly contract's), the labels.
+export function renderSVG(v) {
+  const seat = BigInt(v.seat), round = Number(v.round), edition = Number(v.edition);
+  const { t, st, c, s } = figureInputs(seat, round, edition, Boolean(v.gilt));
+  const b = isButterfly(v);
+  const back =
+    grid() +
+    edge(t.tier) +
+    corner(t.tier) +
+    (t.halo === 0 && !b ? notes(s) : "") +
+    signal(t.signal, s, seed(seat, round, edition, 11300)) +
+    halo(t.halo, t.orbitDeg, c.glow, s) +
+    dots(Number(densityOf(t.density).dots), c.glow, seed(seat, round, edition, 11050));
+  const figure = b ? butterflyFigure(t, st, c, s) : chrysalisFigure(t, c, s);
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">\n` +
+    `<defs>\n` +
+    `  <filter id="glow" x="-200%" y="-200%" width="500%" height="500%">` +
+    `<feGaussianBlur stdDeviation="1.6"/></filter>\n` +
+    `  <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">` +
+    `<feGaussianBlur stdDeviation="0.6"/></filter>\n` +
+    `</defs>\n` +
+    `<rect width="1080" height="1080" fill="${PAPER}"/>\n` +
+    `${back}\n${figure}\n${labels(v)}\n</svg>`
+  );
+}
+
+/// The names the JSON gives the traits, with the drawing's fallbacks for a number past the table (never drawn).
+const tierName = (k) => (k === 0 ? "Holotype" : k === 1 ? "Paratype" : "Series");
+const formName = (k) => (k === 1 ? "Pear" : k === 2 ? "Spindle" : k === 3 ? "Round" : "Teardrop");
+const paletteName = (k, gilt) =>
+  gilt ? "Gilt" : k === 1 ? "Inverted" : k === 2 ? "Ember" : k === 3 ? "Mono" : "Classic";
+const haloName = (k) => (k === 1 ? "Ring" : k === 2 ? "Double" : k === 3 ? "Orbit" : "None");
+const signalName = (k) => (k === 1 ? "Column" : k === 2 ? "Band" : k === 3 ? "Rain" : "None");
+const densityName = (k) => (k === 0 ? "Fine" : k === 1 ? "Standard" : "Bold");
+
+/// A string attribute and a number attribute.
+const str = (name, value) => `{"trait_type":"${name}","value":"${value}"}`;
+const num = (name, value) => `{"trait_type":"${name}","value":${value}}`;
+
+/// The miner as 0x and forty lowercase hex digits (no checksum on the chain).
+const minerHex = (a) => `0x${BigInt(a).toString(16).padStart(40, "0")}`;
+
+/// The attributes in the spec's order: the facts (seat, round, edition, stage, gilt, epoch, miner, the price in
+/// whole PUPATE rounded down), then the looks (tier, form, palette, halo, signal, density, tone).
+function attributes(v, t, st) {
+  return [
+    str("Seat", u(v.seat)),
+    num("Round", u(v.round)),
+    num("Edition", u(v.edition)),
+    str("Stage", isButterfly(v) ? "Butterfly" : "Chrysalis"),
+    str("Gilt", v.gilt ? "Yes" : "No"),
+    num("Epoch", u(v.epoch)),
+    str("Miner", minerHex(v.miner)),
+    num("Price paid (PUPATE)", u(BigInt(v.paid) / 10n ** 18n)),
+    str("Tier", tierName(t.tier)),
+    str("Form", formName(t.form)),
+    str("Palette", paletteName(t.palette, v.gilt)),
+    str("Halo", haloName(t.halo)),
+    str("Signal", signalName(t.signal)),
+    str("Density", densityName(t.density)),
+    str("Tone", tone(st.tone)),
+  ].join(",");
+}
+
+/// The token's JSON: the name, the description, the SVG as a base64 data URI, the attributes.
+export function tokenJSON(v) {
+  const t = cardTraits(BigInt(v.seat), Number(v.round), Number(v.edition));
+  const st = seatTraits(BigInt(v.seat));
+  const image = Buffer.from(renderSVG(v), "utf8").toString("base64");
+  return (
+    `{"name":"Metamorph.md #${u(v.id)}",` +
+    `"description":"Seat identity.md #${u(v.seat)}, edition ${u(v.edition)} of 303, ` +
+    `${isButterfly(v) ? "emerged" : "in the cocoon"}${v.gilt ? ", a gilt proof" : ""}.",` +
+    `"image":"data:image/svg+xml;base64,${image}",` +
+    `"attributes":[${attributes(v, t, st)}]}`
+  );
+}
+
+/// The token URI: the JSON as a base64 data URI.
+export function tokenURI(v) {
+  return `data:application/json;base64,${Buffer.from(tokenJSON(v), "utf8").toString("base64")}`;
+}
+
+/// The heaviest card the tests can construct: a holotype (edition 1) with bold density, a double halo and the
+/// rain, whose butterfly has six veins and four spots (the seat's five and three, each plus one). Seats 1..10000
+/// with five veins and three spots, rounds 0..15; of the cards that qualify, the one whose two stages' SVGs are
+/// the longest together, returned as { seat, round, weight, found } (found: how many qualify), or null. It is
+/// measured as gilt with id 3333 (the last of the supply, epoch 11) and a billion PUPATE paid (worstView): the
+/// longest labels and JSON a real card can have.
+export function worstCard() {
+  let best = null, found = 0;
+  for (let seat = 1n; seat <= 10000n; seat++) {
+    const st = seatTraits(seat);
+    if (st.veins !== 5 || st.spots !== 3) continue;
+    for (let round = 0; round <= 15; round++) {
+      const t = cardTraits(seat, round, 1);
+      if (t.density !== 2 || t.halo !== 2 || t.signal !== 3 || t.dVeins !== 1 || t.dSpots !== 1) continue;
+      const v = worstView(seat, round, 0);
+      const weight =
+        Buffer.byteLength(renderSVG(v), "utf8") + Buffer.byteLength(renderSVG({ ...v, stage: 1 }), "utf8");
+      found++;
+      if (best === null || weight > best.weight) best = { seat, round, weight };
+    }
+  }
+  return best === null ? null : { ...best, found };
+}
+
+/// The view the worst case is measured at, for a stage.
+export function worstView(seat, round, stage) {
+  return {
+    id: 3333n, seat: BigInt(seat), round, edition: 1, stage, gilt: true, epoch: 11,
+    miner: "0xffffffffffffffffffffffffffffffffffffffff", mintedAt: 0, paid: 10n ** 27n,
+  };
+}
+
 // ------------------------------------------------------------------ the vectors
 
 const q = (str) => JSON.stringify(str);
@@ -640,7 +904,9 @@ function vectors() {
   // The quarter turns, a tenth on each side of them, the middle of each quadrant, a whole turn and past it, and
   // the orbit of (2345, 0, 5) at 328.5 degrees with its cosine's angle (418.5).
   say("// ---- test_sinTurnsTheWholeCircle");
-  const turns = [0, 1, 450, 899, 900, 901, 1350, 1799, 1800, 1801, 2250, 2699, 2700, 2701, 3150, 3285, 3599, 3600, 4185, 4500];
+  const turns = [
+    0, 1, 450, 899, 900, 901, 1350, 1799, 1800, 1801, 2250, 2699, 2700, 2701, 3150, 3285, 3599, 3600, 4185, 4500,
+  ];
   for (const t of turns) {
     const { neg, mag } = sinCircle(t);
     say(`_sin(${t}, ${neg}, ${mag});`);
@@ -662,12 +928,58 @@ const isMain = (() => {
 })();
 
 const USAGE =
-  "usage: node script/art/mirror.mjs vectors | sines | figure <chrysalis|butterfly> <seat> <round> <edition> <gilt 0|1>";
+  "usage: node script/art/mirror.mjs vectors | sines" +
+  " | figure <chrysalis|butterfly> <seat> <round> <edition> <gilt 0|1>" +
+  " | <render|uri|digest> <seat> <round> <edition> <stage> <gilt 0|1> <id> [paid] [miner] [epoch] | worst";
+
+/// A view from the command line: seat round edition stage gilt id [paid in wei, 0] [miner, the zero address]
+/// [epoch, 1]; mintedAt is 0 (neither the drawing nor the JSON reads it).
+function viewOf(args) {
+  const [seat, round, edition, stage, gilt, id, paid = "0", miner = `0x${"0".repeat(40)}`, epoch = "1"] = args;
+  return {
+    id: BigInt(id), seat: BigInt(seat), round: Number(round), edition: Number(edition), stage: Number(stage),
+    gilt: gilt === "1", epoch: Number(epoch), miner, mintedAt: 0, paid: BigInt(paid),
+  };
+}
+
+/// keccak256 of a string's UTF-8 bytes, as the tests hash `bytes(svg(v))`.
+const digest = (text) => keccak256(new Uint8Array(Buffer.from(text, "utf8")));
 
 if (isMain) {
   const [cmd, ...args] = process.argv.slice(2);
   const figure = cmd === "figure" && args.length === 5 && ["0", "1"].includes(args[4]);
-  if (cmd === "vectors") {
+  const card =
+    ["render", "uri", "digest"].includes(cmd) && args.length >= 6 && args.length <= 9 && ["0", "1"].includes(args[4]);
+  if (card && cmd === "render") {
+    console.log(renderSVG(viewOf(args)));
+  } else if (card && cmd === "uri") {
+    console.log(tokenJSON(viewOf(args)));
+  } else if (card && cmd === "digest") {
+    const v = viewOf(args);
+    const svg = renderSVG(v), json = tokenJSON(v);
+    console.log(`svg  ${Buffer.byteLength(svg, "utf8")} bytes ${digest(svg)}`);
+    console.log(`json ${Buffer.byteLength(json, "utf8")} bytes ${digest(json)}`);
+  } else if (cmd === "worst" && args.length === 0) {
+    const best = worstCard();
+    if (best === null) {
+      console.log("no card in the search has them all");
+      process.exit(1);
+    }
+    const t = cardTraits(best.seat, best.round, 1), st = seatTraits(best.seat);
+    console.log(
+      `(${best.seat}, ${best.round}, 1), the heaviest of ${best.found} that qualify: bold, double, rain, holotype, ` +
+        `${t.rings} segment rings; the seat's veins ${st.veins} and spots ${st.spots}, the edition's ${t.dVeins} and ` +
+        `${t.dSpots}`,
+    );
+    for (const stage of [0, 1]) {
+      const v = worstView(best.seat, best.round, stage);
+      const svg = renderSVG(v), json = tokenJSON(v);
+      console.log(
+        `stage ${stage}: svg ${Buffer.byteLength(svg, "utf8")} bytes ${digest(svg)}; json ` +
+          `${Buffer.byteLength(json, "utf8")} bytes ${digest(json)}; uri ${tokenURI(v).length} bytes`,
+      );
+    }
+  } else if (cmd === "vectors") {
     console.log(vectors());
   } else if (cmd === "sines" && args.length === 0) {
     console.log(SINES.join(", "));
