@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {FixedPoint96} from "v4-core/src/libraries/FixedPoint96.sol";
+import {FullMath} from "v4-core/src/libraries/FullMath.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
+import {ModifyLiquidityParams} from "v4-core/src/types/PoolOperation.sol";
 import {MetamorphFixture} from "./MetamorphFixture.sol";
 import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
 
@@ -29,6 +33,16 @@ contract MetamorphConvertTest is MetamorphFixture {
         _mintMany(1212);
     }
 
+    /// @dev A change to the fixture's IMD position: full range, held by the router at salt 0.
+    function _imdPosition(int256 liquidityDelta) private pure returns (ModifyLiquidityParams memory) {
+        return ModifyLiquidityParams(
+            TickMath.minUsableTick(IMD_SPACING),
+            TickMath.maxUsableTick(IMD_SPACING),
+            liquidityDelta,
+            bytes32(0)
+        );
+    }
+
     function test_nothingToConvertReverts() public {
         vm.expectRevert(MetamorphMD.NothingToConvert.selector);
         md.convert();
@@ -41,6 +55,14 @@ contract MetamorphConvertTest is MetamorphFixture {
         uint256 devBefore = imd.balanceOf(developer);
         (uint256 seatPot, uint256 burnPot, uint256 dev, uint256 imdBurn) = _pots();
         uint256 vaultBefore = seatPot + burnPot + dev + imdBurn;
+        // The amounts the event must report: both legs run through the router on a copy of the state, then
+        // the copy is dropped. The pot is far inside the bound, so neither limit changes the outcome.
+        uint256 copy = vm.snapshotState();
+        uint256 ethOut = uint256(uint128(_sellExactIn(potBefore).amount0()));
+        uint256 imdOut = uint256(uint128(_swap(router, imdKey, true, -int256(ethOut)).amount1()));
+        vm.revertToState(copy);
+        vm.expectEmit(true, false, false, true, address(md));
+        emit MetamorphMD.Converted(potBefore, ethOut, imdOut, keeper, imdOut * 50 / 10_000);
         vm.prank(keeper);
         uint256 out = md.convert();
         assertGt(out, 0);
@@ -86,19 +108,58 @@ contract MetamorphConvertTest is MetamorphFixture {
 
     function test_convertLeavesWhatTheBoundRefuses() public {
         _bigPot();
+        vm.prank(miner);
+        md.stake(_ids(1));
+        // Thin the IMD pool to 2% of its depth: a 5% move of its price then absorbs about 0.05 ETH, less than
+        // the sale brings, so both bounds refuse part of what is offered.
+        int256 thinned = int256(FullMath.mulDiv(100 ether, IMD_SQRT_PRICE, FixedPoint96.Q96) * 98 / 100);
+        router.addLiquidity(imdKey, _imdPosition(-thinned));
         uint256 potBefore = md.pot();
+        uint160 imdBefore = _sqrtPrice(imdKey);
         vm.prank(keeper);
-        md.convert();
-        assertGt(md.pot(), 0, "part of the pot waits");
+        uint256 out = md.convert();
+        assertGt(md.pot(), 0, "the PUPATE the sale bound refused waits in the pot");
         assertLt(md.pot(), potBefore);
         assertEq(token.balanceOf(address(md)), md.pot(), "the contract holds exactly the pot");
-        assertEq(address(md).balance, md.ethPot(), "and exactly the ETH pot");
-        // The next call, after the pools recover a step, converts more.
-        vm.roll(block.number + 1);
-        uint256 again = md.pot();
+        uint256 waiting = md.ethPot();
+        assertGt(waiting, 0, "the ETH the buy bound refused waits in the ETH pot");
+        assertEq(address(md).balance, waiting, "and exactly the ETH pot");
+        assertGe(
+            uint256(_sqrtPrice(imdKey)),
+            uint256(imdBefore) * 9_746 / 10_000 - 1,
+            "the buy stopped at its bound"
+        );
+        uint256 credited = out - out * 50 / 10_000;
+        assertEq(md.imdOwed(), credited, "the stakers are credited only what was bought");
+        assertEq(imd.balanceOf(address(md)), credited);
+        // Nothing moves the pools back between the calls. Once the spacing has passed and the IMD pool
+        // is deep again, the next call sells another 5% window from the price the first one left and
+        // spends the waiting ETH together with the new.
+        router.addLiquidity{value: 200 ether}(imdKey, _imdPosition(thinned));
+        vm.roll(block.number + md.CONVERT_SPACING());
+        uint256 potAgain = md.pot();
+        vm.prank(keeper);
+        uint256 out2 = md.convert();
+        assertLt(md.pot(), potAgain, "more of the pot sold");
+        assertEq(md.ethPot(), 0, "the waiting ETH was spent");
+        assertEq(address(md).balance, 0);
+        assertEq(md.imdOwed(), credited + out2 - out2 * 50 / 10_000, "and the IMD it bought credited");
+    }
+
+    function test_convertIsSpacedLikeTheVaultsBurns() public {
+        _mintMany(3);
         vm.prank(keeper);
         md.convert();
-        assertLt(md.pot(), again);
+        // A mint in the same block refills the pot; the next conversion still waits out the spacing.
+        _mintAs(miner);
+        vm.expectRevert(MetamorphMD.TooSoon.selector);
+        md.convert();
+        vm.roll(block.number + md.CONVERT_SPACING() - 1);
+        vm.expectRevert(MetamorphMD.TooSoon.selector);
+        md.convert();
+        vm.roll(block.number + 1);
+        vm.prank(keeper);
+        assertGt(md.convert(), 0, "it runs once the spacing has passed");
     }
 
     function test_callbackOnlyFromThePoolManagerAndOnlyDuringAConversion() public {

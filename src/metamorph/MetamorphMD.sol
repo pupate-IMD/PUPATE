@@ -42,6 +42,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     error NotCardOwner();
     error NothingToConvert();
     error NothingBought();
+    error TooSoon();
     error OnlyPoolManager();
     error OnlySelf();
     error UnexpectedCallback();
@@ -83,6 +84,8 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     uint256 public constant STAKER_BPS = 7000;
     uint256 public constant CONVERT_IMPACT_BPS = 500;
     uint256 public constant CALLER_REWARD_BPS = 50;
+    /// @notice Blocks between two conversions: Cocoon's `burnSpacing` default, mirrored.
+    uint16 public constant CONVERT_SPACING = 5;
     uint256 public constant DUTY_MAX_BASEFEE = 2 gwei;
     uint256 public constant MIN_FLUSH = 0.005 ether;
     uint256 public constant MIN_BURN = 0.01 ether;
@@ -143,6 +146,8 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     uint256 public pot;
     /// @notice ETH a conversion bought but the IMD pool could not absorb yet; spent by the next one.
     uint256 public ethPot;
+    /// @notice The block of the last conversion; the next one waits `CONVERT_SPACING` blocks.
+    uint256 public lastConvertBlock;
     uint256 public accIMDPerWeight;
     uint256 public totalWeight;
     /// @notice IMD credited to stakers and not yet paid out.
@@ -499,8 +504,8 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     // ------------------------------------------------------------------ the conversion
 
     /// @notice Sell the pot's PUPATE for ETH, then the ETH for IMD, each under a 5% price-impact bound,
-    /// and credit the stakers. Anyone may call; the caller is paid 0.5% of the IMD bought. What the
-    /// bound leaves unsold stays for the next call.
+    /// and credit the stakers. Anyone may call, once every `CONVERT_SPACING` blocks; the caller is paid
+    /// 0.5% of the IMD bought. What the bound leaves unsold stays for the next call.
     function convert() external nonReentrant returns (uint256 imdOut) {
         return _convert(msg.sender);
     }
@@ -513,6 +518,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     }
 
     function _convert(address caller) private returns (uint256 imdOut) {
+        // The bound holds per call. The spacing keeps calls in a row from stacking it, as the vault
+        // spaces its burns.
+        if (block.number < lastConvertBlock + CONVERT_SPACING) revert TooSoon();
         uint256 pupateIn = pot;
         ethPot = address(this).balance;
         if (pupateIn == 0 && ethPot == 0) revert NothingToConvert();
@@ -520,6 +528,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         bytes memory result = POOL_MANAGER.unlock(abi.encode(pupateIn, ethPot, saleLimit, buyLimit));
         (uint256 sold, uint256 ethBought, uint256 bought) = abi.decode(result, (uint256, uint256, uint256));
         if (bought == 0) revert NothingBought();
+        lastConvertBlock = block.number;
         pot -= sold;
         ethPot = address(this).balance;
         uint256 reward = bought * CALLER_REWARD_BPS / BPS;
