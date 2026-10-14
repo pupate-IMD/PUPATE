@@ -18,14 +18,14 @@ contract ChrysalisTest is Test {
         chrysalis = new MetamorphChrysalis();
     }
 
-    /// (1376, 0, 1), plain: a spindle, bold, classic, tilted -3 degrees, four segment rings (2834 bytes).
+    /// (1376, 0, 1), plain: a spindle, bold, classic, tilted -3 degrees, four segment rings (2836 bytes).
     function test_plainClassicCardMatchesTheMirror() public view {
         string memory want = string.concat(
             '<g transform="translate(540 584) rotate(-3) scale(7.1) translate(-32 -52)" font-family="Consolas, \'Courier New\', monospace" letter-spacing="0.25"><defs>',
             '<path id="shell" d="M32 11C23.3 23.1 16.7 43.3 16.7 58.5C18.9 73.6 25.5 87.8 32 93.8C38.5 87.8 45.1 73.6 47.3 58.5C47.3 43.3 40.7 23.1 32 11Z"/>',
-            '<path id="shell2" d="M32 13.5C24.5 24.8 18.8 43.6 18.8 57.7C20.7 71.8 26.4 84.9 32 90.6C37.6 84.9 43.3 71.8 45.2 57.7C45.2 43.6 39.5 24.8 32 13.5Z"/>',
+            '<path id="shell2" d="M32 13.5C24.5 24.8 18.9 43.6 18.9 57.6C20.8 71.7 26.4 84.9 32 90.5C37.6 84.9 43.2 71.7 45.1 57.6C45.1 43.6 39.5 24.8 32 13.5Z"/>',
             '<path id="wing" d="M32 30C23.4 39.9 19.6 53.8 24.4 73.6C28.2 67.6 31 60.7 32 53.8C33 60.7 35.8 67.6 39.6 73.6C44.4 53.8 40.6 39.9 32 30Z"/>',
-            '<path id="wing2" d="M32 34C25.8 42.1 23 53.4 26.5 69.6C29.2 64.8 31.3 59.1 32 53.4C32.7 59.1 34.8 64.8 37.5 69.6C41 53.4 38.2 42.1 32 34Z"/>',
+            '<path id="wing2" d="M32 34C25.8 42.1 23 53.5 26.5 69.7C29.2 64.8 31.3 59.2 32 53.5C32.7 59.2 34.8 64.8 37.5 69.7C41 53.5 38.2 42.1 32 34Z"/>',
             '<path id="band" d="M23.2 29C26.6 26.4 37.4 26.4 40.8 29"/>',
             '<path id="vein" d="M32 30v43.6"/></defs>'
         );
@@ -37,13 +37,13 @@ contract ChrysalisTest is Test {
             '<text font-size="1.7" fill="#5fd0a3" opacity="0.55"><textPath href="#wing2">01101111001001011111111001101110001001101111100010000110001101000110000011000001010001110101011011110111110011110011010101110000100100010001</textPath></text>',
             '<text font-size="1.9" fill="#5fd0a3" opacity="0.8"><textPath href="#vein">0010101011111001011101111000111010000110</textPath></text>',
             '<text font-size="2.7" fill="#d9a94b" ><textPath href="#band">011101101110111110011101010001</textPath></text>',
-            '<path d="M16.7 64.5q15.3 4 30.6 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>'
+            '<path d="M16.7 64.5q15.3 4 30.5 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>'
         );
         want = string.concat(
             want,
             '<path d="M20 71.6q12 4 24 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
             '<path d="M23.3 78.7q8.7 4 17.4 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
-            '<path d="M26.5 85.7q5.5 4 11 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
+            '<path d="M26.5 85.7q5.5 4 10.9 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
             '<path transform="translate(0 -0.4)" d="M24.9 73c1.9-3.6 4.6-6.6 7.1-9.4 2.6 2.8 5.2 5.8 7.1 9.4" stroke="#d9a94b" stroke-width="0.9" fill="none" stroke-linecap="round"/>',
             '<path d="M32 2v9" stroke="#e9e6da" stroke-width="0.8" fill="none"/>',
             "</g>"
@@ -52,14 +52,14 @@ contract ChrysalisTest is Test {
     }
 
     /// (42, 0, 17), gilt: a round shell, standard density, the gilt colours, three segment rings, the tick at
-    /// translate(0 0) (2681 bytes).
+    /// translate(0 0) (2665 bytes).
     function test_giltCardMatchesTheMirror() public view {
         string memory want = string.concat(
             '<g transform="translate(540 584) rotate(-2.7) scale(6.3) translate(-32 -52)" font-family="Consolas, \'Courier New\', monospace" letter-spacing="0.25"><defs>',
             '<path id="shell" d="M32 11C12.8 18.8 9.9 50.2 15.7 71.8C20.5 83.5 26.2 89.4 32 91.4C37.8 89.4 43.5 83.5 48.3 71.8C54.1 50.2 51.2 18.8 32 11Z"/>',
-            '<path id="shell2" d="M32 13.5C15.4 20.8 12.9 49.9 17.9 69.9C22 80.8 27 86.3 32 88.1C37 86.3 42 80.8 46.1 69.9C51.1 49.9 48.6 20.8 32 13.5Z"/>',
+            '<path id="shell2" d="M32 13.5C15.5 20.8 13 50 18 70C22.1 80.9 27 86.4 32 88.2C37 86.4 41.9 80.9 46 70C51 50 48.5 20.8 32 13.5Z"/>',
             '<path id="wing" d="M32 30C22.8 40 18.7 54 23.8 74C27.9 68 31 61 32 54C33 61 36.1 68 40.2 74C45.3 54 41.2 40 32 30Z"/>',
-            '<path id="wing2" d="M32 34C25.3 42.2 22.4 53.7 26.1 70.1C29 65.2 31.3 59.4 32 53.7C32.7 59.4 35 65.2 37.9 70.1C41.6 53.7 38.7 42.2 32 34Z"/>',
+            '<path id="wing2" d="M32 34C25.3 42.2 22.3 53.7 26 70.1C29 65.2 31.3 59.4 32 53.7C32.7 59.4 35 65.2 38 70.1C41.7 53.7 38.7 42.2 32 34Z"/>',
             '<path id="band" d="M19.8 29C24.5 26.4 39.5 26.4 44.2 29"/>',
             '<path id="vein" d="M32 30v44"/></defs>'
         );
@@ -71,11 +71,11 @@ contract ChrysalisTest is Test {
             '<text font-size="1.4" fill="#37b59a" opacity="0.55"><textPath href="#wing2">10111110100001100101000101001110111101000011101101110000010001111111000111010000101011000001100111001111011011000111101001111001010101111011</textPath></text>',
             '<text font-size="1.6" fill="#37b59a" opacity="0.8"><textPath href="#vein">1001000101111111010011001110011010101010</textPath></text>',
             '<text font-size="2.2" fill="#e9e6da" ><textPath href="#band">101101001011100001000000111010</textPath></text>',
-            '<path d="M18.6 62.9q13.4 4 26.8 0" stroke="#d9a94b" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>'
+            '<path d="M18.6 62.9q13.4 4 26.9 0" stroke="#d9a94b" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>'
         );
         want = string.concat(
             want,
-            '<path d="M21.4 69.8q10.6 4 21.2 0" stroke="#d9a94b" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
+            '<path d="M21.4 69.8q10.6 4 21.1 0" stroke="#d9a94b" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
             '<path d="M24.3 76.7q7.7 4 15.4 0" stroke="#d9a94b" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
             '<path transform="translate(0 0)" d="M24.3 73c2-3.6 4.9-6.6 7.7-9.4 2.8 2.8 5.6 5.8 7.7 9.4" stroke="#e9e6da" stroke-width="0.9" fill="none" stroke-linecap="round"/>',
             '<path d="M32 2v9" stroke="#d9a94b" stroke-width="0.8" fill="none"/>',
@@ -85,14 +85,14 @@ contract ChrysalisTest is Test {
     }
 
     /// (1376, 0, 2), plain: a teardrop, fine, classic, three segment rings. With the pear below and the two
-    /// cards above, every form's control points and band fit are pinned (2719 bytes).
+    /// cards above, every form's control points and band fit are pinned (2715 bytes).
     function test_teardropMatchesTheMirror() public view {
         string memory want = string.concat(
             '<g transform="translate(540 584) rotate(-5.8) scale(6.7) translate(-32 -52)" font-family="Consolas, \'Courier New\', monospace" letter-spacing="0.25"><defs>',
             '<path id="shell" d="M32 11C15.2 17.7 9.9 36.7 13.1 55.7C16.2 71.8 23.6 84.2 32 88.9C40.4 84.2 47.8 71.8 50.9 55.7C54.1 36.7 48.8 17.7 32 11Z"/>',
-            '<path id="shell2" d="M32 13.4C17.6 19.6 13.1 37.2 15.8 54.8C18.5 69.7 24.8 81.2 32 85.6C39.2 81.2 45.5 69.7 48.2 54.8C50.9 37.2 46.4 19.6 32 13.4Z"/>',
+            '<path id="shell2" d="M32 13.4C17.6 19.6 13 37.3 15.7 54.9C18.5 69.9 24.8 81.4 32 85.8C39.2 81.4 45.5 69.9 48.3 54.9C51 37.3 46.4 19.6 32 13.4Z"/>',
             '<path id="wing" d="M32 30C24 40.1 20.4 54.2 24.9 74.4C28.4 68.4 31.1 61.3 32 54.2C32.9 61.3 35.6 68.4 39.1 74.4C43.6 54.2 40 40.1 32 30Z"/>',
-            '<path id="wing2" d="M32 34C26.1 42.3 23.5 53.9 26.8 70.5C29.4 65.5 31.3 59.7 32 53.9C32.7 59.7 34.6 65.5 37.2 70.5C40.5 53.9 37.9 42.3 32 34Z"/>',
+            '<path id="wing2" d="M32 34C26.2 42.3 23.6 53.9 26.8 70.4C29.4 65.5 31.4 59.7 32 53.9C32.6 59.7 34.6 65.5 37.2 70.4C40.4 53.9 37.8 42.3 32 34Z"/>',
             '<path id="band" d="M17.8 29C23.3 26.4 40.7 26.4 46.2 29"/>',
             '<path id="vein" d="M32 30v44.4"/></defs>'
         );
@@ -108,7 +108,7 @@ contract ChrysalisTest is Test {
         );
         want = string.concat(
             want,
-            '<path d="M20.4 68q11.6 4 23.2 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
+            '<path d="M20.4 68q11.6 4 23.1 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
             '<path d="M23.6 74.7q8.4 4 16.8 0" stroke="#e9e6da" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
             '<path transform="translate(0 0.4)" d="M25.3 73c1.8-3.6 4.3-6.6 6.7-9.4 2.4 2.8 4.9 5.8 6.7 9.4" stroke="#d9a94b" stroke-width="0.9" fill="none" stroke-linecap="round"/>',
             '<path d="M32 2v9" stroke="#e9e6da" stroke-width="0.8" fill="none"/>',
@@ -122,9 +122,9 @@ contract ChrysalisTest is Test {
         string memory want = string.concat(
             '<g transform="translate(540 584) rotate(-11.3) scale(7.1) translate(-32 -52)" font-family="Consolas, \'Courier New\', monospace" letter-spacing="0.25"><defs>',
             '<path id="shell" d="M32 11C21.8 17.2 10.5 48.4 9.4 71.3C12.8 85.9 21.8 95.2 32 98.4C42.2 95.2 51.2 85.9 54.6 71.3C53.5 48.4 42.2 17.2 32 11Z"/>',
-            '<path id="shell2" d="M32 13.6C23.3 19.4 13.6 48.5 12.6 69.9C15.5 83.4 23.3 92.2 32 95.1C40.7 92.2 48.5 83.4 51.4 69.9C50.4 48.5 40.7 19.4 32 13.6Z"/>',
+            '<path id="shell2" d="M32 13.6C23.3 19.4 13.5 48.4 12.6 69.7C15.5 83.2 23.3 91.9 32 94.8C40.7 91.9 48.5 83.2 51.4 69.7C50.5 48.4 40.7 19.4 32 13.6Z"/>',
             '<path id="wing" d="M32 30C23.4 39.8 19.5 53.5 24.3 73.1C28.2 67.2 31 60.4 32 53.5C33 60.4 35.8 67.2 39.7 73.1C44.5 53.5 40.6 39.8 32 30Z"/>',
-            '<path id="wing2" d="M32 34C25.7 42 22.9 53.2 26.4 69.2C29.2 64.4 31.3 58.8 32 53.2C32.7 58.8 34.8 64.4 37.6 69.2C41.1 53.2 38.3 42 32 34Z"/>',
+            '<path id="wing2" d="M32 34C25.7 42 22.9 53.3 26.4 69.4C29.2 64.5 31.3 58.9 32 53.3C32.7 58.9 34.8 64.5 37.6 69.4C41.1 53.3 38.3 42 32 34Z"/>',
             '<path id="band" d="M22 29C25.8 26.4 38.2 26.4 42 29"/>',
             '<path id="vein" d="M32 30v43.1"/></defs>'
         );
@@ -140,7 +140,7 @@ contract ChrysalisTest is Test {
         );
         want = string.concat(
             want,
-            '<path d="M19.6 73.4q12.4 4 24.8 0" stroke="#5fd0a3" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
+            '<path d="M19.6 73.4q12.4 4 24.9 0" stroke="#5fd0a3" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>',
             '<path transform="translate(0 -0.9)" d="M24.8 73c1.9-3.6 4.6-6.6 7.2-9.4 2.6 2.8 5.3 5.8 7.2 9.4" stroke="#d9a94b" stroke-width="0.9" fill="none" stroke-linecap="round"/>',
             '<path d="M32 2v9" stroke="#5fd0a3" stroke-width="0.8" fill="none"/>',
             "</g>"

@@ -11,9 +11,10 @@ import {ArtTraits} from "./ArtTraits.sol";
 /// rings, the gold tick and the stem. No state, no owner, no setter: `figure` is pure.
 /// `script/art/mirror.mjs` (`chrysalisFigure`) is its twin, byte for byte.
 /// @dev Lengths and font sizes in tenths, factors in hundredths, the tilt in tenths of a degree. Every
-/// product rounds half up on its magnitude, `(a × b + 50) / 100`. Drawn for the traits `ArtTraits.cardTraits`
-/// gives (a form past 3 reads as the teardrop); a trait far outside its range can take a coordinate below
-/// zero, and the unsigned arithmetic then reverts.
+/// printed coordinate, size and length is the integer product of all its factors divided once, at the end,
+/// rounded half up on its magnitude (`_mulDiv`); intermediate values are never rounded. Drawn for the traits
+/// `ArtTraits.cardTraits` gives (a form past 3 reads as the teardrop); a trait far outside its range can take
+/// a coordinate below zero, and the unsigned arithmetic then reverts.
 contract MetamorphChrysalis is IMetamorphFigure {
     /// The prototype's MONO, the figure's font.
     string private constant MONO = "Consolas, 'Courier New', monospace";
@@ -44,33 +45,35 @@ contract MetamorphChrysalis is IMetamorphFigure {
             '<g transform="translate(540 584) rotate(',
             ArtTraits.f1(tilt),
             ") scale(",
-            _f(_m(66, scale)),
+            _f(_mulDiv(66, scale, 100)),
             ') translate(-32 -52)" font-family="',
             MONO,
             '" letter-spacing="0.25">'
         );
     }
 
-    /// The prototype's shellDefs: the shell; the inner shell at 0.86 / 0.93 from 11 + 2.5 × shellL; the wing;
-    /// the inner wing at 0.73 / 0.82 from 34; the band, bandW × BAND_FIT × shellW wide; the vein, 44 × wingL.
+    /// The prototype's shellDefs: the shell; the inner shell at shellW × 0.86, shellL × 0.93 from 11 + 2.5 ×
+    /// shellL; the wing; the inner wing at wingW × 0.73, wingL × 0.82 from 34; the band, bandW × BAND_FIT ×
+    /// shellW wide; the vein, 44 × wingL. The path factors are carried unrounded: ten-thousandths for the
+    /// shells and the wings (the outer ones × 100), millionths for the band.
     function _defs(Traits calldata t) private pure returns (string memory) {
         (uint256[12] memory p, uint256 fit) = _form(t.form);
         return string.concat(
             string.concat(
                 '<defs><path id="shell" d="',
-                _shell(p, t.shellW, t.shellL, 110),
+                _shell(p, t.shellW * 100, t.shellL * 100, 110),
                 '"/><path id="shell2" d="',
-                _shell(p, _m(t.shellW, 86), _m(t.shellL, 93), 110 + _m(25, t.shellL))
+                _shell(p, t.shellW * 86, t.shellL * 93, 110 + _mulDiv(25, t.shellL, 100))
             ),
             string.concat(
                 '"/><path id="wing" d="',
-                _wing(t.wingW, t.wingL, 300),
+                _wing(t.wingW * 100, t.wingL * 100, 300),
                 '"/><path id="wing2" d="',
-                _wing(_m(t.wingW, 73), _m(t.wingL, 82), 340),
+                _wing(t.wingW * 73, t.wingL * 82, 340),
                 '"/><path id="band" d="',
-                _band(_m(_m(t.bandW, fit), t.shellW)),
+                _band(t.bandW * fit * t.shellW),
                 '"/><path id="vein" d="M32 30v',
-                _f(_m(440, t.wingL)),
+                _f(_mulDiv(440, t.wingL, 100)),
                 '"/></defs>'
             )
         );
@@ -87,7 +90,7 @@ contract MetamorphChrysalis is IMetamorphFigure {
     }
 
     /// The prototype's shellPath: from the top on the axis, the left side down in two cubics to the bottom
-    /// point on the axis, the right side back up in two cubics. w and L in hundredths, top in tenths.
+    /// point on the axis, the right side back up in two cubics. w and L in ten-thousandths, top in tenths.
     function _shell(uint256[12] memory p, uint256 w, uint256 L, uint256 top)
         private
         pure
@@ -99,7 +102,11 @@ contract MetamorphChrysalis is IMetamorphFigure {
                 _pt(true, p[2], w, p[3], L, top),
                 _pt(true, p[4], w, p[5], L, top)
             ),
-            _c(_pt(true, p[6], w, p[7], L, top), _pt(true, p[8], w, p[9], L, top), _axis(top + _d(p[11], L)))
+            _c(
+                _pt(true, p[6], w, p[7], L, top),
+                _pt(true, p[8], w, p[9], L, top),
+                _axis(top + _mulDiv(p[11], L, 10, 10000))
+            )
         );
         string memory up = string.concat(
             _c(
@@ -112,11 +119,16 @@ contract MetamorphChrysalis is IMetamorphFigure {
         return string.concat("M32 ", _f(top), down, up, "Z");
     }
 
-    /// The prototype's wingPath: the folded wing's fixed control points, ww across and wl down from `top`.
+    /// The prototype's wingPath: the folded wing's fixed control points, ww across and wl down from `top`
+    /// (ww and wl in ten-thousandths).
     function _wing(uint256 ww, uint256 wl, uint256 top) private pure returns (string memory) {
         string memory down = string.concat(
             _c(_pt(true, 9, ww, 10, wl, top), _pt(true, 13, ww, 24, wl, top), _pt(true, 8, ww, 44, wl, top)),
-            _c(_pt(true, 4, ww, 38, wl, top), _pt(true, 1, ww, 31, wl, top), _axis(top + _d(24, wl)))
+            _c(
+                _pt(true, 4, ww, 38, wl, top),
+                _pt(true, 1, ww, 31, wl, top),
+                _axis(top + _mulDiv(24, wl, 10, 10000))
+            )
         );
         string memory up = string.concat(
             _c(
@@ -127,10 +139,11 @@ contract MetamorphChrysalis is IMetamorphFigure {
         return string.concat("M32 ", _f(top), down, up, "Z");
     }
 
-    /// The prototype's bandPath: the arc across the shell at y 29, its ends 13 units of w from the axis.
+    /// The prototype's bandPath: the arc across the shell at y 29, its ends 13 units of w from the axis (w in
+    /// millionths: bandW × BAND_FIT × shellW).
     function _band(uint256 w) private pure returns (string memory) {
-        uint256 a = _d(13, w);
-        uint256 b = _d(8, w);
+        uint256 a = _mulDiv(13, w, 10, 1000000);
+        uint256 b = _mulDiv(8, w, 10, 1000000);
         return string.concat(
             "M", _f(320 - a), " 29C", _f(320 - b), " 26.4 ", _f(320 + b), " 26.4 ", _f(320 + a), " 29"
         );
@@ -143,10 +156,18 @@ contract MetamorphChrysalis is IMetamorphFigure {
         return string.concat(
             _tp("shell", outer, c.shell, ArtTraits.bits(seed, 11001, 190), ""),
             _tp("shell2", inner, c.inner, ArtTraits.bits(seed, 11002, 210), 'opacity="0.45"'),
-            _tp("wing", _m(outer, 90), c.wing, ArtTraits.bits(seed, 11003, 130), 'filter="url(#soft)"'),
-            _tp("wing2", _m(inner, 95), c.wing2, ArtTraits.bits(seed, 11004, 140), 'opacity="0.55"'),
-            _tp("vein", _m(inner, 105), c.vein, ArtTraits.bits(seed, 11005, 40), 'opacity="0.8"'),
-            _tp("band", _m(outer, 95), c.band, ArtTraits.bits(seed, 11006, 30), "")
+            _tp(
+                "wing",
+                _mulDiv(outer, 90, 100),
+                c.wing,
+                ArtTraits.bits(seed, 11003, 130),
+                'filter="url(#soft)"'
+            ),
+            _tp(
+                "wing2", _mulDiv(inner, 95, 100), c.wing2, ArtTraits.bits(seed, 11004, 140), 'opacity="0.55"'
+            ),
+            _tp("vein", _mulDiv(inner, 105, 100), c.vein, ArtTraits.bits(seed, 11005, 40), 'opacity="0.8"'),
+            _tp("band", _mulDiv(outer, 95, 100), c.band, ArtTraits.bits(seed, 11006, 30), "")
         );
     }
 
@@ -163,18 +184,27 @@ contract MetamorphChrysalis is IMetamorphFigure {
         );
     }
 
-    /// The prototype's segmentRings: ring j at y = 11 + (53 + 7j) × shellL, (14 − 3j) × shellW to each side.
+    /// The prototype's segmentRings: ring j at y = 11 + (53 + 7j) × shellL, w = (14 − 3j) × shellW to each
+    /// side, its arc 2w wide (2 × (14 − 3j) × shellW, rounded once like every printed value).
     function _rings(uint8 rings, uint256 shellW, uint256 shellL, string memory stroke)
         private
         pure
         returns (string memory s)
     {
         for (uint256 j; j < rings; j++) {
-            uint256 w = _m(140 - 30 * j, shellW);
+            uint256 w = _mulDiv(140 - 30 * j, shellW, 100);
             s = string.concat(
                 s,
-                string.concat('<path d="M', _f(320 - w), " ", _f(110 + _m(530 + 70 * j, shellL)), "q", _f(w)),
-                string.concat(" 4 ", _f(2 * w), ' 0" stroke="', stroke, '" stroke-width="0.5" fill="none"'),
+                string.concat(
+                    '<path d="M', _f(320 - w), " ", _f(110 + _mulDiv(530 + 70 * j, shellL, 100)), "q", _f(w)
+                ),
+                string.concat(
+                    " 4 ",
+                    _f(_mulDiv(2, 140 - 30 * j, shellW, 100)),
+                    ' 0" stroke="',
+                    stroke,
+                    '" stroke-width="0.5" fill="none"'
+                ),
                 ' opacity="0.45" stroke-dasharray="0.8 1.2"/>'
             );
         }
@@ -183,21 +213,32 @@ contract MetamorphChrysalis is IMetamorphFigure {
     /// The prototype's gold tick, moved down to the end of the vein: translate(0 tickY − 73) with
     /// tickY = 30 + 44 × wingL − 1; its offsets are 7.5, 2, 4.8, 2.7 and 5.5 × wingW.
     function _tick(uint256 wingW, uint256 wingL, string memory stroke) private pure returns (string memory) {
-        uint256 tickY = 300 + _m(440, wingL) - 10;
+        uint256 tickY = 300 + _mulDiv(440, wingL, 100) - 10;
         return string.concat(
             string.concat(
                 '<path transform="translate(0 ',
                 ArtTraits.f1(int256(tickY) - 730),
                 ')" d="M',
-                _f(320 - _m(75, wingW)),
+                _f(320 - _mulDiv(75, wingW, 100)),
                 " 73c",
-                _f(_m(20, wingW)),
+                _f(_mulDiv(20, wingW, 100)),
                 "-3.6 ",
-                _f(_m(48, wingW))
+                _f(_mulDiv(48, wingW, 100))
             ),
-            string.concat("-6.6 ", _f(_m(75, wingW)), "-9.4 ", _f(_m(27, wingW)), " 2.8 ", _f(_m(55, wingW))),
             string.concat(
-                " 5.8 ", _f(_m(75, wingW)), ' 9.4" stroke="', stroke, '" stroke-width="0.9" fill="none"'
+                "-6.6 ",
+                _f(_mulDiv(75, wingW, 100)),
+                "-9.4 ",
+                _f(_mulDiv(27, wingW, 100)),
+                " 2.8 ",
+                _f(_mulDiv(55, wingW, 100))
+            ),
+            string.concat(
+                " 5.8 ",
+                _f(_mulDiv(75, wingW, 100)),
+                ' 9.4" stroke="',
+                stroke,
+                '" stroke-width="0.9" fill="none"'
             ),
             ' stroke-linecap="round"/>'
         );
@@ -209,14 +250,15 @@ contract MetamorphChrysalis is IMetamorphFigure {
     }
 
     /// "x y": the point k units of w across the axis x = 32 (left of it when `left`) and j units of L below
-    /// `top`: x = 320 ∓ (k × w × 10 + 50) / 100, y = top + (j × L × 10 + 50) / 100, in tenths.
+    /// `top`, in tenths: x = 320 ∓ k × w × 10 / 10000 and y = top + j × L × 10 / 10000, each rounded once.
+    /// w and L in ten-thousandths.
     function _pt(bool left, uint256 k, uint256 w, uint256 j, uint256 L, uint256 top)
         private
         pure
         returns (string memory)
     {
-        uint256 dx = _d(k, w);
-        return string.concat(_f(left ? 320 - dx : 320 + dx), " ", _f(top + _d(j, L)));
+        uint256 dx = _mulDiv(k, w, 10, 10000);
+        return string.concat(_f(left ? 320 - dx : 320 + dx), " ", _f(top + _mulDiv(j, L, 10, 10000)));
     }
 
     /// "32 y": the point at height y on the axis.
@@ -224,14 +266,17 @@ contract MetamorphChrysalis is IMetamorphFigure {
         return string.concat("32 ", _f(y));
     }
 
-    /// (a × b + 50) / 100: a times a factor b in hundredths, rounded half up (a and b are never negative).
-    function _m(uint256 a, uint256 b) private pure returns (uint256) {
-        return (a * b + 50) / 100;
+    /// The figure's one rounding: the product of the integer factors, divided once by `den` (a power of ten),
+    /// rounded half up. Every printed coordinate, size and length goes through it with all of its factors at
+    /// once: intermediate values are never rounded (shellW × 0.86 is carried unrounded as shellW × 86). The
+    /// factors are never negative. The mirror's `mulDiv` is the same function.
+    function _mulDiv(uint256 a, uint256 b, uint256 den) private pure returns (uint256) {
+        return (a * b + den / 2) / den;
     }
 
-    /// (k × w × 10 + 50) / 100: k units of a factor w (hundredths), in tenths, rounded half up.
-    function _d(uint256 k, uint256 w) private pure returns (uint256) {
-        return (k * w * 10 + 50) / 100;
+    /// The same with three factors.
+    function _mulDiv(uint256 a, uint256 b, uint256 c, uint256 den) private pure returns (uint256) {
+        return (a * b * c + den / 2) / den;
     }
 
     /// Tenths as the prototype's f1 prints them (`ArtTraits.f1`), for a value that is never negative.

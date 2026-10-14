@@ -273,42 +273,53 @@ function shellForm(form) {
   return f >= 1 && f <= 3 ? { p: SHELLS[f], fit: BAND_FIT[f] } : { p: SHELLS[0], fit: BAND_FIT[0] };
 }
 
-/// (a × b + 50) / 100: a product with a factor in hundredths, rounded half up. Every product of the figure goes
-/// through it on magnitudes (a and b are never negative); BigInt throws on a float, so none can slip in.
-const m = (a, b) => (BigInt(a) * BigInt(b) + 50n) / 100n;
+/// The figure's one rounding (the contract's _mulDiv): the product of the integer factors, then one division by
+/// the last argument (a power of ten), rounded half up. Every printed coordinate, size and length goes through it
+/// with all of its factors at once: intermediate values are never rounded (shellW × 0.86 is carried unrounded as
+/// shellW × 86). The factors are never negative, and BigInt throws on a float.
+const mulDiv = (...xs) => {
+  const den = BigInt(xs[xs.length - 1]);
+  return (xs.slice(0, -1).reduce((acc, x) => acc * BigInt(x), 1n) + den / 2n) / den;
+};
 
-/// (k × w × 10 + 50) / 100: k units of a factor w (hundredths), in tenths, rounded half up.
-const d = (k, w) => (BigInt(k) * BigInt(w) * 10n + 50n) / 100n;
-
-/// The point k units of w across the axis x = 32 (left of it when `left`) and j units of L below `top` (tenths),
-/// printed "x y": x = 320 ∓ (k × w × 10 + 50) / 100, y = top + (j × L × 10 + 50) / 100.
-const pt = (left, k, w, j, L, top) => `${f1(left ? 320n - d(k, w) : 320n + d(k, w))} ${f1(BigInt(top) + d(j, L))}`;
+/// The point k units of a factor w across the axis x = 32 (left of it when `left`) and j units of a factor L
+/// below `top`, printed "x y" in tenths: x = 320 ∓ k × w × 10 / 10000 and y = top + j × L × 10 / 10000, each
+/// rounded once. w and L in ten-thousandths, top in tenths.
+const pt = (left, k, w, j, L, top) => {
+  const dx = mulDiv(k, w, 10, 10000);
+  return `${f1(left ? 320n - dx : 320n + dx)} ${f1(BigInt(top) + mulDiv(j, L, 10, 10000))}`;
+};
 
 /// The prototype's shellPath(form, w, L, top): from the top on the axis, the left side down in two cubics to the
-/// bottom point on the axis, the right side back up in two cubics. w and L in hundredths, top in tenths.
+/// bottom point on the axis, the right side back up in two cubics. w and L in ten-thousandths, top in tenths.
 function shellPath(p, w, L, top) {
   const l = (n) => pt(true, p[n], w, p[n + 1], L, top);
   const r = (n) => pt(false, p[n], w, p[n + 1], L, top);
   return (
     `M32 ${f1(top)}` +
-    `C${l(0)} ${l(2)} ${l(4)}C${l(6)} ${l(8)} 32 ${f1(BigInt(top) + d(p[11], L))}` +
+    `C${l(0)} ${l(2)} ${l(4)}C${l(6)} ${l(8)} 32 ${f1(BigInt(top) + mulDiv(p[11], L, 10, 10000))}` +
     `C${r(8)} ${r(6)} ${r(4)}C${r(2)} ${r(0)} 32 ${f1(top)}Z`
   );
 }
 
-/// The prototype's wingPath(ww, wl, top): the folded wing's fixed control points, ww across and wl down.
+/// The prototype's wingPath(ww, wl, top): the folded wing's fixed control points, ww across and wl down
+/// (ten-thousandths).
 function wingPath(ww, wl, top) {
   const l = (k, j) => pt(true, k, ww, j, wl, top);
   const r = (k, j) => pt(false, k, ww, j, wl, top);
   return (
-    `M32 ${f1(top)}C${l(9, 10)} ${l(13, 24)} ${l(8, 44)}C${l(4, 38)} ${l(1, 31)} 32 ${f1(BigInt(top) + d(24, wl))}` +
+    `M32 ${f1(top)}C${l(9, 10)} ${l(13, 24)} ${l(8, 44)}C${l(4, 38)} ${l(1, 31)} 32 ` +
+    `${f1(BigInt(top) + mulDiv(24, wl, 10, 10000))}` +
     `C${r(1, 31)} ${r(4, 38)} ${r(8, 44)}C${r(13, 24)} ${r(9, 10)} 32 ${f1(top)}Z`
   );
 }
 
-/// The prototype's bandPath(w): the arc across the shell at y 29, its ends 13 units of w from the axis.
+/// The prototype's bandPath(w): the arc across the shell at y 29, its ends 13 units of w from the axis; w in
+/// millionths (bandW × BAND_FIT × shellW, unrounded).
 function bandPath(w) {
-  return `M${f1(320n - d(13, w))} 29C${f1(320n - d(8, w))} 26.4 ${f1(320n + d(8, w))} 26.4 ${f1(320n + d(13, w))} 29`;
+  const a = mulDiv(13, w, 10, 1000000);
+  const b = mulDiv(8, w, 10, 1000000);
+  return `M${f1(320n - a)} 29C${f1(320n - b)} 26.4 ${f1(320n + b)} 26.4 ${f1(320n + a)} 29`;
 }
 
 /// The prototype's tp: a digit string on a path, the size in tenths. `more` follows a space even when it is
@@ -319,44 +330,47 @@ const tp = (href, size, fill, text, more) =>
 /// The chrysalis figure: the prototype's chrysalisStage inside its figureGroup, with the minimal layout (cx 540,
 /// cy 584, shell 6.6), in integer tenths. t: the card traits; c: the colours; s: the drawing seed
 /// seed(seat, round, edition, 11), whose lines 11001..11006 carry the six digit strings. The seat traits are not
-/// used. The order of the elements and their attributes is the prototype's, verbatim.
+/// used. The order of the elements and their attributes is the prototype's, verbatim; every printed number is
+/// one mulDiv of all its factors.
 export function chrysalisFigure(t, c, s) {
   const { outer, inner } = densityOf(t.density);
   const { p, fit } = shellForm(t.form);
   let rings = "";
   for (let j = 0n; j < BigInt(t.rings); j++) {
-    const w = m(140n - 30n * j, t.shellW); // (14 − 3j) × shellW
-    const y = 110n + m(530n + 70n * j, t.shellL); // 11 + (53 + 7j) × shellL
+    const w = mulDiv(140n - 30n * j, t.shellW, 100); // (14 − 3j) × shellW
+    const y = 110n + mulDiv(530n + 70n * j, t.shellL, 100); // 11 + (53 + 7j) × shellL
     rings +=
-      `<path d="M${f1(320n - w)} ${f1(y)}q${f1(w)} 4 ${f1(2n * w)} 0" stroke="${c.shell}" stroke-width="0.5" ` +
-      `fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>`;
+      `<path d="M${f1(320n - w)} ${f1(y)}q${f1(w)} 4 ${f1(mulDiv(2, 140n - 30n * j, t.shellW, 100))} 0" ` +
+      `stroke="${c.shell}" stroke-width="0.5" fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>`;
   }
-  const tickY = 300n + m(440, t.wingL) - 10n; // 30 + 44 × wingL − 1
+  const tickY = 300n + mulDiv(440, t.wingL, 100) - 10n; // 30 + 44 × wingL − 1
   return (
     // the group: translate(cx cy) rotate(tilt) scale(6.6 × scale) translate(-32 -52)
-    `<g transform="translate(540 584) rotate(${f1(t.tilt)}) scale(${f1(m(66, t.scale))}) translate(-32 -52)" ` +
-    `font-family="Consolas, 'Courier New', monospace" letter-spacing="0.25">` +
-    // the defs: the shell; the inner shell at 0.86 / 0.93 from 11 + 2.5 × shellL; the wing; the inner wing at
-    // 0.73 / 0.82 from 34; the band, bandW × BAND_FIT × shellW wide; the vein, 44 × wingL long
-    `<defs><path id="shell" d="${shellPath(p, t.shellW, t.shellL, 110n)}"/>` +
-    `<path id="shell2" d="${shellPath(p, m(t.shellW, 86), m(t.shellL, 93), 110n + m(25, t.shellL))}"/>` +
-    `<path id="wing" d="${wingPath(t.wingW, t.wingL, 300n)}"/>` +
-    `<path id="wing2" d="${wingPath(m(t.wingW, 73), m(t.wingL, 82), 340n)}"/>` +
-    `<path id="band" d="${bandPath(m(m(t.bandW, fit), t.shellW))}"/>` +
-    `<path id="vein" d="M32 30v${f1(m(440, t.wingL))}"/></defs>` +
+    `<g transform="translate(540 584) rotate(${f1(t.tilt)}) scale(${f1(mulDiv(66, t.scale, 100))}) ` +
+    `translate(-32 -52)" font-family="Consolas, 'Courier New', monospace" letter-spacing="0.25">` +
+    // the defs: the shell (its factors in ten-thousandths); the inner shell at shellW × 0.86, shellL × 0.93 from
+    // 11 + 2.5 × shellL; the wing; the inner wing at wingW × 0.73, wingL × 0.82 from 34; the band, bandW ×
+    // BAND_FIT × shellW wide; the vein, 44 × wingL long
+    `<defs><path id="shell" d="${shellPath(p, t.shellW * 100n, t.shellL * 100n, 110n)}"/>` +
+    `<path id="shell2" d="${shellPath(p, t.shellW * 86n, t.shellL * 93n, 110n + mulDiv(25, t.shellL, 100))}"/>` +
+    `<path id="wing" d="${wingPath(t.wingW * 100n, t.wingL * 100n, 300n)}"/>` +
+    `<path id="wing2" d="${wingPath(t.wingW * 73n, t.wingL * 82n, 340n)}"/>` +
+    `<path id="band" d="${bandPath(t.bandW * BigInt(fit) * t.shellW)}"/>` +
+    `<path id="vein" d="M32 30v${f1(mulDiv(440, t.wingL, 100))}"/></defs>` +
     // the six digit strings: the prototype's bits(seed + k, n) is bits(s, 11000 + k, n)
     tp("shell", outer, c.shell, bits(s, 11001, 190), "") +
     tp("shell2", inner, c.inner, bits(s, 11002, 210), `opacity="0.45"`) +
-    tp("wing", m(outer, 90), c.wing, bits(s, 11003, 130), `filter="url(#soft)"`) +
-    tp("wing2", m(inner, 95), c.wing2, bits(s, 11004, 140), `opacity="0.55"`) +
-    tp("vein", m(inner, 105), c.vein, bits(s, 11005, 40), `opacity="0.8"`) +
-    tp("band", m(outer, 95), c.band, bits(s, 11006, 30), "") +
+    tp("wing", mulDiv(outer, 90, 100), c.wing, bits(s, 11003, 130), `filter="url(#soft)"`) +
+    tp("wing2", mulDiv(inner, 95, 100), c.wing2, bits(s, 11004, 140), `opacity="0.55"`) +
+    tp("vein", mulDiv(inner, 105, 100), c.vein, bits(s, 11005, 40), `opacity="0.8"`) +
+    tp("band", mulDiv(outer, 95, 100), c.band, bits(s, 11006, 30), "") +
     // the segment rings
     rings +
     // the gold tick, moved down to the end of the vein
-    `<path transform="translate(0 ${f1(tickY - 730n)})" d="M${f1(320n - m(75, t.wingW))} 73c${f1(m(20, t.wingW))}` +
-    `-3.6 ${f1(m(48, t.wingW))}-6.6 ${f1(m(75, t.wingW))}-9.4 ${f1(m(27, t.wingW))} 2.8 ${f1(m(55, t.wingW))} 5.8 ` +
-    `${f1(m(75, t.wingW))} 9.4" stroke="${c.band}" stroke-width="0.9" fill="none" stroke-linecap="round"/>` +
+    `<path transform="translate(0 ${f1(tickY - 730n)})" d="M${f1(320n - mulDiv(75, t.wingW, 100))} 73c` +
+    `${f1(mulDiv(20, t.wingW, 100))}-3.6 ${f1(mulDiv(48, t.wingW, 100))}-6.6 ${f1(mulDiv(75, t.wingW, 100))}-9.4 ` +
+    `${f1(mulDiv(27, t.wingW, 100))} 2.8 ${f1(mulDiv(55, t.wingW, 100))} 5.8 ${f1(mulDiv(75, t.wingW, 100))} 9.4" ` +
+    `stroke="${c.band}" stroke-width="0.9" fill="none" stroke-linecap="round"/>` +
     // the stem
     `<path d="M32 2v9" stroke="${c.shell}" stroke-width="0.8" fill="none"/>` +
     "</g>"
