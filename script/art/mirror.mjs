@@ -218,10 +218,12 @@ export const HAIR = "#223029";
 export const JADE = "#3ec28f";
 export const GOLD = "#d9a94b";
 
-/// The four jades; an index past 3 reads as the first (the contract's fallback).
+/// The four jades; an index past 3 reads as the first (the contract's fallback). The index is coerced with
+/// Number(), so a BigInt index picks its jade instead of falling through to the first.
 export const TONES = ["#3ec28f", "#2aa87a", "#5fd0a3", "#37b59a"];
 export function tone(index) {
-  return index === 1 ? TONES[1] : index === 2 ? TONES[2] : index === 3 ? TONES[3] : TONES[0];
+  const k = Number(index);
+  return k === 1 ? TONES[1] : k === 2 ? TONES[2] : k === 3 ? TONES[3] : TONES[0];
 }
 
 const row = (shell, inner, wing, wing2, vein, band, glow, spots, body) => ({
@@ -229,21 +231,24 @@ const row = (shell, inner, wing, wing2, vein, band, glow, spots, body) => ({
 });
 
 /// The prototype's colours(palette, tone) table; a gilt card takes the prototype's gilt row whatever its
-/// palette; a palette past 3 reads as classic (the prototype's default branch).
+/// palette; a palette past 3 reads as classic (the prototype's default branch). The palette is coerced with
+/// Number(), as in tone().
 export function colours(palette, gilt, toneIndex) {
   const t = tone(toneIndex);
+  const p = Number(palette);
   if (gilt) return row(GOLD, GOLD, t, t, t, INK, GOLD, INK, GOLD);
-  if (palette === 1) return row(t, t, INK, INK, INK, GOLD, t, GOLD, INK); // inverted
-  if (palette === 2) return row(INK, INK, GOLD, GOLD, GOLD, t, GOLD, t, INK); // ember
-  if (palette === 3) return row(INK, INK, INK, INK, INK, GOLD, INK, GOLD, INK); // mono
+  if (p === 1) return row(t, t, INK, INK, INK, GOLD, t, GOLD, INK); // inverted
+  if (p === 2) return row(INK, INK, GOLD, GOLD, GOLD, t, GOLD, t, INK); // ember
+  if (p === 3) return row(INK, INK, INK, INK, INK, GOLD, INK, GOLD, INK); // mono
   return row(INK, INK, t, t, t, GOLD, t, GOLD, INK); // classic
 }
 
 /// Font sizes in tenths and the glow dot count: fine 1.9 / 1.2 / 12, standard 2.3 / 1.5 / 26, bold 2.8 / 1.8
-/// / 42; a density past 2 reads as bold.
+/// / 42; a density past 2 reads as bold. The density is coerced with Number(), as in tone().
 export function densityOf(density) {
-  if (density === 0) return { outer: 19n, inner: 12n, dots: 12n };
-  if (density === 1) return { outer: 23n, inner: 15n, dots: 26n };
+  const d = Number(density);
+  if (d === 0) return { outer: 19n, inner: 12n, dots: 12n };
+  if (d === 1) return { outer: 23n, inner: 15n, dots: 26n };
   return { outer: 28n, inner: 18n, dots: 42n };
 }
 
@@ -294,7 +299,10 @@ function vectors() {
   }
 
   say("// ---- test_cardTraitsVectors");
-  for (const [seat, round, edition] of [[1376, 0, 1], [1376, 0, 2], [1376, 1, 303], [42, 0, 17]]) {
+  // (1376, 0, 4) and (1376, 0, 20): the wingW draw (116, 114) is above the cap (shellW × 110 + 50) / 100
+  // (105, 96), so the cap is what the card gets.
+  const cards = [[1376, 0, 1], [1376, 0, 2], [1376, 1, 303], [42, 0, 17], [1376, 0, 4], [1376, 0, 20]];
+  for (const [seat, round, edition] of cards) {
     const t = cardTraits(seat, round, edition);
     say(
       `_card(${seat}, ${round}, ${edition}, Traits({form: ${t.form}, signal: ${t.signal}, tilt: ${t.tilt}, ` +
@@ -319,19 +327,24 @@ function vectors() {
   for (const n of [30, 190, 320]) say(`assertEq(h.bits(bytes32(${sB}), 11001, ${n}), ${q(bits(sB, 11001, n))});`);
   for (const n of [30, 190, 320]) say(`assertEq(h.bits(bytes32(${sD}), 11006, ${n}), ${q(bits(sD, 11006, n))});`);
 
+  // The boundaries run on the library's own tables (the ones cardTraits draws with), each pinned first to the
+  // spec's weights.
   say("// ---- test_pickAtTheTableBoundaries");
-  for (const w of [FORM, SIGNAL, DENSITY, HALO, PALETTE]) {
-    say(`assertEq(h.pick(0, ${W(w)}), ${pick(0n, w)});`);
+  const tables = [["form", FORM], ["signal", SIGNAL], ["density", DENSITY], ["halo", HALO], ["palette", PALETTE]];
+  for (const [n, [name, w]] of tables.entries()) {
+    say(`${n === 0 ? "uint16[4] memory " : ""}w = h.${name}Weights();`);
+    say(`_weights(w, ${W(w)});`);
+    say(`assertEq(h.pick(0, w), ${pick(0n, w)});`);
     let b = 0;
     for (let k = 0; k < 3; k++) {
       b += w[k];
       if (b >= 100) break;
       // The first u with (u × 100) >> 32 == b, and the one before it.
       const first = (BigInt(b) * (1n << 32n) + 99n) / 100n;
-      say(`assertEq(h.pick(${first - 1n}, ${W(w)}), ${pick(first - 1n, w)});`);
-      say(`assertEq(h.pick(${first}, ${W(w)}), ${pick(first, w)});`);
+      say(`assertEq(h.pick(${first - 1n}, w), ${pick(first - 1n, w)});`);
+      say(`assertEq(h.pick(${first}, w), ${pick(first, w)});`);
     }
-    say(`assertEq(h.pick(type(uint32).max, ${W(w)}), ${pick(MASK32, w)});`);
+    say(`assertEq(h.pick(type(uint32).max, w), ${pick(MASK32, w)});`);
   }
 
   say("// ---- test_tonesAreTheFourJades");

@@ -52,6 +52,26 @@ contract ArtTraitsHarness {
         return ArtTraits.cardTraits(seat, round, edition);
     }
 
+    function formWeights() external pure returns (uint16[4] memory) {
+        return ArtTraits.formWeights();
+    }
+
+    function signalWeights() external pure returns (uint16[4] memory) {
+        return ArtTraits.signalWeights();
+    }
+
+    function densityWeights() external pure returns (uint16[4] memory) {
+        return ArtTraits.densityWeights();
+    }
+
+    function haloWeights() external pure returns (uint16[4] memory) {
+        return ArtTraits.haloWeights();
+    }
+
+    function paletteWeights() external pure returns (uint16[4] memory) {
+        return ArtTraits.paletteWeights();
+    }
+
     function tone(uint8 index) external pure returns (string memory) {
         return ArtTraits.tone(index);
     }
@@ -319,6 +339,69 @@ contract ArtTraitsTest is Test {
                 tier: 1
             })
         );
+        _card(
+            1376,
+            0,
+            4,
+            Traits({
+                form: 3,
+                signal: 0,
+                tilt: -2,
+                scale: 107,
+                shellW: 95,
+                shellL: 101,
+                wingW: 105,
+                wingL: 94,
+                density: 0,
+                halo: 0,
+                palette: 2,
+                bandW: 93,
+                rings: 2,
+                orbitDeg: 8,
+                dSpan: 106,
+                dRise: 95,
+                dReach: 97,
+                dDrop: 99,
+                dVeins: 1,
+                dSpots: -1,
+                tier: 1
+            })
+        );
+        _card(
+            1376,
+            0,
+            20,
+            Traits({
+                form: 3,
+                signal: 0,
+                tilt: 14,
+                scale: 106,
+                shellW: 87,
+                shellL: 93,
+                wingW: 96,
+                wingL: 102,
+                density: 2,
+                halo: 2,
+                palette: 0,
+                bandW: 114,
+                rings: 2,
+                orbitDeg: 852,
+                dSpan: 111,
+                dRise: 95,
+                dReach: 93,
+                dDrop: 112,
+                dVeins: 0,
+                dSpots: 1,
+                tier: 1
+            })
+        );
+    }
+
+    /// wingW = min(draw, (shellW × 110 + 50) / 100): for (1376, 0, 4) and (1376, 0, 20) the draw (word 6) is
+    /// above the cap, and the card gets the cap.
+    function test_wingWIsCappedByTheShell() public view {
+        _capped(1376, 0, 4);
+        _capped(1376, 0, 20);
     }
 
     function test_f1PrintsTenths() public view {
@@ -388,45 +471,57 @@ contract ArtTraitsTest is Test {
         assertNotEq(h.bits(s, 11001, 256), h.bits(s, 11002, 256));
     }
 
+    /// The boundaries run on the library's own tables, the ones `cardTraits` draws with, each pinned first to
+    /// the spec's weights: two weights swapped in the library fail here.
     function test_pickAtTheTableBoundaries() public view {
-        assertEq(h.pick(0, [uint16(40), 22, 22, 16]), 0);
-        assertEq(h.pick(1717986918, [uint16(40), 22, 22, 16]), 0);
-        assertEq(h.pick(1717986919, [uint16(40), 22, 22, 16]), 1);
-        assertEq(h.pick(2662879723, [uint16(40), 22, 22, 16]), 1);
-        assertEq(h.pick(2662879724, [uint16(40), 22, 22, 16]), 2);
-        assertEq(h.pick(3607772528, [uint16(40), 22, 22, 16]), 2);
-        assertEq(h.pick(3607772529, [uint16(40), 22, 22, 16]), 3);
-        assertEq(h.pick(type(uint32).max, [uint16(40), 22, 22, 16]), 3);
-        assertEq(h.pick(0, [uint16(45), 25, 20, 10]), 0);
-        assertEq(h.pick(1932735283, [uint16(45), 25, 20, 10]), 0);
-        assertEq(h.pick(1932735284, [uint16(45), 25, 20, 10]), 1);
-        assertEq(h.pick(3006477107, [uint16(45), 25, 20, 10]), 1);
-        assertEq(h.pick(3006477108, [uint16(45), 25, 20, 10]), 2);
-        assertEq(h.pick(3865470566, [uint16(45), 25, 20, 10]), 2);
-        assertEq(h.pick(3865470567, [uint16(45), 25, 20, 10]), 3);
-        assertEq(h.pick(type(uint32).max, [uint16(45), 25, 20, 10]), 3);
-        assertEq(h.pick(0, [uint16(30), 50, 20, 0]), 0);
-        assertEq(h.pick(1288490188, [uint16(30), 50, 20, 0]), 0);
-        assertEq(h.pick(1288490189, [uint16(30), 50, 20, 0]), 1);
-        assertEq(h.pick(3435973836, [uint16(30), 50, 20, 0]), 1);
-        assertEq(h.pick(3435973837, [uint16(30), 50, 20, 0]), 2);
-        assertEq(h.pick(type(uint32).max, [uint16(30), 50, 20, 0]), 2);
-        assertEq(h.pick(0, [uint16(50), 30, 15, 5]), 0);
-        assertEq(h.pick(2147483647, [uint16(50), 30, 15, 5]), 0);
-        assertEq(h.pick(2147483648, [uint16(50), 30, 15, 5]), 1);
-        assertEq(h.pick(3435973836, [uint16(50), 30, 15, 5]), 1);
-        assertEq(h.pick(3435973837, [uint16(50), 30, 15, 5]), 2);
-        assertEq(h.pick(4080218931, [uint16(50), 30, 15, 5]), 2);
-        assertEq(h.pick(4080218932, [uint16(50), 30, 15, 5]), 3);
-        assertEq(h.pick(type(uint32).max, [uint16(50), 30, 15, 5]), 3);
-        assertEq(h.pick(0, [uint16(58), 20, 12, 10]), 0);
-        assertEq(h.pick(2491081031, [uint16(58), 20, 12, 10]), 0);
-        assertEq(h.pick(2491081032, [uint16(58), 20, 12, 10]), 1);
-        assertEq(h.pick(3350074490, [uint16(58), 20, 12, 10]), 1);
-        assertEq(h.pick(3350074491, [uint16(58), 20, 12, 10]), 2);
-        assertEq(h.pick(3865470566, [uint16(58), 20, 12, 10]), 2);
-        assertEq(h.pick(3865470567, [uint16(58), 20, 12, 10]), 3);
-        assertEq(h.pick(type(uint32).max, [uint16(58), 20, 12, 10]), 3);
+        uint16[4] memory w = h.formWeights();
+        _weights(w, [uint16(40), 22, 22, 16]);
+        assertEq(h.pick(0, w), 0);
+        assertEq(h.pick(1717986918, w), 0);
+        assertEq(h.pick(1717986919, w), 1);
+        assertEq(h.pick(2662879723, w), 1);
+        assertEq(h.pick(2662879724, w), 2);
+        assertEq(h.pick(3607772528, w), 2);
+        assertEq(h.pick(3607772529, w), 3);
+        assertEq(h.pick(type(uint32).max, w), 3);
+        w = h.signalWeights();
+        _weights(w, [uint16(45), 25, 20, 10]);
+        assertEq(h.pick(0, w), 0);
+        assertEq(h.pick(1932735283, w), 0);
+        assertEq(h.pick(1932735284, w), 1);
+        assertEq(h.pick(3006477107, w), 1);
+        assertEq(h.pick(3006477108, w), 2);
+        assertEq(h.pick(3865470566, w), 2);
+        assertEq(h.pick(3865470567, w), 3);
+        assertEq(h.pick(type(uint32).max, w), 3);
+        w = h.densityWeights();
+        _weights(w, [uint16(30), 50, 20, 0]);
+        assertEq(h.pick(0, w), 0);
+        assertEq(h.pick(1288490188, w), 0);
+        assertEq(h.pick(1288490189, w), 1);
+        assertEq(h.pick(3435973836, w), 1);
+        assertEq(h.pick(3435973837, w), 2);
+        assertEq(h.pick(type(uint32).max, w), 2);
+        w = h.haloWeights();
+        _weights(w, [uint16(50), 30, 15, 5]);
+        assertEq(h.pick(0, w), 0);
+        assertEq(h.pick(2147483647, w), 0);
+        assertEq(h.pick(2147483648, w), 1);
+        assertEq(h.pick(3435973836, w), 1);
+        assertEq(h.pick(3435973837, w), 2);
+        assertEq(h.pick(4080218931, w), 2);
+        assertEq(h.pick(4080218932, w), 3);
+        assertEq(h.pick(type(uint32).max, w), 3);
+        w = h.paletteWeights();
+        _weights(w, [uint16(58), 20, 12, 10]);
+        assertEq(h.pick(0, w), 0);
+        assertEq(h.pick(2491081031, w), 0);
+        assertEq(h.pick(2491081032, w), 1);
+        assertEq(h.pick(3350074490, w), 1);
+        assertEq(h.pick(3350074491, w), 2);
+        assertEq(h.pick(3865470566, w), 2);
+        assertEq(h.pick(3865470567, w), 3);
+        assertEq(h.pick(type(uint32).max, w), 3);
     }
 
     function test_tonesAreTheFourJades() public view {
@@ -740,6 +835,20 @@ contract ArtTraitsTest is Test {
         assertEq(o, outer, "outer");
         assertEq(n, inner, "inner");
         assertEq(d, dots, "dots");
+    }
+
+    function _weights(uint16[4] memory got, uint16[4] memory want) internal pure {
+        for (uint256 k; k < 4; k++) {
+            assertEq(got[k], want[k], "weight");
+        }
+    }
+
+    function _capped(uint256 seat, uint16 round, uint16 edition) internal view {
+        Traits memory t = h.cardTraits(seat, round, edition);
+        uint256 draw = uint256(h.between(h.word(h.seed(seat, round, edition, 7), 6), 80, 120, 1));
+        uint256 cap = (t.shellW * 110 + 50) / 100;
+        assertGt(draw, cap, "the draw is above the cap");
+        assertEq(t.wingW, cap, "wingW is the cap");
     }
 
     /// Holotype for edition 1, paratype for 2..33, series otherwise (edition 0 included).

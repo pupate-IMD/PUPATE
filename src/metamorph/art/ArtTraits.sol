@@ -133,13 +133,35 @@ library ArtTraits {
 
     // ------------------------------------------------------------------ the card
 
+    /// @notice The weight tables `cardTraits` draws with, the main spec's, verbatim, named once so that the
+    /// tests run the pick boundaries on these very tables. Each sums to 100; the palette has no gilt entry
+    /// (gilt comes from the proof, never from the seed).
+    function formWeights() internal pure returns (uint16[4] memory) {
+        return [uint16(40), 22, 22, 16]; // teardrop, pear, spindle, round
+    }
+
+    function signalWeights() internal pure returns (uint16[4] memory) {
+        return [uint16(45), 25, 20, 10]; // none, column, band, rain
+    }
+
+    function densityWeights() internal pure returns (uint16[4] memory) {
+        return [uint16(30), 50, 20, 0]; // fine, standard, bold
+    }
+
+    function haloWeights() internal pure returns (uint16[4] memory) {
+        return [uint16(50), 30, 15, 5]; // none, ring, double, orbit
+    }
+
+    function paletteWeights() internal pure returns (uint16[4] memory) {
+        return [uint16(58), 20, 12, 10]; // classic, inverted, ember, mono
+    }
+
     /// @notice Per edition: seed line 7, one word per draw (picks and counts included), words 0, 1, 2, ... in
-    /// the spec's order. The weight tables are the main spec's; the palette has no gilt entry (gilt comes from
-    /// the proof, never from the seed).
+    /// the spec's order, the picks on the tables above.
     function cardTraits(uint256 seat, uint16 round, uint16 edition) internal pure returns (Traits memory t) {
         bytes32 s = seed(seat, round, edition, 7);
-        t.form = pick(word(s, 0), [uint16(40), 22, 22, 16]); // teardrop, pear, spindle, round
-        t.signal = pick(word(s, 1), [uint16(45), 25, 20, 10]); // none, column, band, rain
+        t.form = pick(word(s, 0), formWeights());
+        t.signal = pick(word(s, 1), signalWeights());
         t.tilt = between(word(s, 2), -12, 12, 10);
         t.scale = uint256(between(word(s, 3), 90, 110, 1));
         t.shellW = uint256(between(word(s, 4), 85, 120, 1));
@@ -149,9 +171,9 @@ library ArtTraits {
         uint256 cap = (t.shellW * 110 + 50) / 100;
         t.wingW = wing < cap ? wing : cap;
         t.wingL = uint256(between(word(s, 7), 90, 108, 1));
-        t.density = pick(word(s, 8), [uint16(30), 50, 20, 0]); // fine, standard, bold
-        t.halo = pick(word(s, 9), [uint16(50), 30, 15, 5]); // none, ring, double, orbit
-        t.palette = pick(word(s, 10), [uint16(58), 20, 12, 10]); // classic, inverted, ember, mono
+        t.density = pick(word(s, 8), densityWeights());
+        t.halo = pick(word(s, 9), haloWeights());
+        t.palette = pick(word(s, 10), paletteWeights());
         t.bandW = uint256(between(word(s, 11), 80, 115, 1));
         t.rings = uint8(2 + count(word(s, 12), 4));
         t.orbitDeg = uint256(between(word(s, 13), 0, 360, 10));
