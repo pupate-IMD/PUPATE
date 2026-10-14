@@ -13,8 +13,9 @@ import {ArtTraits} from "./ArtTraits.sol";
 /// @dev Lengths and font sizes in tenths, factors in hundredths, the tilt in tenths of a degree; a seat length
 /// times its edition's delta (thousandths of a unit) is carried unrounded. Every printed coordinate, size and
 /// length is the integer product of all its factors divided once, at the end, rounded half up on its magnitude
-/// (`_mulDiv`); a coordinate below zero is its base minus a rounded magnitude. The vein angles are whole degrees
-/// whose sines and cosines come from `_sines`. Drawn for the traits `ArtTraits` gives: a seat length below zero
+/// (`_mulDiv`); a coordinate below zero is its base minus a rounded magnitude. The vein angles are tenths of a
+/// degree, their sines and cosines interpolated between the whole degrees of `_sines` (`_sinT`) and carried
+/// unrounded into the endpoint's one division. Drawn for the traits `ArtTraits` gives: a seat length below zero
 /// is outside them, and the unsigned arithmetic then reverts.
 contract MetamorphButterfly is IMetamorphFigure {
     /// The prototype's MONO, the figure's font.
@@ -144,8 +145,8 @@ contract MetamorphButterfly is IMetamorphFigure {
     }
 
     /// The vein rays: `n` upper ones from (6, -8) at `_angle(i, n)`, span × 0.92 long, clipped to the upper wing;
-    /// three lower ones from (6, 16) at 22, 48 and 74 degrees, drop × 0.9 long, clipped to the lower wing. A
-    /// length is carried unrounded into the ray (span × 92: its tenths are that over 10000).
+    /// three lower ones from (6, 16) at 22, 48 and 74 degrees (tenths: 220, 480, 740), drop × 0.9 long, clipped
+    /// to the lower wing. A length is carried unrounded into the ray (span × 92: its tenths are that over 10000).
     function _veins(uint256 n, uint256 span, uint256 drop, string calldata stroke)
         private
         pure
@@ -155,7 +156,7 @@ contract MetamorphButterfly is IMetamorphFigure {
         for (uint256 i; i < n; i++) {
             s = string.concat(s, _vein(_ray(sines, 60, -80, _angle(i, n), span * 92), stroke, "cu"));
         }
-        int256[3] memory lower = [int256(22), 48, 74];
+        int256[3] memory lower = [int256(220), 480, 740];
         for (uint256 k; k < 3; k++) {
             s = string.concat(s, _vein(_ray(sines, 60, 160, lower[k], drop * 90), stroke, "cl"));
         }
@@ -178,31 +179,40 @@ contract MetamorphButterfly is IMetamorphFigure {
         );
     }
 
-    /// The prototype's ray, "Mx yLx' y'": from (x, y) in tenths at a whole number of degrees a (-90..90), its
-    /// length len / 10000 tenths (len the unrounded product of its factors). The end is x + cos(a) × len and
-    /// y + sin(a) × len, each offset one product of the table's sine and len divided once by 10^8, its magnitude
-    /// rounded half up; cos(a) = sin(90 - |a|) is never negative, and the sign of the angle goes on the rounded
-    /// y offset.
+    /// The prototype's ray, "Mx yLx' y'": from (x, y) in tenths at an angle a in tenths of a degree (-900..900),
+    /// its length len / 10000 tenths (len the unrounded product of its factors). The end is x + cos(a) × len and
+    /// y + sin(a) × len, each offset one product of the interpolated sine (`_sinT`, hundred-thousandths) and len
+    /// divided once by 10^9, its magnitude rounded half up; cos(a) = sin(90° - |a|) is never negative, and the
+    /// sign of the angle goes on the rounded y offset.
     function _ray(uint16[91] memory sines, int256 x, int256 y, int256 a, uint256 len)
         private
         pure
         returns (string memory)
     {
         uint256 m = uint256(a < 0 ? -a : a);
-        int256 dx = int256(_mulDiv(sines[90 - m], len, 1e8));
-        int256 dy = int256(_mulDiv(sines[m], len, 1e8));
+        int256 dx = int256(_mulDiv(_sinT(sines, 900 - m), len, 1e9));
+        int256 dy = int256(_mulDiv(_sinT(sines, m), len, 1e9));
         return string.concat(
             string.concat("M", ArtTraits.f1(x), " ", ArtTraits.f1(y)),
             string.concat("L", ArtTraits.f1(x + dx), " ", ArtTraits.f1(a < 0 ? y - dy : y + dy))
         );
     }
 
-    /// The angle of upper vein i of n (n >= 2, after the clamp): -62 + 70 × i / (n - 1) degrees, rounded half up
-    /// on its magnitude to a whole degree (-44.5 to -45, -38.67 to -39, -9.5 to -10).
+    /// sin(t / 10 degrees) for t in 0..900 tenths of a degree, in hundred-thousandths (ten times the table's
+    /// ten-thousandths, so that it stays an integer): the two whole degrees around it interpolated linearly and
+    /// kept unrounded, sin(d) × (10 - f) + sin(d + 1) × f with d = t / 10 and f = t % 10. At a whole degree
+    /// (f = 0) it is sin(d) × 10 and the next entry is not read, so 90° never reads past the table.
+    function _sinT(uint16[91] memory sines, uint256 t) internal pure returns (uint256) {
+        uint256 d = t / 10;
+        uint256 f = t % 10;
+        if (f == 0) return uint256(sines[d]) * 10;
+        return uint256(sines[d]) * (10 - f) + uint256(sines[d + 1]) * f;
+    }
+
+    /// The angle of upper vein i of n (n >= 2, after the clamp) in tenths of a degree: -62 + 70 × i / (n - 1)
+    /// degrees, its 700 × i / (n - 1) tenths one product divided once (-38.67° is -387, -44.5° is -445).
     function _angle(uint256 i, uint256 n) internal pure returns (int256) {
-        uint256 up = 70 * i;
-        uint256 down = 62 * (n - 1);
-        return up < down ? -int256(_mulDiv(down - up, 1, n - 1)) : int256(_mulDiv(up - down, 1, n - 1));
+        return int256(_mulDiv(700, i, n - 1)) - 620;
     }
 
     /// The spots: spot i at 4 + span × (0.8 - 0.07 i) across and -22 - rise × 0.62 + 17 i down, its radius
@@ -288,8 +298,8 @@ contract MetamorphButterfly is IMetamorphFigure {
     }
 
     /// sin(d°) for d = 0..90 in ten-thousandths, round(sin(d°) × 10000): the mirror's `SINES`, the 91 numbers
-    /// `node script/art/mirror.mjs sines` prints. For a whole number of degrees a in -90..90,
-    /// cos(a) = sin(90 - |a|) and sin(a) = sign(a) × sin(|a|).
+    /// `node script/art/mirror.mjs sines` prints. `_sinT` interpolates between them; for an angle a in tenths
+    /// (-900..900), sin(a) = sign(a) × _sinT(|a|) and cos(a) = _sinT(900 - |a|).
     function _sines() internal pure returns (uint16[91] memory) {
         // forgefmt: disable-start
         return [

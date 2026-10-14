@@ -6,10 +6,14 @@ import {Colours, SeatTraits, Traits} from "../../../src/interfaces/IMetamorphFig
 import {MetamorphButterfly} from "../../../src/metamorph/art/MetamorphButterfly.sol";
 import {ArtTraitsHarness} from "./ArtTraits.t.sol";
 
-/// @dev The butterfly's table of sines and its vein angles, as the figure reads them.
+/// @dev The butterfly's table of sines, its interpolated sine and its vein angles, as the figure reads them.
 contract ButterflyHarness is MetamorphButterfly {
     function sines() external pure returns (uint16[91] memory) {
         return _sines();
+    }
+
+    function sinT(uint256 t) external pure returns (uint256) {
+        return _sinT(_sines(), t);
     }
 
     function angle(uint256 i, uint256 n) external pure returns (int256) {
@@ -18,9 +22,9 @@ contract ButterflyHarness is MetamorphButterfly {
 }
 
 /// @dev The expected figures are pasted from `node script/art/mirror.mjs figure butterfly <seat> <round>
-/// <edition> <gilt>`, cut before each element; the sines from `node script/art/mirror.mjs sines`; the angles
-/// from the mirror's `veinAngle`. The mirror is written first, and when it and the contract disagree, the side
-/// that deviates from the spec's rule is fixed, never the string.
+/// <edition> <gilt>`, cut before each element; the sines from `node script/art/mirror.mjs sines`; the angles and
+/// the interpolated sines from the mirror's `veinAngle` and `sinT`. The mirror is written first, and when it and
+/// the contract disagree, the side that deviates from the spec's rule is fixed, never the string.
 contract ButterflyTest is Test {
     ArtTraitsHarness internal h;
     MetamorphButterfly internal butterfly;
@@ -33,7 +37,7 @@ contract ButterflyTest is Test {
     }
 
     /// (1376, 0, 1), plain: bold, classic, the seat's jade #5fd0a3, tilt -3, scale 2.4; five veins less one (four,
-    /// at -62, -39, -15 and 8 degrees), no spot plus one (4172 bytes).
+    /// at -62, -38.7, -15.3 and 8 degrees), no spot plus one (4172 bytes).
     function test_plainClassicCardMatchesTheMirror() public view {
         string memory want = string.concat(
             '<g transform="translate(540 596) rotate(-3) scale(2.4)" font-family="Consolas, \'Courier New\', monospace">\n<defs>',
@@ -50,8 +54,8 @@ contract ButterflyTest is Test {
             '<text font-size="10.4" fill="#5fd0a3" letter-spacing="0.6"><textPath href="#lo">1110001100110110100110111100010010000011100110011010001000110100000101001000100111110101001101100011</textPath></text>',
             '<text font-size="6.7" fill="#e9e6da" opacity="0.35" letter-spacing="0.5"><textPath href="#up2">00111011010101111101111101000001000011111010111010101101110101011010010010010110100100001010010000100000111110101101111011110110001011010011</textPath></text>',
             '<path d="M6 -8L57.3 -104.4" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L90.9 -76.7" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L111.5 -36.3" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L91.2 -76.3" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L111.4 -36.8" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 -8L114.2 7.2" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>'
         );
         want = string.concat(
@@ -67,8 +71,8 @@ contract ButterflyTest is Test {
         want = string.concat(
             want,
             '<path d="M6 -8L57.3 -104.4" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L90.9 -76.7" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L111.5 -36.3" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L91.2 -76.3" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L111.4 -36.8" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 -8L114.2 7.2" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 16L97.5 53" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cl)"/>',
             '<path d="M6 16L72 89.3" stroke="#5fd0a3" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cl)"/>',
@@ -88,7 +92,7 @@ contract ButterflyTest is Test {
     }
 
     /// (2345, 0, 5), gilt: standard, the gilt colours with the jade #3ec28f, tilt 3.4, scale 2; three veins plus
-    /// one (four), two spots (4281 bytes).
+    /// one (four), two spots (4277 bytes).
     function test_giltCardMatchesTheMirror() public view {
         string memory want = string.concat(
             '<g transform="translate(540 596) rotate(3.4) scale(2)" font-family="Consolas, \'Courier New\', monospace">\n<defs>',
@@ -105,8 +109,8 @@ contract ButterflyTest is Test {
             '<text font-size="8.5" fill="#3ec28f" letter-spacing="0.6"><textPath href="#lo">0101011000100110110110011011111001110010011000111110110001111001111110100000100101010100111010101100</textPath></text>',
             '<text font-size="5.6" fill="#d9a94b" opacity="0.35" letter-spacing="0.5"><textPath href="#up2">01000111011001111101101010100111110101111110101001000010101111100101011101110010100111100101000100101111111110100000010110100011100100011101</textPath></text>',
             '<path d="M6 -8L72.9 -133.7" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L116.7 -97.6" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L143.5 -44.9" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L117.1 -97" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L143.3 -45.6" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 -8L147 11.8" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>'
         );
         want = string.concat(
@@ -123,8 +127,8 @@ contract ButterflyTest is Test {
             want,
             '<text font-size="5.6" fill="#d9a94b" opacity="0.35" letter-spacing="0.5"><textPath href="#up2">01000111011001111101101010100111110101111110101001000010101111100101011101110010100111100101000100101111111110100000010110100011100100011101</textPath></text>',
             '<path d="M6 -8L72.9 -133.7" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L116.7 -97.6" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L143.5 -44.9" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L117.1 -97" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L143.3 -45.6" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 -8L147 11.8" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 16L88.4 49.3" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cl)"/>',
             '<path d="M6 16L65.5 82.1" stroke="#3ec28f" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cl)"/>'
@@ -258,8 +262,8 @@ contract ButterflyTest is Test {
         assertEq(_figure(1376, 0, 4, false), want);
     }
 
-    /// (42, 0, 10), plain: three spots plus one, four, the clamp's ceiling; five veins, whose angles -44.5 and
-    /// -9.5 round on their magnitudes to -45 and -10; fine, classic (4695 bytes).
+    /// (42, 0, 10), plain: three spots plus one, four, the clamp's ceiling; five veins, at -62, -44.5, -27, -9.5
+    /// and 8 degrees (the half degrees interpolated); fine, classic (4695 bytes).
     function test_fourSpotsMatchTheMirror() public view {
         string memory want = string.concat(
             '<g transform="translate(540 596) rotate(5.9) scale(2.1)" font-family="Consolas, \'Courier New\', monospace">\n<defs>',
@@ -276,9 +280,9 @@ contract ButterflyTest is Test {
             '<text font-size="7" fill="#37b59a" letter-spacing="0.6"><textPath href="#lo">1111001001110110101010110001010110010111010010100001011100010101110001110101100111010001000010110010</textPath></text>',
             '<text font-size="4.4" fill="#e9e6da" opacity="0.35" letter-spacing="0.5"><textPath href="#up2">11000111111000000000110110110100000001101101100000101001111110000101111110101011001111111100010001011010110000110011001011101110010110010100</textPath></text>',
             '<path d="M6 -8L57.7 -105.1" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L83.8 -85.8" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L84.5 -85.1" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 -8L104 -58" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L114.4 -27.1" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>'
+            '<path d="M6 -8L114.5 -26.2" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>'
         );
         want = string.concat(
             want,
@@ -297,12 +301,12 @@ contract ButterflyTest is Test {
             '<text font-size="7" fill="#37b59a" letter-spacing="0.6"><textPath href="#lo">1111001001110110101010110001010110010111010010100001011100010101110001110101100111010001000010110010</textPath></text>',
             '<text font-size="4.4" fill="#e9e6da" opacity="0.35" letter-spacing="0.5"><textPath href="#up2">11000111111000000000110110110100000001101101100000101001111110000101111110101011001111111100010001011010110000110011001011101110010110010100</textPath></text>',
             '<path d="M6 -8L57.7 -105.1" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
-            '<path d="M6 -8L83.8 -85.8" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L84.5 -85.1" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 -8L104 -58" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>'
         );
         want = string.concat(
             want,
-            '<path d="M6 -8L114.4 -27.1" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
+            '<path d="M6 -8L114.5 -26.2" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 -8L115 7.3" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cu)"/>',
             '<path d="M6 16L83.2 47.2" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cl)"/>',
             '<path d="M6 16L61.7 77.9" stroke="#37b59a" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#cl)"/>',
@@ -350,14 +354,45 @@ contract ButterflyTest is Test {
         }
     }
 
-    /// The upper veins of every count the clamp allows: -62 + 70 i / (n - 1) degrees, rounded half up on the
-    /// magnitude (five veins: -44.5 and -9.5 give -45 and -10).
+    /// The upper veins of every count the clamp allows, in tenths of a degree: -620 + 700 i / (n - 1), rounded
+    /// half up once (four veins: -38.67 and -15.33 degrees are -387 and -153; five: -44.5 and -9.5 are exact).
     function test_veinAnglesMatchTheMirror() public view {
-        _angles(2, [int256(-62), 8, 0, 0, 0, 0]);
-        _angles(3, [int256(-62), -27, 8, 0, 0, 0]);
-        _angles(4, [int256(-62), -39, -15, 8, 0, 0]);
-        _angles(5, [int256(-62), -45, -27, -10, 8, 0]);
-        _angles(6, [int256(-62), -48, -34, -20, -6, 8]);
+        _angles(2, [int256(-620), 80, 0, 0, 0, 0]);
+        _angles(3, [int256(-620), -270, 80, 0, 0, 0]);
+        _angles(4, [int256(-620), -387, -153, 80, 0, 0]);
+        _angles(5, [int256(-620), -445, -270, -95, 80, 0]);
+        _angles(6, [int256(-620), -480, -340, -200, -60, 80]);
+    }
+
+    /// The sine between two whole degrees, in hundred-thousandths: the two entries interpolated linearly and kept
+    /// unrounded, at the table's ends, next to a whole degree, at the angles the veins use (38.7, 15.3, 44.5, 9.5
+    /// degrees) and at their complements (the cosines); 90 degrees reads no entry past the table.
+    function test_sineInterpolationMatchesTheMirror() public view {
+        _sine(0, 0);
+        _sine(1, 175);
+        _sine(5, 875);
+        _sine(9, 1575);
+        _sine(95, 16500);
+        _sine(153, 26384);
+        _sine(270, 45400);
+        _sine(280, 46950);
+        _sine(387, 62522);
+        _sine(445, 70090);
+        _sine(455, 71320);
+        _sine(513, 78037);
+        _sine(620, 88290);
+        _sine(747, 96452);
+        _sine(805, 98625);
+        _sine(899, 99998);
+        _sine(900, 100000);
+    }
+
+    /// (42, 0, 10), five veins: the first upper ray, at -62 degrees, and the second, at -44.5 degrees (between two
+    /// entries of the table), end where the mirror's do.
+    function test_fiveVeinRaysEndWhereTheMirrorsDo() public view {
+        string memory f = _figure(42, 0, 10, false);
+        assertEq(_upperRay(f, 0), "M6 -8L57.7 -105.1");
+        assertEq(_upperRay(f, 1), "M6 -8L84.5 -85.1");
     }
 
     /// Every card draws: no revert for any seat, round, edition or proof, and the figure is one group.
@@ -377,6 +412,37 @@ contract ButterflyTest is Test {
         for (uint256 i; i < n; i++) {
             assertEq(inside.angle(i, n), want[i]);
         }
+    }
+
+    function _sine(uint256 t, uint256 want) internal view {
+        assertEq(inside.sinT(t), want);
+    }
+
+    /// The d attribute of a figure's nth upper ray, counting from 0: from its "M6 -8L" to the closing quote.
+    function _upperRay(string memory fig, uint256 nth) internal pure returns (string memory) {
+        bytes memory f = bytes(fig);
+        bytes memory key = bytes("M6 -8L");
+        for (uint256 k; k + key.length <= f.length; k++) {
+            uint256 j;
+            while (j < key.length && f[k + j] == key[j]) {
+                j++;
+            }
+            if (j < key.length) continue;
+            if (nth > 0) {
+                nth--;
+                continue;
+            }
+            uint256 end = k;
+            while (f[end] != '"') {
+                end++;
+            }
+            bytes memory d = new bytes(end - k);
+            for (j = 0; j < d.length; j++) {
+                d[j] = f[k + j];
+            }
+            return string(d);
+        }
+        revert("no such ray");
     }
 
     /// The figure of a card as the router asks for it: the card traits, the seat traits, the colours (the

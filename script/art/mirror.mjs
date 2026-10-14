@@ -386,28 +386,37 @@ export function chrysalisFigure(t, c, s) {
 
 /// sin(d°) for d = 0..90 in ten-thousandths, Math.round(Math.sin(d × π / 180) × 10000): 0, 175, 349, …, 10000.
 /// The contract holds the same 91 numbers as a constant table; `node script/art/mirror.mjs sines` prints them.
-/// For a whole number of degrees a in −90..90: cos(a) = SINES[90 − |a|] and sin(a) = sign(a) × SINES[|a|].
+/// Angles between two whole degrees are interpolated (sinT).
 export const SINES = Array.from({ length: 91 }, (_, d) => Math.round(Math.sin((d * Math.PI) / 180) * 10000));
+
+/// sin(t / 10 degrees) for t in 0..900 tenths of a degree, in hundred-thousandths (ten times the table's
+/// ten-thousandths, so that it stays an integer): the two whole degrees around it interpolated linearly and kept
+/// unrounded, SINES[d] × (10 − f) + SINES[d + 1] × f with d = t / 10 and f = t % 10. At a whole degree (f = 0)
+/// it is SINES[d] × 10 and the next entry is not read, so 90° never reads past the table. For an angle a in
+/// tenths (−900..900): sin(a) = sign(a) × sinT(|a|) and cos(a) = sinT(900 − |a|).
+export function sinT(t) {
+  const d = Math.floor(t / 10), f = t % 10;
+  return f === 0 ? BigInt(SINES[d]) * 10n : BigInt(SINES[d]) * BigInt(10 - f) + BigInt(SINES[d + 1]) * BigInt(f);
+}
 
 /// The prototype's clamp(v, lo, hi), on integers.
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
-/// The angle of upper vein i of n (n ≥ 2 after the clamp): −62 + 70 × i / (n − 1) degrees, rounded half up on
-/// its magnitude to a whole degree (−44.5 → −45, −38.67 → −39, −9.5 → −10), so that it indexes the table.
+/// The angle of upper vein i of n (n ≥ 2 after the clamp) in tenths of a degree: −62 + 70 × i / (n − 1)
+/// degrees, its 700 × i / (n − 1) tenths one mulDiv (−38.67° is −387, −44.5° is −445).
 export function veinAngle(i, n) {
-  const num = 70 * i - 62 * (n - 1);
-  const deg = Number(mulDiv(Math.abs(num), 1, n - 1));
-  return num < 0 ? -deg : deg;
+  return -620 + Number(mulDiv(700, i, n - 1));
 }
 
-/// The prototype's ray(x, y, deg, len): from (x, y) in tenths at a whole number of degrees a (−90..90), its
-/// length len / 10000 tenths (len the unrounded product of its factors), printed "Mx yLx' y'". The end is
-/// x + cos(a) × len and y + sin(a) × len: each offset is one product of the table's sine and len divided once
-/// (by 10^8), its magnitude rounded half up, and the sign of the angle goes on the rounded y offset.
+/// The prototype's ray(x, y, deg, len): from (x, y) in tenths at an angle a in tenths of a degree (−900..900),
+/// its length len / 10000 tenths (len the unrounded product of its factors), printed "Mx yLx' y'". The end is
+/// x + cos(a) × len and y + sin(a) × len: each offset is one product of the interpolated sine (sinT,
+/// hundred-thousandths) and len divided once (by 10^9), its magnitude rounded half up; cos(a) = sinT(900 − |a|)
+/// is never negative, and the sign of the angle goes on the rounded y offset.
 function ray(x, y, a, len) {
   const m = Math.abs(a);
-  const dx = mulDiv(SINES[90 - m], len, 100000000);
-  const dy = mulDiv(SINES[m], len, 100000000);
+  const dx = mulDiv(sinT(900 - m), len, 1000000000);
+  const dy = mulDiv(sinT(m), len, 1000000000);
   return `M${f1(x)} ${f1(y)}L${f1(BigInt(x) + dx)} ${f1(a < 0 ? BigInt(y) - dy : BigInt(y) + dy)}`;
 }
 
@@ -447,10 +456,10 @@ export function butterflyFigure(t, s, c, seed) {
   const vein = (d, clip) =>
     `<path d="${d}" stroke="${c.vein}" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#${clip})"/>`;
   // the veins: the upper ones from (6, −8), span × 0.92 long; the lower ones from (6, 16) at 22, 48 and 74
-  // degrees, drop × 0.9 long
+  // degrees (tenths: 220, 480, 740), drop × 0.9 long
   let lines = "";
   for (let i = 0; i < veins; i++) lines += vein(ray(60, -80, veinAngle(i, veins), span * 92n), "cu");
-  for (const a of [22, 48, 74]) lines += vein(ray(60, 160, a, drop * 90n), "cl");
+  for (const a of [220, 480, 740]) lines += vein(ray(60, 160, a, drop * 90n), "cl");
   // the spots: spot i at 4 + span × (0.8 − 0.07 i), −22 − rise × 0.62 + 17 i, radius 5 − 0.6 i
   let dots = "";
   for (let i = 0; i < spots; i++) {
