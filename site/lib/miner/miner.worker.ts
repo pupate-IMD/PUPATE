@@ -44,7 +44,9 @@ async function run(m: StartMessage, mine: number) {
   buf.set(hexToBytes(job.miner), 128 + 12);
   buf.set(hexToBytes(m.nonceHigh), 160);
   const nonce = buf.subarray(160, 192);
-  // The worker's own lane: byte 24 of the nonce, so threads never overlap; the last 7 bytes count.
+  // The worker's own lane: byte 24 of the nonce, so threads never overlap; the last 7 bytes count. The
+  // page runs at most 255 workers (MAX_CPU_THREADS in useMiner.ts), so CPU lanes stay within 0..254 and
+  // 0xff stays the GPU's.
   nonce[24] = m.worker & 255;
   for (let i = 25; i < 32; i++) nonce[i] = 0;
   const { targetHi, targetLo } = job;

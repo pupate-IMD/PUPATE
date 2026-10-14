@@ -12,7 +12,8 @@
 // Other options: --port <n>, --browser <path to msedge or chrome>, --flags "<extra browser flags>",
 // --timeout <seconds> (default 300), --bench <ms> (a longer GPU benchmark than the page's one second).
 // Exits 0 when the self-test passed, 1 otherwise. Every wait is bounded, and whatever the script started
-// (the dev server, the browser) is stopped on the way out.
+// (the dev server, the browser, a temporary browser profile) is stopped or removed on the way out, after
+// the result is printed.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,8 +39,8 @@ const browser = opt("browser", "") || findBrowser();
 const extra = (opt("flags", "") || "").split(/\s+/).filter(Boolean);
 const gpuFlags = ["--enable-unsafe-webgpu", "--enable-features=Vulkan", ...(flag("high-performance") ? ["--force-high-performance-gpu"] : []), ...extra];
 
-/// What the script started, so every exit path can stop it.
-const started = { server: null, browser: null };
+/// What the script started, so every exit path can stop it, and the browser profiles it made.
+const started = { server: null, browser: null, profiles: [] };
 
 function findBrowser() {
   const candidates =
@@ -76,6 +77,15 @@ function stopAll() {
     killTree(started.server);
     console.log("dev server stopped");
     started.server = null;
+  }
+  // Never fatal: Windows can hold a profile's files for a while after the browser exits, and a profile
+  // left behind must not turn a passed self-test into a failure.
+  for (const dir of started.profiles.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    } catch (e) {
+      console.log(`note: the temporary profile ${dir} was not removed: ${e instanceof Error ? e.message : e}`);
+    }
   }
 }
 
@@ -163,6 +173,7 @@ function consoleLines(events) {
 
 async function viaDevtools() {
   const profile = mkdtempSync(join(tmpdir(), "pupate-gpu-selftest-"));
+  started.profiles.push(profile);
   const args = ["--headless=new", ...gpuFlags, "--no-first-run", "--no-default-browser-check", `--user-data-dir=${profile}`, "--remote-debugging-port=0", target];
   const edge = spawn(browser, args, { stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32" });
   started.browser = edge;
@@ -220,25 +231,21 @@ async function viaDevtools() {
     if (edge.exitCode === null) await Promise.race([new Promise((r) => edge.once("exit", r)), sleep(5000)]);
     killTree(edge);
     started.browser = null;
-    await sleep(500);
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    // The profile is removed by stopAll, after the result is printed.
   }
 }
 
 async function viaDumpDom() {
   const profile = mkdtempSync(join(tmpdir(), "pupate-gpu-selftest-"));
-  try {
-    const r = spawnSync(browser, ["--headless=new", ...gpuFlags, "--virtual-time-budget=20000", `--user-data-dir=${profile}`, "--dump-dom", target], {
-      encoding: "utf8",
-      timeout: timeoutMs,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    const m = /<pre id="gpu-selftest"[^>]*>([\s\S]*?)<\/pre>/.exec(r.stdout ?? "");
-    const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-    return { out: m ? unescape(m[1]) : null, logs: (r.stderr ?? "").split("\n").filter((l) => /webgpu|dawn|gpu/i.test(l)).slice(-20) };
-  } finally {
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
-  }
+  started.profiles.push(profile);
+  const r = spawnSync(browser, ["--headless=new", ...gpuFlags, "--virtual-time-budget=20000", `--user-data-dir=${profile}`, "--dump-dom", target], {
+    encoding: "utf8",
+    timeout: timeoutMs,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const m = /<pre id="gpu-selftest"[^>]*>([\s\S]*?)<\/pre>/.exec(r.stdout ?? "");
+  const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  return { out: m ? unescape(m[1]) : null, logs: (r.stderr ?? "").split("\n").filter((l) => /webgpu|dawn|gpu/i.test(l)).slice(-20) };
 }
 
 const fmt = (h) => (h >= 1e9 ? `${(h / 1e9).toFixed(2)} GH/s` : h >= 1e6 ? `${(h / 1e6).toFixed(2)} MH/s` : h >= 1e3 ? `${(h / 1e3).toFixed(1)} kH/s` : `${Math.round(h)} H/s`);

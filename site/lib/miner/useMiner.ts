@@ -49,6 +49,9 @@ export interface GpuState {
   /// Why the GPU is unavailable.
   reason?: string;
   selfTest?: GpuSelfTestState;
+  /// Why the GPU was set aside after failing its CPU checks while mining (its self-test had passed); it
+  /// stays off until the page reloads.
+  failed?: string;
 }
 
 export interface MinerState {
@@ -62,7 +65,10 @@ export interface MinerState {
   hashes: number;
   seconds: number;
   sample: Hex | null;
+  /// The newest finds, at most FOUND_KEPT of them (the drawer shows eight).
   found: Found[];
+  /// Every find this session, and the gilt ones among them, however many `found` still holds.
+  tally: { found: number; gilt: number };
   /// A found hash waiting for the Mint button (auto-mint off).
   pending: Found | null;
   log: LogLine[];
@@ -72,6 +78,11 @@ export interface MinerState {
 }
 
 const CHUNK = 2000;
+/// Finds kept in state; the count of all of them lives in `tally`.
+const FOUND_KEPT = 64;
+/// CPU threads write their index (0..254) into nonce byte 24 and the GPU writes 0xff there, so the two
+/// engines' nonces never meet: at most 255 threads, whatever the machine reports.
+const MAX_CPU_THREADS = 255;
 
 function stamp(): string {
   const d = new Date();
@@ -89,6 +100,7 @@ export function useMiner() {
   const [seconds, setSeconds] = useState(0);
   const [sample, setSample] = useState<Hex | null>(null);
   const [found, setFound] = useState<Found[]>([]);
+  const [tally, setTally] = useState({ found: 0, gilt: 0 });
   const [pending, setPendingState] = useState<Found | null>(null);
   // The log starts empty on the server and gets its first line on the client, so the time stamp never
   // differs between the two renders.
@@ -118,6 +130,8 @@ export function useMiner() {
   const gpuBits = useRef(PRACTICE_BITS);
   /// The engine the visitor asked for last; a self-test that ends after they went back to the CPU stays put.
   const wanted = useRef<Engine>("cpu");
+  /// Set when the device is lost while the self-test runs: that test's result says nothing about the GPU.
+  const lostInTest = useRef<string | null>(null);
   // dispatch and the found handler call each other, and the GPU's failure handler switches engines.
   const dispatchRef = useRef<(j: MinerJob) => void>(() => {});
   const switchRef = useRef<(e: Engine) => void>(() => {});
@@ -176,16 +190,15 @@ export function useMiner() {
         gilt: leadingZeroBits(digest) >= j.bits + 4,
         at: Date.now(),
         sinceStart: (performance.now() - t0.current) / 1000,
-        minted: false,
+        minted: autoRef.current,
       };
-      if (autoRef.current) {
-        f.minted = true;
-        setFound((list) => [f, ...list]);
+      setFound((list) => [f, ...list].slice(0, FOUND_KEPT));
+      setTally((t) => ({ found: t.found + 1, gilt: t.gilt + (f.gilt ? 1 : 0) }));
+      if (f.minted) {
         say(f.gilt ? `valid hash, a gilt one · practice mint · mining the next one` : `valid hash found · practice mint · mining the next one`, f.gilt ? "gold" : "jade");
         // A real mint changes prevWork for everyone; a practice mint changes the folded word the same way.
         dispatchRef.current(practiceJob(j.id + 1, j.miner, engineBits()));
       } else {
-        setFound((list) => [f, ...list]);
         setPending(f);
         say(f.gilt ? `valid hash found, a gilt one · mint it now` : `valid hash found · mint it now`, f.gilt ? "gold" : "jade");
         for (const w of workers.current) w.postMessage({ type: "stop" });
@@ -211,15 +224,20 @@ export function useMiner() {
     [onFound, showSample],
   );
 
-  /// The GPU stopped itself. Hits that failed the CPU check mark it as failed; a lost or failing device
-  /// gets a fresh self-test the next time it is picked. Either way the miner goes back to the CPU.
+  /// The GPU stopped itself, or its device was lost. Failed CPU checks set it aside until reload; a lost or
+  /// failing device gets a fresh self-test the next time it is picked. Either way the miner goes back to
+  /// the CPU. A loss while the self-test runs is left to setEngine, which voids that test.
   const onGpuFail = useCallback(
     (reason: string, kind: GpuFailure) => {
-      setGpu((g) => ({
-        ...g,
-        selfTest: kind === "verify" ? { running: false, ok: false, rate: g.selfTest?.rate ?? 0, batch: g.selfTest?.batch ?? 0, detail: reason } : undefined,
-      }));
-      if (engineRef.current !== "gpu") return;
+      if (kind === "lost" && gpuRef.current.selfTest?.running) {
+        lostInTest.current = reason;
+        return;
+      }
+      setGpu((g) => (kind === "verify" ? { ...g, failed: reason } : { ...g, selfTest: undefined }));
+      if (engineRef.current !== "gpu") {
+        if (kind === "lost") say(`${reason} · a fresh self-test runs when GPU is picked again`, "dim");
+        return;
+      }
       say(`${reason} · back on the CPU`, "dim");
       wanted.current = "cpu";
       switchRef.current("cpu");
@@ -339,11 +357,20 @@ export function useMiner() {
       if (e === engineRef.current) return;
       if (e === "cpu") return switchTo("cpu");
       const g = gpuRef.current;
-      if (!g.available || g.selfTest?.running || (g.selfTest && !g.selfTest.ok)) return;
+      if (!g.available || g.failed || g.selfTest?.running || (g.selfTest && !g.selfTest.ok)) return;
       if (!g.selfTest) {
+        lostInTest.current = null;
         setGpu((s) => ({ ...s, selfTest: { running: true, ok: false, rate: 0, batch: 0, detail: "" } }));
         say("GPU self-test: a known hash, 256 hits checked on the CPU, one second of work", "dim");
         const r = await GpuMiner.selfTest();
+        if (lostInTest.current) {
+          // The device went away mid-test, so the result says nothing about the GPU: it is tested afresh, on
+          // a new device, the next time it is picked.
+          setGpu((s) => ({ ...s, selfTest: undefined }));
+          say(`${lostInTest.current} during the self-test · pick GPU to test it again`, "dim");
+          lostInTest.current = null;
+          return;
+        }
         setGpu((s) => ({ ...s, name: r.name || s.name, selfTest: { running: false, ok: r.ok, rate: r.rate, batch: r.batch, detail: r.detail } }));
         if (!r.ok) {
           say(`GPU self-test failed: ${r.detail}`);
@@ -359,7 +386,7 @@ export function useMiner() {
   );
 
   useEffect(() => {
-    const n = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
+    const n = Math.min(MAX_CPU_THREADS, Math.max(1, (navigator.hardwareConcurrency || 4) - 1));
     threadsRef.current = n;
     setThreads(n);
     setLog([{ at: stamp(), text: "ready" }]);
@@ -367,19 +394,20 @@ export function useMiner() {
     void GpuMiner.probe().then((p) => {
       if (!live) return;
       setGpu((g) => (p.ok ? { ...g, checked: true, available: true, name: p.name, reason: undefined } : { ...g, checked: true, available: false, reason: p.reason }));
+      if (!p.ok) say(`GPU unavailable: ${p.reason}`, "dim");
     });
     const off = GpuMiner.onLost((message) => onGpuFail(`GPU lost: ${message}`, "lost"));
     return () => {
       live = false;
       off();
     };
-  }, [onGpuFail, setGpu]);
+  }, [onGpuFail, say, setGpu]);
 
   useEffect(() => () => terminate(), [terminate]);
 
   const state: MinerState = useMemo(
-    () => ({ running, practice, engine, power, threads, auto, rate, hashes, seconds, sample, found, pending, log, bits, gpu }),
-    [running, practice, engine, power, threads, auto, rate, hashes, seconds, sample, found, pending, log, bits, gpu],
+    () => ({ running, practice, engine, power, threads, auto, rate, hashes, seconds, sample, found, tally, pending, log, bits, gpu }),
+    [running, practice, engine, power, threads, auto, rate, hashes, seconds, sample, found, tally, pending, log, bits, gpu],
   );
 
   return { state, start, stop, setPower, setEngine, setAuto, mintPending, fmtRate };

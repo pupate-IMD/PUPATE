@@ -7,7 +7,8 @@
     "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "npx serve out",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "keccak-kat": "node scripts/keccak-kat.mjs"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",

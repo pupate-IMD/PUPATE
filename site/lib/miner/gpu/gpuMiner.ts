@@ -2,11 +2,16 @@
 // gives every thread one nonce. The host keeps the midstate and the nonce bookkeeping (words.ts). After
 // each dispatch it reads back a small buffer (the hit count, up to 16 hit records, thread 0's digest for
 // the drawing), rebuilds each hit's nonce, re-hashes the 192-byte preimage on the CPU with keccak_256 and
-// only then reports it. A hit that fails that check is logged; the third one stops the engine.
+// only then reports it. Every few seconds it also re-hashes thread 0's nonce on the CPU and compares the
+// digest with the GPU's sample, so a GPU that hashes wrongly is caught even when it reports no hits. A hit
+// or a sample that fails its check is a strike against the device; the third strike stops the engine.
 //
 // The batch adapts to the GPU: it starts at 2^18 threads, doubles while a dispatch takes under 60 ms,
 // halves past 120 ms, and stays within 2^14..2^22. Power is a duty cycle, as on the CPU: after a dispatch
 // that took t ms the loop rests t × (100 − power) / power ms, and it always yields between dispatches.
+//
+// The probe asks only for an adapter, which names the GPU; the device is requested at the first self-test,
+// so a visitor who never picks the GPU never holds one.
 //
 // GpuMiner.selfTest runs before the first job: (a) a known answer: thread 0's digest for a fixed job and
 // nonce must equal keccak_256 of the same 192 bytes on the CPU; (b) the hit path: at bits 0 each of 256
@@ -20,13 +25,18 @@ import { BufferUsage, MapMode, type GpuAdapter, type GpuApi, type GpuBindGroup, 
 import { BATCH_LIMIT, NONCE_HIGH_BYTES, PARAM_WORDS, below, blockTwo, bytesHex, digestWords, gpuNonce, hexBytes, midstate, paramWords, preimage } from "./words";
 
 const START_THREADS = 1 << 18;
+/// The floor departs from the design's 2^18 on purpose: a slow GPU (an integrated or a mobile one) that
+/// needs more than 120 ms for 2^18 threads keeps halving its dispatches, so the page's frames still get through.
 const MIN_THREADS = 1 << 14;
 const MAX_THREADS = 1 << 22;
 const GROW_BELOW_MS = 60;
 const SHRINK_ABOVE_MS = 120;
 /// Hit records a mining dispatch keeps; more hits than this in one dispatch are counted, not recorded.
 const HIT_SLOTS = 16;
-const MAX_FAILED_HITS = 3;
+/// Strikes (a hit or a sample that failed the CPU check) a device takes before the engine stops itself.
+const MAX_STRIKES = 3;
+/// How often the loop re-hashes thread 0's nonce on the CPU to check the GPU's sample digest.
+const SAMPLE_CHECK_MS = 3000;
 /// The output buffer: the hit count and padding (16 bytes), thread 0's digest (32), then 16 bytes a record.
 const OUT_HEAD = 48;
 
@@ -73,6 +83,8 @@ interface Gpu {
   name: string;
   lost: boolean;
   pipeline: Promise<GpuComputePipeline> | null;
+  /// Failed CPU checks on this device since its last passed self-test; a new device starts clean.
+  strikes: number;
 }
 
 interface HitRecord {
@@ -107,6 +119,8 @@ function nextTask(): Promise<void> {
 
 // The duty cycle's rest, timed by a tiny worker (rest.worker.ts): a hidden tab's own timers fire about
 // once a second, which would leave the GPU nearly idle below 100% power. The page's timer is the fallback.
+// The worker is a bounded singleton: one for the page, made at the first rest, idle between rests, and
+// never ended on stop, since a rest still pending then would leave its loop waiting for good.
 let clock: Worker | null | undefined;
 let clockSeq = 0;
 const resting = new Map<number, () => void>();
@@ -162,20 +176,26 @@ async function nameOf(adapter: GpuAdapter): Promise<string> {
   return parts.length ? parts.join(" ") : "WebGPU adapter";
 }
 
-// The one device the probe, the self-test and the miner share. A lost device is forgotten, so the next
-// call asks for a new one, and the listeners hear of the loss.
+async function requestAdapter(): Promise<GpuAdapter> {
+  const gpu = api();
+  if (!gpu) throw new Error("This browser has no WebGPU.");
+  const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
+  if (!adapter) throw new Error("WebGPU found no GPU adapter.");
+  return adapter;
+}
+
+// The one device the self-test and the miner share, requested at the first self-test from an adapter of
+// its own (an adapter gives one device). A lost device is forgotten, so the next call asks for a new
+// adapter and device, and the listeners hear of the loss.
 let shared: Promise<Gpu> | null = null;
 const lostListeners = new Set<(message: string) => void>();
 
 function acquire(): Promise<Gpu> {
   if (shared) return shared;
   const p: Promise<Gpu> = (async () => {
-    const gpu = api();
-    if (!gpu) throw new Error("This browser has no WebGPU.");
-    const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
-    if (!adapter) throw new Error("WebGPU found no GPU adapter.");
+    const adapter = await requestAdapter();
     const device = await adapter.requestDevice({ label: "pupate miner" });
-    const g: Gpu = { device, name: await nameOf(adapter), lost: false, pipeline: null };
+    const g: Gpu = { device, name: await nameOf(adapter), lost: false, pipeline: null, strikes: 0 };
     void device.lost.then((info) => {
       g.lost = true;
       if (shared === p) shared = null;
@@ -316,14 +336,12 @@ export class GpuMiner {
   private gen = 0;
   private power: Power = 100;
   private queue: Promise<void> = Promise.resolve();
-  private failedHits = 0;
 
-  /// Whether this browser can mine on a GPU: WebGPU, an adapter, and a device.
+  /// Whether this browser can mine on a GPU: WebGPU and an adapter, whose info names it. No device is
+  /// requested here; the first self-test asks for one.
   static async probe(): Promise<Probe> {
-    if (!api()) return { ok: false, reason: "This browser has no WebGPU." };
     try {
-      const g = await acquire();
-      return { ok: true, name: g.name };
+      return { ok: true, name: await nameOf(await requestAdapter()) };
     } catch (e) {
       return { ok: false, reason: message(e) };
     }
@@ -389,6 +407,8 @@ export class GpuMiner {
       const bench = await benchmark(one, benchMs);
       Object.assign(t, bench);
       t.ok = true;
+      // A device that passes starts with a clean record.
+      g.strikes = 0;
       t.detail = `known answer matches the CPU; ${WORKGROUP_SIZE} of ${WORKGROUP_SIZE} hits verified on the CPU; ${bench.dispatches} dispatches of up to ${bench.batch} hashes in ${benchMs / 1000} s`;
       return t;
     } catch (e) {
@@ -431,16 +451,30 @@ export class GpuMiner {
       this.fail(gen, opts, `GPU stopped: ${message(e)}`, "error");
       return;
     }
+    // A hit or a sample that failed the CPU check counts against the device; its third strike stops the engine.
+    const strike = (what: string) => {
+      g.strikes++;
+      opts.onLog(`${what} failed CPU verification (${g.strikes} of ${MAX_STRIKES})`);
+      if (g.strikes >= MAX_STRIKES) this.fail(gen, opts, `GPU failed CPU verification ${MAX_STRIKES} times`, "verify");
+    };
     try {
       const mid = midstate(job);
       let high = randomBytes(NONCE_HIGH_BYTES);
       let batch = 0;
       let threads = START_THREADS;
+      let checkedAt = -Infinity;
       while (gen === this.gen) {
         if (g.lost) throw new Error("the device was lost");
         const r = await k.run(paramWords(mid, blockTwo(job, high, batch), job, batch), threads);
         if (gen !== this.gen) break;
-        opts.onProgress({ jobId: job.id, hashes: threads, sample: bytesHex(r.sample) });
+        const sample = bytesHex(r.sample);
+        opts.onProgress({ jobId: job.id, hashes: threads, sample });
+        // The first dispatch of a job, then every few seconds: thread 0's nonce re-hashed on the CPU.
+        const now = performance.now();
+        if (now - checkedAt >= SAMPLE_CHECK_MS) {
+          checkedAt = now;
+          if (bytesHex(keccak_256(preimage(job, gpuNonce(high, batch, 0)))) !== sample) strike("GPU sample");
+        }
         for (const rec of r.records) {
           if (gen !== this.gen) break;
           const v = verify(job, high, batch, threads, rec);
@@ -448,9 +482,7 @@ export class GpuMiner {
             opts.onFound({ jobId: job.id, nonce: bytesHex(v.nonce), digest: bytesHex(v.digest) });
             continue;
           }
-          this.failedHits++;
-          opts.onLog(`GPU hit failed CPU verification (${this.failedHits} of ${MAX_FAILED_HITS})`);
-          if (this.failedHits >= MAX_FAILED_HITS) this.fail(gen, opts, `GPU hits failed CPU verification ${MAX_FAILED_HITS} times`, "verify");
+          strike("GPU hit");
         }
         threads = adapt(threads, r.ms);
         if (++batch >= BATCH_LIMIT) {

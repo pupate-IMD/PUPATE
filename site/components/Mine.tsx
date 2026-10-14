@@ -36,10 +36,12 @@ function Meter({ hashes, expected, seed }: { hashes: number; expected: number; s
   );
 }
 
-/// The GPU half of the engine switch: why it is off when it is, what the self-test said when it ran.
+/// The GPU half of the engine switch: why it is off when it is, what the self-test said when it ran. The
+/// field notes carry the same reasons, since a disabled button's title is hard to reach.
 function gpuSwitch(g: GpuState): { label: string; disabled: boolean; title: string } {
   if (!g.checked) return { label: "GPU", disabled: true, title: "Looking for WebGPU in this browser" };
   if (!g.available) return { label: "GPU unavailable", disabled: true, title: g.reason ?? "This browser cannot mine on its GPU." };
+  if (g.failed) return { label: "GPU failed its checks", disabled: true, title: g.failed };
   if (g.selfTest?.running) return { label: "testing the GPU", disabled: true, title: "A known hash, 256 hits checked on the CPU, one second of work" };
   if (g.selfTest && !g.selfTest.ok) return { label: "GPU failed self-test", disabled: true, title: g.selfTest.detail };
   const name = g.name ?? "WebGPU";
@@ -55,23 +57,22 @@ export function Mine() {
   const { state: m, start, stop, setPower, setEngine, setAuto, mintPending } = useMiner();
   const wallet = s.wallet;
   const [reveal, setReveal] = useState<ReturnType<typeof cardFor> | null>(null);
-  const seen = useRef<number>(0);
   const sinceFound = useRef(0);
   const hashesNow = useRef(0);
   hashesNow.current = m.hashes;
 
   // A found hash shows its card in the incubator for a breath, then the search is drawn again. The
-  // effect follows the found list only: were the hash count among its inputs, every tick of the count
-  // would cancel the timer and the card would never leave.
+  // effect follows the newest find's number only: the hash count ticks twice a second and the Mint button
+  // re-maps the list, and a re-run on either would cancel the timer and leave the card up.
+  const newest = m.found[0];
   useEffect(() => {
-    const f = m.found[0];
-    if (!f || f.n === seen.current) return;
-    seen.current = f.n;
+    if (!newest) return;
     sinceFound.current = hashesNow.current;
-    setReveal(cardFor(f));
+    setReveal(cardFor(newest));
     const t = window.setTimeout(() => setReveal(null), 2800);
     return () => window.clearTimeout(t);
-  }, [m.found]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newest?.n]);
 
   const active = m.running || !!m.pending;
   const expectedHashes = 2 ** m.bits;
@@ -105,8 +106,8 @@ export function Mine() {
         <div>
           <h1 className="serif">Mine a card of a seat that works.</h1>
           <p className="mine-lede">
-            Your machine searches for a hash under the target. Find one, pay the mint in PUPATE, and the hash picks which
-            seat your card comes from. Lucky hashes come out gilt.
+            Your machine searches for a hash with enough leading zeros. Find one, pay the mint in PUPATE, and the hash picks
+            which seat your card comes from. Lucky hashes come out gilt.
           </p>
           <span className="chip gold">Preview · contracts not live</span>
         </div>
@@ -214,7 +215,7 @@ export function Mine() {
           <span className="k">search</span>
           <Meter hashes={Math.max(0, m.hashes - sinceFound.current)} expected={expectedHashes} seed={m.sample ?? ""} />
           <span className="v dim">
-            {m.found.length} found{m.found.some((f) => f.gilt) ? `, ${m.found.filter((f) => f.gilt).length} gilt` : ""}
+            {m.tally.found} found{m.tally.gilt ? `, ${m.tally.gilt} gilt` : ""}
           </span>
         </div>
       </div>
@@ -270,7 +271,8 @@ export function Mine() {
           <figure>
             <img src="/cards/metamorph/c-240.svg" alt="Metamorph.md #240 of seat 1376" width={360} height={360} loading="lazy" />
             <figcaption>
-              <b>One in sixteen comes out gilt.</b> A hash well under the target paints the card gold. The hash decides; nobody picks.
+              <b>One in sixteen comes out gilt.</b> A hash with far more leading zeros than needed paints the card gold. The hash
+              decides; nobody picks.
             </figcaption>
           </figure>
         </div>

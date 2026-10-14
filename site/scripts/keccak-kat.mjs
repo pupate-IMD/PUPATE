@@ -8,7 +8,10 @@
 //   - the two-word compare and the GPU practice target.
 // The in-browser self-test runs the WGSL itself (GpuMiner.selfTest).
 //
-//   cd site && node scripts/keccak-kat.mjs
+//   cd site && npm run keccak-kat        (or: node scripts/keccak-kat.mjs)
+//
+// Needs Node 22.18 or later (23.6 or later on the 23 line): it imports the engine's TypeScript files
+// directly, which those versions run without a flag.
 import { keccakP, keccak_256 } from "@noble/hashes/sha3";
 import { encodeAbiParameters } from "viem";
 import { KECCAK_WGSL, RHO, ROUND_CONSTANTS, permutationJs } from "../lib/miner/gpu/keccak.ts";
