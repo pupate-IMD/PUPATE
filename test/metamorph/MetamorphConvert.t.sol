@@ -48,6 +48,31 @@ contract MetamorphConvertTest is MetamorphFixture {
         md.convert();
     }
 
+    function test_convertSpendsTheEthItHoldsAlone() public {
+        // An empty pot and ETH in hand: the sale is skipped and the ETH alone buys IMD. The fixture has
+        // never converted, so the spacing is no obstacle.
+        assertEq(md.pot(), 0);
+        vm.deal(address(md), 0.1 ether);
+        uint256 devBefore = imd.balanceOf(developer);
+        // The amount the event must report, from a copy of the state; the buy is far inside the bound.
+        uint256 copy = vm.snapshotState();
+        uint256 imdOut = uint256(uint128(_swap(router, imdKey, true, -int256(0.1 ether)).amount1()));
+        vm.revertToState(copy);
+        vm.expectEmit(true, false, false, true, address(md));
+        emit MetamorphMD.Converted(0, 0, imdOut, keeper, imdOut * 50 / 10_000);
+        vm.prank(keeper);
+        uint256 out = md.convert();
+        assertEq(out, imdOut);
+        assertEq(md.pot(), 0);
+        assertEq(md.ethPot(), address(md).balance, "ETH equals the ETH pot");
+        assertEq(address(md).balance, 0, "the IMD pool absorbed all of it");
+        uint256 reward = imd.balanceOf(keeper);
+        assertEq(reward, out * 50 / 10_000, "0.5% to the caller");
+        assertEq(
+            imd.balanceOf(developer) - devBefore, out - reward, "nobody staked: the rest to the developer"
+        );
+    }
+
     function test_convertSellsThePotForIMDPaysTheCallerAndTheDeveloperWhenNobodyStakes() public {
         _mintMany(3);
         uint256 potBefore = md.pot();
