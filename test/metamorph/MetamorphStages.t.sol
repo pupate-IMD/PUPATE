@@ -96,11 +96,12 @@ contract MetamorphStagesTest is MetamorphFixture {
         assertTrue(md.supportsInterface(0x2a55205a));
     }
 
-    function test_supportsTheFourInterfacesItImplements() public view {
+    function test_supportsTheFiveInterfacesItImplements() public view {
         assertTrue(md.supportsInterface(0x01ffc9a7), "ERC-165");
         assertTrue(md.supportsInterface(0x80ac58cd), "ERC-721");
         assertTrue(md.supportsInterface(0x5b5e139f), "ERC-721 metadata");
         assertTrue(md.supportsInterface(0x2a55205a), "ERC-2981");
+        assertTrue(md.supportsInterface(0x49064906), "ERC-4906");
         assertFalse(md.supportsInterface(0x780e9d63), "not ERC-721 enumerable");
         assertFalse(md.supportsInterface(0xffffffff), "never 0xffffffff, as ERC-165 requires");
     }

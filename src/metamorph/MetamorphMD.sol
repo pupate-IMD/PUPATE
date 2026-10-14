@@ -74,6 +74,8 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     event Unstaked(uint256 indexed id, address indexed staker);
     event Claimed(address indexed staker, uint256 imd);
     event Reweighed(uint256 indexed id, uint8 weight);
+    /// @notice ERC-4906: a card's metadata changed (its stage flipped), so marketplaces refresh it.
+    event MetadataUpdate(uint256 _tokenId);
     /// kind: 0 flush, 1 burn, 2 convert; paid: what the miner received for it (ETH wei or IMD wei)
     event DutyRun(uint8 kind, uint256 paid);
 
@@ -462,7 +464,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     }
 
     function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
-        return interfaceId == 0x2a55205a || super.supportsInterface(interfaceId);
+        return interfaceId == 0x2a55205a || interfaceId == 0x49064906 || super.supportsInterface(interfaceId);
     }
 
     function tokenURI(uint256 id) public view override returns (string memory) {
@@ -544,6 +546,17 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         emit Claimed(msg.sender, paid);
     }
 
+    /// @notice Settle any staked cards: anyone may call it. What each card earned goes to its staker, never
+    /// to the caller; the card's stage is re-read, so an emerged card weighs 2 from here on, and one whose
+    /// stage fell back weighs 1 again. A changed stage emits `MetadataUpdate`.
+    function poke(uint256[] calldata ids) external nonReentrant {
+        for (uint256 i; i < ids.length; i++) {
+            Stake storage s = stakeOf[ids[i]];
+            if (s.staker == address(0)) revert NotStaked();
+            _settle(ids[i], s);
+        }
+    }
+
     /// @dev Books what a staked card earned since its last settlement, then re-reads its stage.
     function _settle(uint256 id, Stake storage s) private {
         uint256 acc = accIMDPerWeight;
@@ -554,6 +567,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
             totalWeight = totalWeight - s.weight + w;
             s.weight = w;
             emit Reweighed(id, w);
+            emit MetadataUpdate(id);
         }
         s.debt = uint256(w) * acc;
     }

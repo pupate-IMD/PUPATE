@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {Vm} from "forge-std/Vm.sol";
 import {MetamorphFixture} from "./MetamorphFixture.sol";
 import {MetamorphHarness} from "./MetamorphHarness.sol";
 import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
@@ -35,6 +36,10 @@ contract MetamorphStakingTest is MetamorphFixture {
     function _ids(uint256 a) private pure returns (uint256[] memory ids) {
         ids = new uint256[](1);
         ids[0] = a;
+    }
+
+    function _seatOf(uint256 id) private view returns (uint32 seat) {
+        (seat,,,,,,,) = md.cards(id);
     }
 
     function test_stakeLocksAndWeighsOne() public {
@@ -148,6 +153,56 @@ contract MetamorphStakingTest is MetamorphFixture {
         assertEq(weight, 2);
         assertEq(md.totalWeight(), 2);
         assertEq(imd.balanceOf(miner), 30 ether);
+    }
+
+    /// A stranger pokes a staked card: its staker's pending grows, the stranger's does not, and an emerged
+    /// card reaches weight 2 without its staker's touch.
+    function test_anyoneCanPokeAndOnlyTheStakerEarns() public {
+        uint256 id = _mintAs(miner);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.prank(miner);
+        md.stake(ids);
+        _credit(30 ether);
+        address stranger = makeAddr("stranger");
+        vm.prank(stranger);
+        md.poke(ids);
+        assertEq(md.pendingIMD(miner), 30 ether, "the staker was credited");
+        assertEq(md.pendingIMD(stranger), 0, "the stranger was not");
+        (, uint8 w,) = md.stakeOf(id);
+        assertEq(w, 1, "still a chrysalis");
+        _sell(uint256(_seatOf(id))); // the seat leaves the vault: the card emerges
+        vm.expectEmit(true, false, false, true, address(md));
+        emit MetamorphMD.MetadataUpdate(id);
+        vm.prank(stranger);
+        md.poke(ids);
+        (, w,) = md.stakeOf(id);
+        assertEq(w, 2, "reweighed to butterfly by a stranger's poke");
+        assertEq(md.totalWeight(), 2);
+    }
+
+    function test_pokeRefusesAnUnstakedCardAndIgnoresAnEmptyList() public {
+        uint256 id = _mintAs(miner);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.expectRevert(MetamorphMD.NotStaked.selector);
+        md.poke(ids);
+        md.poke(new uint256[](0)); // no-op
+    }
+
+    /// A poke that does not change the weight emits no MetadataUpdate.
+    function test_pokeWithoutAStageChangeIsSilent() public {
+        uint256 id = _mintAs(miner);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.prank(miner);
+        md.stake(ids);
+        vm.recordLogs();
+        md.poke(ids);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != MetamorphMD.MetadataUpdate.selector, "no MetadataUpdate");
+        }
     }
 
     function test_claimOnlyTouchesYourOwnStakes() public {
