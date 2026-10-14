@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { EPOCH_ONE_BITS, type Power, fmtHashes, fmtRate } from "@/lib/miner/job";
-import { type Found, useMiner } from "@/lib/miner/useMiner";
+import { type Found, type GpuState, useMiner } from "@/lib/miner/useMiner";
 import { Incubator } from "./Incubator";
 import { useSim } from "./SimContext";
 
@@ -35,28 +35,42 @@ function Meter({ hashes, expected, seed }: { hashes: number; expected: number; s
   );
 }
 
+/// The GPU half of the engine switch: why it is off when it is, what the self-test said when it ran.
+function gpuSwitch(g: GpuState): { label: string; disabled: boolean; title: string } {
+  if (!g.checked) return { label: "GPU", disabled: true, title: "Looking for WebGPU in this browser" };
+  if (!g.available) return { label: "GPU unavailable", disabled: true, title: g.reason ?? "This browser cannot mine on its GPU." };
+  if (g.selfTest?.running) return { label: "testing the GPU", disabled: true, title: "A known hash, 256 hits checked on the CPU, one second of work" };
+  if (g.selfTest && !g.selfTest.ok) return { label: "GPU failed self-test", disabled: true, title: g.selfTest.detail };
+  const name = g.name ?? "WebGPU";
+  return { label: "GPU", disabled: false, title: g.selfTest ? `${name} · ${fmtRate(g.selfTest.rate)} in its self-test` : `${name} · a self-test runs before the first job` };
+}
+
 /// The mine, as a specimen bench: the drawing of the card being searched for, the readings beside it,
 /// the controls as instruments, and underneath the field notes and the drawer of what was mined. Before
 /// the contracts exist every run is a practice run: the hashing is real, the mint is a line in the notes.
 export function Mine() {
   const s = useSim();
   const { openConnectModal } = useConnectModal();
-  const { state: m, start, stop, setPower, setAuto, mintPending } = useMiner();
+  const { state: m, start, stop, setPower, setEngine, setAuto, mintPending } = useMiner();
   const wallet = s.wallet;
   const [reveal, setReveal] = useState<ReturnType<typeof cardFor> | null>(null);
   const seen = useRef<number>(0);
   const sinceFound = useRef(0);
+  const hashesNow = useRef(0);
+  hashesNow.current = m.hashes;
 
-  // A found hash shows its card in the incubator for a breath, then the search is drawn again.
+  // A found hash shows its card in the incubator for a breath, then the search is drawn again. The
+  // effect follows the found list only: were the hash count among its inputs, every tick of the count
+  // would cancel the timer and the card would never leave.
   useEffect(() => {
     const f = m.found[0];
     if (!f || f.n === seen.current) return;
     seen.current = f.n;
-    sinceFound.current = m.hashes;
+    sinceFound.current = hashesNow.current;
     setReveal(cardFor(f));
     const t = window.setTimeout(() => setReveal(null), 2800);
     return () => window.clearTimeout(t);
-  }, [m.found, m.hashes]);
+  }, [m.found]);
 
   const active = m.running || !!m.pending;
   const expectedHashes = 2 ** m.bits;
@@ -82,6 +96,7 @@ export function Mine() {
   }
   const cta = primary();
   const cards = m.found.map((f) => ({ f, c: cardFor(f) }));
+  const gpuOption = gpuSwitch(m.gpu);
 
   return (
     <section className="wrap mine-page" aria-label="Mine">
@@ -104,7 +119,8 @@ export function Mine() {
           <div>
             <dt>difficulty</dt>
             <dd>
-              ≈ {fmtHashes(expectedHashes)} hashes <span className="dim">· {EPOCH_ONE_BITS} bits</span>
+              ≈ {fmtHashes(expectedHashes)} hashes{" "}
+              <span className="dim">· {m.engine === "gpu" ? `practice target ${m.bits} bits` : `${EPOCH_ONE_BITS} bits`}</span>
             </dd>
           </div>
           <div>
@@ -150,10 +166,22 @@ export function Mine() {
           <div className="instrument">
             <span className="k">engine</span>
             <span className="v">
-              CPU, {m.threads} thread{m.threads > 1 ? "s" : ""}
-              <button type="button" className="switch" disabled title="The GPU engine is being built; it will verify every hit on the CPU first">
-                GPU not yet
-              </button>
+              <span className="pair" role="group" aria-label="Engine">
+                <button type="button" className={`switch ${m.engine === "cpu" ? "on" : ""}`} aria-pressed={m.engine === "cpu"} onClick={() => void setEngine("cpu")}>
+                  CPU
+                </button>
+                <button
+                  type="button"
+                  className={`switch ${m.engine === "gpu" ? "on" : ""}`}
+                  aria-pressed={m.engine === "gpu"}
+                  disabled={gpuOption.disabled}
+                  title={gpuOption.title}
+                  onClick={() => void setEngine("gpu")}
+                >
+                  {gpuOption.label}
+                </button>
+              </span>
+              <span className="dim">{m.engine === "gpu" ? `GPU · ${m.gpu.name ?? "WebGPU"}` : `CPU, ${m.threads} thread${m.threads > 1 ? "s" : ""}`}</span>
             </span>
           </div>
           <div className="instrument">

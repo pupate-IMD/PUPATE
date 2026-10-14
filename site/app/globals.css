@@ -638,6 +638,10 @@ footer .serif { color: var(--ink); font-size: 16px; }
 .switch.on { border-color: var(--ink); color: var(--ink); }
 .switch:not(:disabled):hover { border-color: var(--ink); color: var(--ink); }
 .switch:disabled { color: var(--faint); }
+/* two switches joined into one control (the engine: CPU / GPU); the pressed one's ink border sits on top */
+.pair { display: inline-flex; }
+.pair .switch + .switch { margin-left: -1px; }
+.pair .switch.on, .pair .switch:not(:disabled):hover { position: relative; z-index: 1; }
 /* the power ruler: a hairline with a tick every 25%, and a small ink block for the needle */
 .ruler input { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 0; background: linear-gradient(var(--hair), var(--hair)) center / 100% 1px no-repeat, repeating-linear-gradient(to right, var(--hair) 0 1px, transparent 1px 25%) left / calc(100% - 1px) 100% no-repeat, linear-gradient(var(--hair), var(--hair)) right / 1px 100% no-repeat; cursor: pointer; }
 .ruler input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 22px; background: var(--ink); border: 0; }
