@@ -379,6 +379,27 @@ contract MetamorphMintTest is MetamorphFixture {
         assertEq(md.bits(), 1, "bits() reports the effective target");
     }
 
+    /// The ceiling binds before the shift saturates too: the year of silence above reaches it through a
+    /// shift of 256 or more, while here the eased target would pass it after five intervals. Four intervals
+    /// ease the burst's target ×256 to just under the ceiling; a fifth would carry it past, so the effective
+    /// target is the ceiling exactly. Without that cap, the fifth interval would shift the target's top bits
+    /// out, and at the mainnet floor of 20 bits a fast mint and two intervals of silence would accept proofs
+    /// of 18 bits.
+    function test_silenceStopsAtTheCeilingBeforeTheShiftSaturates() public {
+        uint256 cap = type(uint256).max >> 1; // minBits 1, epoch 1
+        _mintAs(miner);
+        for (uint256 i; i < 3; i++) {
+            _mintAs(miner); // same block: ÷4 each
+        }
+        uint256 t = md.target();
+        assertEq(t, cap >> 8, "four same-block mints: the ceiling / 256");
+        vm.warp(block.timestamp + 4 * md.DECAY_INTERVAL());
+        assertLe(t << 8, cap, "four intervals: x256 stays under the ceiling");
+        assertEq(md.effectiveTarget(), t << 8, "four intervals: x256");
+        vm.warp(block.timestamp + md.DECAY_INTERVAL());
+        assertEq(md.effectiveTarget(), cap, "five intervals would pass the ceiling: capped");
+    }
+
     /// A proof found against the stored target stays valid after silence: the effective target is never
     /// below the stored one.
     function test_aProofAgainstTheStoredTargetStaysValid() public {

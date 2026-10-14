@@ -130,9 +130,14 @@ contract MetamorphInvariantTest is MetamorphFixture {
         }
     }
 
+    /// @dev The effective target too, the one proofs are checked against: silence eases the stored target up
+    /// to the ceiling and never past it, and never makes it harder.
     function invariant_targetIsNeverAboveTheCeiling() public view {
         uint256 epoch_ = md.epoch();
         uint256 shift = uint256(md.MIN_BITS()) + epoch_ - 1;
-        assertLe(md.target(), type(uint256).max >> shift);
+        uint256 ceiling = type(uint256).max >> shift;
+        assertLe(md.target(), ceiling);
+        assertLe(md.effectiveTarget(), ceiling, "the eased target never passes the ceiling");
+        assertGe(md.effectiveTarget(), md.target(), "silence never makes the target harder");
     }
 }

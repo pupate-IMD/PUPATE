@@ -169,6 +169,9 @@ contract MetamorphDutiesTest is MetamorphFixture {
         assertLt(md.pot(), 50_000 ether, "the pot was converted inside the mint");
         assertGt(imd.balanceOf(miner), 0, "the miner got the conversion reward");
         assertEq(imd.balanceOf(miner), _paid(vm.getRecordedLogs(), 2), "as the duty reports");
+        // The mint had gas to spare, so the duty had its whole allowance and the margin; it succeeded, and a
+        // success never arms the back-off, only a failure does.
+        assertEq(md.convertBackoffUntil(), 0, "a successful duty conversion leaves the back-off alone");
     }
 
     /// 99 prices in the pot is not due; the hundredth makes it due.
@@ -285,9 +288,11 @@ contract MetamorphDutiesTest is MetamorphFixture {
     }
 
     /// A duty conversion starved by the sender's gas limit says nothing about the pool: the mint succeeds,
-    /// the conversion is skipped without a back-off, and the next mint sent with enough gas converts. At
-    /// 380,000 gas the conversion runs out inside a token transfer that the PoolManager wraps into an error
-    /// with data, so only the gas, not the revert data, can tell this starvation from a real failure.
+    /// the conversion is skipped without a back-off, and the next mint sent with enough gas converts. On this
+    /// fixture, at 380,000 gas, the starved conversion reaches the catch with a wrapped error that carries
+    /// data (a trace shows it running out inside a token transfer that the PoolManager wraps; the test does
+    /// not assert the data), so only the gas, not the revert data, can tell this starvation from a real
+    /// failure.
     function test_aStarvedDutyConversionDoesNotBackOff() public {
         _starvedMintDoesNotBackOff(380_000);
     }
@@ -295,6 +300,41 @@ contract MetamorphDutiesTest is MetamorphFixture {
     /// The same at 420,000 gas, where the starved conversion reverts with no data.
     function test_aStarvedDutyConversionDoesNotBackOffWhenItRevertsEmpty() public {
         _starvedMintDoesNotBackOff(420_000);
+    }
+
+    /// The back-off arms only when more than CONVERT_GAS × 64/63 + 10,000 gas, about 924,300, is left at the
+    /// conversion. The duty already gets its whole 900,000 from about 914,700 left (the 1/64 rule), so in the
+    /// band between, the 10,000 margin kept for the catch's write, a failure does not back off: padding a
+    /// mint by the allowance alone is not enough, and the page and the keeper pad a due conversion by
+    /// 1,000,000.
+    /// With the IMD pool emptied and the conversion due, E is the lowest gas limit at which the mint
+    /// succeeds, what an estimator that searches from below settles on; it starves the conversion (about
+    /// 20,000 gas reach it) and does not back off. E + 900,000 gives the duty exactly its allowance and lands
+    /// in the band; E + 1,000,000 arms the back-off. This pins the threshold: with `CONVERT_GAS * 2`, without
+    /// the margin, or with 63/64 for 64/63, the test fails.
+    function test_aMintPaddedByAMillionArmsTheBackOff() public {
+        _fillThePot();
+        _removeImdLiquidity();
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 90);
+        (,, bool c) = md.dutiesDue();
+        assertTrue(c, "the conversion is due, and the emptied pool fails it");
+        uint256 e = _lowestGasThatMints();
+        (bool ok,) = _mintWithGas(e - 1);
+        assertFalse(ok, "E is the lowest limit that mints");
+        uint256 until;
+        (ok, until) = _mintWithGas(e);
+        assertTrue(ok, "E mints");
+        assertEq(until, 0, "E starves the conversion: no back-off");
+        (ok, until) = _mintWithGas(e + 1_000_000);
+        assertTrue(ok, "E + 1,000,000 mints");
+        assertEq(until, block.number + md.CONVERT_BACKOFF(), "padded by a million: the failure backs off");
+        // Set last, so that only the next mint can meet it: `expectCall` checks the gas the call received,
+        // and padded by the allowance alone the duty receives all of it, exactly 900,000.
+        vm.expectCall(address(md), 0, uint64(md.CONVERT_GAS()), abi.encodeCall(md.convertDuty, (miner)));
+        (ok, until) = _mintWithGas(e + 900_000);
+        assertTrue(ok, "E + 900,000 mints");
+        assertEq(until, 0, "padded by the allowance alone: inside the margin, no back-off");
     }
 
     function test_aFlushOrABurnThatRevertsNeverRevertsTheMint() public {
@@ -399,6 +439,33 @@ contract MetamorphDutiesTest is MetamorphFixture {
         _mintAs(miner);
         assertEq(md.lastConvertBlock(), block.number, "the next mint converted the pot");
         assertGt(_paid(vm.getRecordedLogs(), 2), 0, "and its duty paid the miner");
+    }
+
+    /// @dev Mints as the miner with `gasLimit`, reports whether the mint succeeded and the back-off it left,
+    /// then restores the state, so that each limit is tried from the same one.
+    function _mintWithGas(uint256 gasLimit) private returns (bool ok, uint256 backoffUntil) {
+        uint256 state = vm.snapshotState();
+        uint256 a = _anchor();
+        uint256 n = _proof(miner, a);
+        vm.prank(miner);
+        try md.mint{gas: gasLimit}(a, n) {
+            ok = true;
+            backoffUntil = md.convertBackoffUntil();
+        } catch {}
+        vm.revertToState(state);
+    }
+
+    /// @dev The lowest gas limit at which the miner's mint succeeds, by binary search: what an estimator
+    /// that searches from below settles on. A mint that succeeds with a limit succeeds with any higher one.
+    function _lowestGasThatMints() private returns (uint256 lo) {
+        lo = 100_000;
+        uint256 hi = 3_000_000;
+        while (lo < hi) {
+            uint256 mid = (lo + hi) / 2;
+            (bool ok,) = _mintWithGas(mid);
+            if (ok) hi = mid;
+            else lo = mid + 1;
+        }
     }
 
     /// @dev Fails when `logs` hold a DutyRun of `kind`.

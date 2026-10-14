@@ -106,16 +106,21 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     /// miner's 0.5% reward was about a fiftieth of the duty's gas; at a hundred it about covers the duty's
     /// gas at 1 gwei, half of it at the 2 gwei ceiling.
     uint256 public constant CONVERT_PRICES = 100;
-    /// @notice Blocks a mint leaves the conversion alone after a duty conversion that ran with its whole gas
-    /// allowance failed, so a stuck pool does not tax every cheap mint with a failing retry. The 1/64 rule
-    /// decides before the call whether the duty has its whole allowance: a duty starved of gas by the
-    /// sender's limit says nothing about the pool and is simply skipped, while a conversion that exhausts its
-    /// whole allowance is a real failure and backs off. A mint whose gas limit came from `eth_estimateGas`
-    /// gives the duties almost nothing (the bare mint is what the estimator finds) and skips them cheaply;
-    /// the mine page and the keeper pad the limit by the duties' allowances so that they run, and only such
-    /// a mint can arm the back-off. A sender with a limit in between pays for a failing conversion on every
-    /// cheap mint while a pool is stuck, which is its own choice. The public `convert()` ignores the
-    /// back-off.
+    /// @notice Blocks a mint leaves the conversion alone after a duty conversion failed with more than
+    /// `CONVERT_GAS` × 64/63 + 10,000 gas, about 924,300, left at the call, so a stuck pool does not tax
+    /// every cheap mint with a failing retry. The gas left decides, not the revert data (see `_duties`): a
+    /// duty starved of gas by the sender's limit says nothing about the pool and is simply skipped, while a
+    /// conversion that fails with its whole allowance is a real failure. The duty gets its whole allowance
+    /// from about 914,700 gas left, and the 10,000 above that is the margin kept for the catch's write, so in
+    /// that band a real failure does not back off either: a mint padded by exactly `CONVERT_GAS` over the
+    /// lowest limit at which it succeeds lands there. The mine page and the keeper pad a mint's gas limit by
+    /// 400,000 for each due flush or burn and by 1,000,000 for a due conversion. What `eth_estimateGas`
+    /// returns depends on the client: geth and reth start their search from the gas the unconstrained run
+    /// used, so an estimate may already include a duty's consumption; a client that searches from below
+    /// settles on the lowest limit at which the mint succeeds, which runs the earlier due duties and starves
+    /// only the last (a starved conversion burns about 20,000 gas). Either way an estimated mint is a
+    /// mid-range sender: while a pool is stuck it may pay for a failing conversion on every cheap mint, and
+    /// it never arms the back-off. The public `convert()` ignores the back-off.
     uint256 public constant CONVERT_BACKOFF = 300;
     uint256 public constant DUTY_MAX_BASEFEE = 2 gwei;
     uint256 public constant MIN_FLUSH = 0.005 ether;
@@ -183,8 +188,10 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     uint256 public ethPot;
     /// @notice The block of the last conversion; the next one waits `CONVERT_SPACING` blocks.
     uint256 public lastConvertBlock;
-    /// @notice The block from which a duty conversion may be tried again after one that ran with its whole
-    /// gas allowance failed; 0 when none did.
+    /// @notice The block from which a duty conversion may be tried again after one failed with more than
+    /// `CONVERT_GAS` × 64/63 + 10,000 gas left at the call (see `CONVERT_BACKOFF`); 0 until a duty conversion
+    /// that had its whole allowance and that margin failed. A duty conversion that failed with less, even one
+    /// that got its whole allowance, leaves it as it was.
     uint256 public convertBackoffUntil;
     uint256 public accIMDPerWeight;
     uint256 public totalWeight;
@@ -713,7 +720,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     /// @notice The duties due right now: the hook's flush, the vault's burn, the pot's conversion. A mint
     /// runs them when gas is cheap; the keeper reads the same. The conversion is due once the pot holds
     /// `CONVERT_PRICES` mint prices or ETH waits; like the burn, it waits out its spacing, and after a duty
-    /// conversion that had its whole gas allowance failed, its back-off.
+    /// conversion failed with more than `CONVERT_GAS` × 64/63 + 10,000 gas left at the call, its back-off.
     function dutiesDue() public view returns (bool flushDue, bool burnDue, bool convertDue) {
         flushDue = POOL_MANAGER.balanceOf(address(HOOK), 0) >= MIN_FLUSH;
         burnDue = COCOON.wired() && COCOON.burnPot() >= MIN_BURN
@@ -748,16 +755,18 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
             } catch {}
         }
         if (convertDue) {
-            // The duty backs off only when it ran with its whole allowance, which the 1/64 rule (EIP-150)
-            // decides before the call: under CONVERT_GAS × 64/63 it gets less. The revert data cannot tell a
-            // starved duty from a reasoned failure: v4-core wraps an out-of-gas inside hook callbacks and
-            // currency transfers into a `WrappedError` that carries data. A duty starved by the sender's gas
-            // limit says nothing about the pool and is simply skipped; a mint whose limit came from
-            // `eth_estimateGas` gives it almost nothing, and only a mint padded by the duties' allowances, as
-            // the mine page and the keeper send, can arm the back-off. A conversion that exhausts its whole
-            // allowance is a real failure and backs off. The 10,000 is a safety margin for the catch's first
-            // write of the back-off (20,000 gas, zero to non-zero), which the 64th kept back alone may not
-            // pay after a whole allowance was spent; it is not the call's cost.
+            // The duty backs off only when more than CONVERT_GAS × 64/63 + 10,000 gas (about 924,300) is left
+            // here: under CONVERT_GAS × 64/63 the 1/64 rule (EIP-150) gives it less than its whole allowance.
+            // The revert data cannot tell a starved duty from a reasoned failure: v4-core wraps an out-of-gas
+            // inside hook callbacks and currency transfers into a `WrappedError` that carries data. A duty
+            // starved by the sender's gas limit says nothing about the pool and is simply skipped; a
+            // conversion that fails with its whole allowance is a real failure. The 10,000 is a safety margin
+            // for the catch's first write of the back-off (20,000 gas, zero to non-zero), which the 64th kept
+            // back alone may not pay after a whole allowance was spent; it is not the call's cost. In the
+            // band it leaves, from about 914,700 gas left up to the threshold, the duty gets its whole
+            // allowance yet a failure does not back off, so the mine page and the keeper pad a due conversion
+            // by 1,000,000, not by CONVERT_GAS alone; a mint whose limit came from `eth_estimateGas` never
+            // arms it (see CONVERT_BACKOFF).
             bool whole = gasleft() > CONVERT_GAS * 64 / 63 + 10_000;
             try this.convertDuty{gas: CONVERT_GAS}(miner_) returns (uint256 bought) {
                 emit DutyRun(2, bought * CALLER_REWARD_BPS / BPS);

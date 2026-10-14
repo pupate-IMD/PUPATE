@@ -229,7 +229,7 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
 | `DUTY_MAX_BASEFEE` | 2 gwei | duties ride along only when gas is cheap |
 | `MIN_FLUSH`, `MIN_BURN`, the conversion's threshold | 0.005 ETH, 0.01 ETH, a pot of `CONVERT_PRICES` × price or any ETH in `ethPot` | the in-mint duties' thresholds, which `dutiesDue()` reports; anyone may still call `convert()` on any pot once the spacing has passed |
 | `CONVERT_PRICES` | 100 mint prices | at a hundred the miner's 0.5% about covers the duty conversion's gas at 1 gwei, half of it at the 2 gwei ceiling; at two it was about a fiftieth (whole-branch review I5) |
-| `CONVERT_BACKOFF` | 300 blocks | after a duty conversion that ran with its whole gas allowance failed, mints leave the conversion alone this long; `convert()` ignores it (audit L-2) |
+| `CONVERT_BACKOFF` | 300 blocks | after a duty conversion failed with more than `CONVERT_GAS` × 64/63 + 10,000 gas (about 924,300) left at the call, mints leave the conversion alone this long; `convert()` ignores it (audit L-2) |
 | `DUTY_GAS`, `CONVERT_GAS` | 400,000 and 900,000 gas | each duty's allowance inside a mint |
 | butterfly ceiling | 90 days from the mint | no card waits forever for a sale |
 | staking weights | chrysalis 1, butterfly 2 | yield follows the vault's success |
@@ -358,23 +358,25 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
   - L-2: a conversion runs both legs or neither. The keeper's `convert()` reverts in the same states as the
     duty (`PriceLimitAlreadyExceeded` while the launch price is parked; `NothingBought` when no IMD
     liquidity sits within the bound), so it is never a way out of a failing state. Since the revision, a
-    duty conversion that ran with its whole gas allowance and failed backs off `CONVERT_BACKOFF` blocks
-    (the back-off item below), so a failing state no longer taxes every cheap mint. The rest stays
-    accepted by the owner: if the liquidity within 1.5% of the ETH/IMD spot leaves for good, the pot can
-    never convert again, and 70% of every later fee stays locked as PUPATE (and any ETH waiting in `ethPot`
-    with it).
+    duty conversion that fails with more than `CONVERT_GAS` × 64/63 + 10,000 gas left at the call backs
+    off `CONVERT_BACKOFF` blocks (the back-off item below), so a failing state no longer taxes every cheap
+    mint. The rest stays accepted by the owner: if the liquidity within 1.5% of the ETH/IMD spot leaves for
+    good, the pot can never convert again, and 70% of every later fee stays locked as PUPATE (and any ETH
+    waiting in `ethPot` with it).
   - L-3: no time locks, as designed; a stake made just before a conversion takes a full share of it. With
     no keys and no upgrade path, a stake-age rule can only come with a new collection, so it is a decision
     for the owner before deploy, not a later change.
   - M-1 residual: an attacker holding about a quarter or more of the ETH/IMD pool's in-range liquidity
     recovers its fees and can still profit a little from a sandwich, and griefing stays cheap: the griefer
     loses about a third of what the stakers lose. Accepted; the numbers are in `docs/REVIEW.md`.
-- For the page and the keeper: pad the mint's gas limit by the allowances of the duties `dutiesDue()`
-  reports (`DUTY_GAS`, 400,000 each; `CONVERT_GAS`, 900,000; the duty conversion used about 300,000 on a
-  mainnet fork), because `eth_estimateGas` settles on a limit that starves the duties, which then fail
-  silently on every mint (audit I-1: no gas-starvation guard, declined by the owner; only such a padded
-  mint can arm the conversion's back-off). After a sale they call `forgetSeat`, so mints stop walking the
-  sold seat.
+- For the page and the keeper: pad the mint's gas limit by 400,000 (`DUTY_GAS`) for each flush or burn
+  `dutiesDue()` reports and by 1,000,000 for a due conversion, so that the duties run (the duty conversion
+  used about 300,000 on a mainnet fork) and a failing conversion arms its back-off. That takes more than
+  `CONVERT_GAS` × 64/63 + 10,000 gas, about 924,300, left at the call: padded by its 900,000 alone, the
+  conversion gets its whole allowance and still fails without a back-off (the back-off item below). A
+  limit from `eth_estimateGas` alone runs the duties only as far as the client's search allows and never
+  arms the back-off (audit I-1: no gas-starvation guard, declined by the owner; the I-1 item below). After
+  a sale they call `forgetSeat`, so mints stop walking the sold seat.
 - The invariant suite seeds one seat-round near the editions cap, so the cap is crossed inside a run; the
   3,333 supply cap is pinned by the unit test that mints the whole collection. The ETH invariant reads
   `balance == ethPot` (every actor is an EOA), and an eighth invariant ties `totalWeight` to the staked
@@ -384,21 +386,31 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
   - Difficulty eases with silence (audit L-1, the audit's fix adopted): `effectiveTarget() = min(ceiling,
     target × 4^((now − lastMintAt) / DECAY_INTERVAL))`, `DECAY_INTERVAL = 360` s. Proofs and gilt are
     checked against it, `bits()` reports it, and the retarget after a mint starts from it; a proof found
-    against the stored target stays valid. Accepted: from 360 s of silence the retarget jumps ×16 (eased
-    ×4, then the clamp's ×4) where it was ×4, and at an epoch boundary its base is clamped to the next
-    epoch's ceiling, one bit harder than the target the proof met.
+    against the stored target stays valid. Accepted: after silence the retarget lands ×4 above the eased
+    target, so ×16, ×64, … above the stored target after one, two, … intervals, up to the ceiling, where it
+    was ×4; and at an epoch boundary its base is clamped to the next epoch's ceiling, one bit harder than
+    the target the proof met.
   - The duty conversion waits for `CONVERT_PRICES = 100` mint prices (was 2): at two the miner's reward was
     about a fiftieth of the duty's gas (whole-branch review I5); at a hundred it about covers it at 1 gwei,
     half of it at the 2 gwei ceiling. `dutiesDue().convertDue` describes this in-mint duty only: the
     keeper, or anyone, may call `convert()` on any pot once the spacing has passed.
-  - After a duty conversion that ran with its whole gas allowance failed, mints leave the conversion alone
-    for `CONVERT_BACKOFF = 300` blocks (`convertBackoffUntil`); `convert()` is not held back (audit L-2,
-    partly: the dead-pool lock stays accepted). The gas before the call decides whether the duty had its
-    whole allowance, not the revert: v4-core wraps an out-of-gas inside hook callbacks and currency
-    transfers into a `WrappedError` that carries data. A duty starved by the sender's gas limit is skipped
-    without a back-off, so the page and the keeper pad the mint's gas limit by the duties' allowances.
-  - No gas-starvation guard (audit I-1, declined): a mint whose limit came from `eth_estimateGas` skips its
-    duties cheaply; the page and the keeper pad the limit so that they run.
+  - After a duty conversion failed with more than `CONVERT_GAS` × 64/63 + 10,000 gas, about 924,300, left
+    at the call, mints leave the conversion alone for `CONVERT_BACKOFF = 300` blocks
+    (`convertBackoffUntil`); `convert()` is not held back (audit L-2, partly: the dead-pool lock stays
+    accepted). The gas before the call decides, not the revert: v4-core wraps an out-of-gas inside hook
+    callbacks and currency transfers into a `WrappedError` that carries data. Under `CONVERT_GAS` × 64/63
+    the 1/64 rule gives the duty less than its whole allowance, and a duty starved by the sender's gas limit
+    is skipped without a back-off. The 10,000 above it is a margin for the catch's write of the back-off; in
+    that band, from about 914,700 gas left, the duty gets its whole allowance yet fails without a back-off,
+    and a mint padded by exactly 900,000 over the lowest limit at which it succeeds lands there. So the page
+    and the keeper pad a due conversion by 1,000,000.
+  - No gas-starvation guard (audit I-1, declined). What `eth_estimateGas` returns depends on the client:
+    geth and reth start their search from the gas the unconstrained run used, so an estimate may already
+    include a duty's consumption; a client that searches from below settles on the lowest limit at which
+    the mint succeeds, which runs the earlier due duties and starves only the last (a starved conversion
+    burns about 20,000 gas). Either way an estimated mint is a mid-range sender: while a pool is stuck it
+    may pay for a failing conversion on every cheap mint, and it never arms the back-off. The page and the
+    keeper pad the limit, by 400,000 for each due flush or burn and by 1,000,000 for a due conversion.
   - `poke(ids)`: anyone may settle staked cards; what a card earned goes to its staker, never to the
     caller; ids that are not staked are skipped, so one unstake cannot void a keeper's batch. A settlement
     that changes a card's weight emits ERC-4906 `MetadataUpdate(id)`, and `supportsInterface(0x49064906)`
