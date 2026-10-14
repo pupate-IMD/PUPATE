@@ -15,6 +15,8 @@ export interface MinerJob {
   /// The target's top 64 bits as two uint32 words; a digest wins when its first two words are below them.
   targetHi: number;
   targetLo: number;
+  /// The leading zero bits the target asks for; the page shows it and tells a gilt hash by it (4 more).
+  bits: number;
 }
 
 export type Power = 25 | 50 | 75 | 100;
@@ -35,8 +37,16 @@ export type FromWorker =
   | { type: "progress"; worker: number; jobId: number; hashes: number; sample: Hex }
   | { type: "found"; worker: number; jobId: number; nonce: Hex; digest: Hex };
 
-/// A valid practice hash needs this many leading zero bits: about a million hashes on average.
+/// A valid practice hash on the CPU needs this many leading zero bits: about a million hashes on average.
 export const PRACTICE_BITS = 20;
+
+/// The GPU's practice target: the bits that make a hash take about four seconds at the rate its
+/// self-test measured, within 20..40.
+export function practiceBitsFor(rate: number): number {
+  if (!(rate > 0)) return PRACTICE_BITS;
+  return Math.min(40, Math.max(20, Math.round(Math.log2(rate * 4))));
+}
+
 /// The mainnet floor the spec names for epoch 1, shown on the page before the contracts exist.
 export const EPOCH_ONE_BITS = 20;
 
@@ -54,7 +64,7 @@ export function targetWords(bits: number): { targetHi: number; targetLo: number 
   return { targetHi: Number(top >> 32n), targetLo: Number(top & 0xffffffffn) };
 }
 
-export function practiceJob(id: number, miner?: Hex): MinerJob {
+export function practiceJob(id: number, miner?: Hex, bits: number = PRACTICE_BITS): MinerJob {
   return {
     id,
     domain: randomHex(32),
@@ -62,7 +72,8 @@ export function practiceJob(id: number, miner?: Hex): MinerJob {
     contract: randomHex(20),
     folded: randomHex(32),
     miner: miner ?? randomHex(20),
-    ...targetWords(PRACTICE_BITS),
+    ...targetWords(bits),
+    bits,
   };
 }
 
