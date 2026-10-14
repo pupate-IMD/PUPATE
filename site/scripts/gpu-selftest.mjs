@@ -11,7 +11,8 @@
 //
 // Other options: --port <n>, --browser <path to msedge or chrome>, --flags "<extra browser flags>",
 // --timeout <seconds> (default 300), --bench <ms> (a longer GPU benchmark than the page's one second).
-// Exits 0 when the self-test passed, 1 otherwise.
+// Exits 0 when the self-test passed, 1 otherwise. Every wait is bounded, and whatever the script started
+// (the dev server, the browser) is stopped on the way out.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,6 +37,9 @@ const timeoutMs = Number(opt("timeout", "300")) * 1000;
 const browser = opt("browser", "") || findBrowser();
 const extra = (opt("flags", "") || "").split(/\s+/).filter(Boolean);
 const gpuFlags = ["--enable-unsafe-webgpu", "--enable-features=Vulkan", ...(flag("high-performance") ? ["--force-high-performance-gpu"] : []), ...extra];
+
+/// What the script started, so every exit path can stop it.
+const started = { server: null, browser: null };
 
 function findBrowser() {
   const candidates =
@@ -66,29 +70,51 @@ function killTree(child) {
   }
 }
 
+function stopAll() {
+  killTree(started.browser);
+  if (started.server) {
+    killTree(started.server);
+    console.log("dev server stopped");
+    started.server = null;
+  }
+}
+
+// The last word: whatever hangs, the script ends and takes its children with it.
+setTimeout(() => {
+  console.error("gave up: the self-test did not finish in time");
+  stopAll();
+  process.exit(1);
+}, 2 * timeoutMs + 60_000).unref();
+
 async function waitForServer() {
   const until = Date.now() + timeoutMs;
   let last = "";
   while (Date.now() < until) {
     try {
       // The first request compiles the page, which can take a minute or two.
-      const r = await fetch(`${base}/mine/`, { signal: AbortSignal.timeout(240_000) });
+      const r = await fetch(`${base}/mine/`, { signal: AbortSignal.timeout(Math.max(1000, Math.min(240_000, until - Date.now()))) });
       if (r.ok) return;
       last = `HTTP ${r.status}`;
     } catch (e) {
       last = e instanceof Error ? e.message : String(e);
     }
+    if (started.server && started.server.exitCode !== null) throw new Error(`the dev server exited (code ${started.server.exitCode})`);
     await sleep(1000);
   }
   throw new Error(`the site at ${base} did not answer: ${last}`);
 }
 
-/// A minimal DevTools protocol client over Node's WebSocket.
+/// A minimal DevTools protocol client over Node's WebSocket; every request times out, and a closed
+/// connection fails whatever was still waiting.
 function devtools(url) {
   const ws = new WebSocket(url);
   let id = 0;
   const waiting = new Map();
   const events = [];
+  const failAll = (why) => {
+    for (const w of waiting.values()) w.reject(new Error(why));
+    waiting.clear();
+  };
   ws.onmessage = (m) => {
     const msg = JSON.parse(typeof m.data === "string" ? m.data : m.data.toString());
     if (msg.id && waiting.has(msg.id)) {
@@ -98,14 +124,29 @@ function devtools(url) {
       else w.resolve(msg.result);
     } else if (msg.method) events.push(msg);
   };
+  ws.onclose = () => failAll("the browser closed the DevTools connection");
   const open = new Promise((resolve, reject) => {
     ws.onopen = resolve;
     ws.onerror = () => reject(new Error(`cannot reach ${url}`));
+    setTimeout(() => reject(new Error(`no DevTools connection to ${url}`)), 15_000).unref();
   });
-  const send = (method, params = {}) =>
+  const send = (method, params = {}, ms = 30_000) =>
     new Promise((resolve, reject) => {
       const i = ++id;
-      waiting.set(i, { resolve, reject });
+      const timer = setTimeout(() => {
+        waiting.delete(i);
+        reject(new Error(`${method}: no answer in ${ms / 1000} s`));
+      }, ms);
+      waiting.set(i, {
+        resolve: (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
       ws.send(JSON.stringify({ id: i, method, params }));
     });
   return { open, send, events, close: () => ws.close() };
@@ -123,29 +164,39 @@ function consoleLines(events) {
 async function viaDevtools() {
   const profile = mkdtempSync(join(tmpdir(), "pupate-gpu-selftest-"));
   const args = ["--headless=new", ...gpuFlags, "--no-first-run", "--no-default-browser-check", `--user-data-dir=${profile}`, "--remote-debugging-port=0", target];
-  const edge = spawn(browser, args, { stdio: "ignore", detached: process.platform !== "win32" });
+  const edge = spawn(browser, args, { stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32" });
+  started.browser = edge;
+  const stderr = [];
+  edge.stderr.on("data", (d) => stderr.push(...String(d).split("\n").filter(Boolean)));
+  const alive = () => {
+    if (edge.exitCode !== null) throw new Error(`the browser exited (code ${edge.exitCode})${stderr.length ? `:\n  ${stderr.slice(-10).join("\n  ")}` : ""}`);
+  };
+  let page = null;
   try {
     // The browser writes its DevTools port into the profile.
     const portFile = join(profile, "DevToolsActivePort");
     const until = Date.now() + 30_000;
     while (!existsSync(portFile) || !readFileSync(portFile, "utf8").includes("\n")) {
+      alive();
       if (Date.now() > until) throw new Error("the browser did not open its DevTools port");
       await sleep(200);
     }
     const [dtPort, browserPath] = readFileSync(portFile, "utf8").trim().split("\n");
     let pageUrl = "";
     for (let i = 0; i < 50 && !pageUrl; i++) {
-      const list = await (await fetch(`http://127.0.0.1:${dtPort}/json/list`)).json();
+      alive();
+      const list = await (await fetch(`http://127.0.0.1:${dtPort}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
       pageUrl = list.find((t) => t.type === "page" && t.url.includes("gpu-selftest"))?.webSocketDebuggerUrl ?? "";
       if (!pageUrl) await sleep(200);
     }
     if (!pageUrl) throw new Error("the self-test page did not open");
-    const page = devtools(pageUrl);
+    page = devtools(pageUrl);
     await page.open;
     await page.send("Runtime.enable");
     const until2 = Date.now() + timeoutMs;
     let out = null;
     while (Date.now() < until2) {
+      alive();
       const r = await page.send("Runtime.evaluate", { expression: "document.getElementById('gpu-selftest')?.textContent ?? null", returnByValue: true });
       if (r.result?.value) {
         out = r.result.value;
@@ -154,20 +205,21 @@ async function viaDevtools() {
       await sleep(1000);
     }
     const logs = consoleLines(page.events);
-    page.close();
     // Close the browser cleanly over its own endpoint.
     try {
       const b = devtools(`ws://127.0.0.1:${dtPort}${browserPath}`);
       await b.open;
-      await Promise.race([b.send("Browser.close"), sleep(3000)]);
+      await Promise.race([b.send("Browser.close", {}, 3000), sleep(3000)]);
       b.close();
     } catch {
       /* killed below */
     }
     return { out, logs };
   } finally {
-    await Promise.race([new Promise((r) => edge.once("exit", r)), sleep(5000)]);
+    page?.close();
+    if (edge.exitCode === null) await Promise.race([new Promise((r) => edge.once("exit", r)), sleep(5000)]);
     killTree(edge);
+    started.browser = null;
     await sleep(500);
     rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
   }
@@ -191,12 +243,11 @@ async function viaDumpDom() {
 
 const fmt = (h) => (h >= 1e9 ? `${(h / 1e9).toFixed(2)} GH/s` : h >= 1e6 ? `${(h / 1e6).toFixed(2)} MH/s` : h >= 1e3 ? `${(h / 1e3).toFixed(1)} kH/s` : `${Math.round(h)} H/s`);
 
-let server = null;
 let code = 1;
 try {
   if (!given) {
     console.log(`starting the dev server on port ${port}`);
-    server = spawn(process.execPath, ["scripts/dev.mjs", "-p", String(port)], { cwd: site, stdio: "ignore", detached: process.platform !== "win32" });
+    started.server = spawn(process.execPath, ["scripts/dev.mjs", "-p", String(port)], { cwd: site, stdio: "ignore", detached: process.platform !== "win32" });
   }
   await waitForServer();
   console.log(`${flag("dump-dom") ? "dump-dom" : "devtools"}: ${browser} ${gpuFlags.join(" ")}\n  ${target}`);
@@ -220,9 +271,6 @@ try {
 } catch (e) {
   console.error(e instanceof Error ? e.message : e);
 } finally {
-  if (server) {
-    killTree(server);
-    console.log("dev server stopped");
-  }
+  stopAll();
 }
 process.exit(code);
