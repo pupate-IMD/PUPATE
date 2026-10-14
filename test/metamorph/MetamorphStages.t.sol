@@ -43,6 +43,42 @@ contract MetamorphStagesTest is MetamorphFixture {
         assertEq(md.stageOf(id), 1, "the wallet, not only the books, decides");
     }
 
+    /// @dev Audit L-6, kept and pinned: until someone settles the seat, a seat that left the vault's wallet
+    /// and comes back turns the card back into a chrysalis. A stake follows the stage only when touched.
+    function test_aStageCanFallBackUntilTheSeatIsSettled() public {
+        uint256 id = _mintAs(miner);
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.prank(miner);
+        md.stake(ids);
+        vm.prank(address(cocoon));
+        collection.transferFrom(address(cocoon), other, 1376); // a fill, before anyone settles it
+        assertEq(md.stageOf(id), 1);
+        vm.prank(miner);
+        md.claim(ids); // the touch reweighs the stake to the butterfly's 2
+        (, uint8 weight,) = md.stakeOf(id);
+        assertEq(weight, 2);
+
+        vm.prank(other);
+        collection.transferFrom(other, address(cocoon), 1376); // and straight back
+        assertEq(md.stageOf(id), 0, "a chrysalis again: the books and the wallet both hold the seat");
+        (, weight,) = md.stakeOf(id);
+        assertEq(weight, 2, "the stake keeps the butterfly's weight until touched");
+        vm.prank(miner);
+        md.claim(ids);
+        (, weight,) = md.stakeOf(id);
+        assertEq(weight, 1, "the touch reweighs it to the chrysalis's 1");
+        assertEq(md.totalWeight(), 1);
+
+        // Settled while it is out, the round is over for good: back in the wallet, the seat is off the books.
+        vm.prank(address(cocoon));
+        collection.transferFrom(address(cocoon), other, 1376);
+        cocoon.settleSeat(1376);
+        vm.prank(other);
+        collection.transferFrom(other, address(cocoon), 1376);
+        assertEq(md.stageOf(id), 1, "a butterfly for good");
+    }
+
     function test_stageOfUnmintedReverts() public {
         vm.expectRevert(ERC721Lite.NotMinted.selector);
         md.stageOf(5);

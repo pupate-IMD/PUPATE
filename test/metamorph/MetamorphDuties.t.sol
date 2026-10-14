@@ -158,8 +158,8 @@ contract MetamorphDutiesTest is MetamorphFixture {
 
     function test_ethWaitingFromARefusedBuyMakesTheConversionDue() public {
         _mintMany(2); // 70,000 PUPATE, under twice the price
-        // Thin the IMD pool to 0.01% of its depth: a 5% move of its price then absorbs less ETH than the sale
-        // brings, so the buy leaves ETH waiting.
+        // Thin the IMD pool to 0.01% of its depth: a 1.5% move of its price then absorbs less ETH than the
+        // sale brings, so the buy leaves ETH waiting.
         router.addLiquidity(imdKey, _imdPosition(-int256(_imdLiquidity() * 9999 / 10_000)));
         vm.prank(keeper);
         md.convert();

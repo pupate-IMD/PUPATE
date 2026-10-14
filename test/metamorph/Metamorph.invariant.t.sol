@@ -107,6 +107,18 @@ contract MetamorphInvariantTest is MetamorphFixture {
         assertEq(address(md).balance, md.ethPot());
     }
 
+    /// @dev Audit I-9: the weight the accumulator divides by is exactly the weight staked. A card that is not
+    /// staked has no entry, so the sum runs over every card minted.
+    function invariant_totalWeightIsTheSumOfStakedWeights() public view {
+        uint256 n = handler.mintedCount();
+        uint256 sum;
+        for (uint256 i; i < n; i++) {
+            (, uint8 weight,) = md.stakeOf(handler.minted(i));
+            sum += weight;
+        }
+        assertEq(md.totalWeight(), sum);
+    }
+
     function invariant_stagesNeverGoBack() public view {
         uint256 n = handler.mintedCount();
         for (uint256 i; i < n; i++) {

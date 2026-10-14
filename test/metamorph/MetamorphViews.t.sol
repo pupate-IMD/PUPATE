@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {PoolManager} from "v4-core/src/PoolManager.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
+import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {IERC20Minimal} from "../../src/interfaces/IERC20Minimal.sol";
@@ -18,6 +20,9 @@ contract MetamorphViewsTest is MetamorphFixture {
         assertEq(md.BASE_PRICE(), 50_000 ether);
         assertEq(md.TARGET_INTERVAL(), 90);
         assertEq(md.ANCHOR_WINDOW(), 50);
+        assertEq(md.CONVERT_IMPACT_BPS(), 500);
+        assertEq(md.BUY_IMPACT_BPS(), 150);
+        assertEq(md.CONVERT_SPACING(), 5);
         assertEq(md.DOMAIN(), keccak256("Metamorph MD work v1"));
         assertEq(md.MIN_BITS(), 1);
         assertEq(md.name(), "Metamorph MD");
@@ -80,6 +85,25 @@ contract MetamorphViewsTest is MetamorphFixture {
         assertEq(md.mineableSeats().length, 2);
     }
 
+    /// @dev Audit L-4: a card keeps its seat in 32 bits, so the registry refuses a seat id that does not
+    /// fit. Noted and picked, such a seat would be stored cut, and the card would read another seat's stage.
+    function test_noteSeatRefusesSeatIdsAbove32Bits() public {
+        uint256 largest = type(uint32).max;
+        _giveSeat(largest + 1);
+        vm.expectRevert(MetamorphMD.SeatTooLarge.selector);
+        md.noteSeat(largest + 1);
+        assertFalse(md.noted(largest + 1));
+        // The largest id that fits is noted, picked and stored whole.
+        _giveSeat(largest);
+        md.noteSeat(largest);
+        _sell(1376);
+        vm.roll(block.number + 1);
+        uint256 id = _mintAs(miner);
+        (uint32 seat,,,,,,,) = md.cards(id);
+        assertEq(seat, largest);
+        assertEq(md.stageOf(id), 0, "a chrysalis: the vault holds that seat");
+    }
+
     function test_soldSeatLeavesTheMineableListButStaysNoted() public {
         _sell(1376);
         assertEq(md.notedSeats().length, 1);
@@ -121,7 +145,7 @@ contract MetamorphViewsTest is MetamorphFixture {
         vm.expectRevert(MetamorphMD.BadBits.selector);
         _deploy(201);
 
-        // The six facts the constructor checks about the two pool keys, each broken on its own.
+        // The facts the constructor checks about the two pool keys, each broken on its own.
         PoolKey memory launch = key;
         launch.hooks = IHooks(address(0)); // not the hook it was given
         vm.expectRevert(MetamorphMD.BadPoolKey.selector);
@@ -151,9 +175,38 @@ contract MetamorphViewsTest is MetamorphFixture {
         imdPool.hooks = IHooks(address(hook)); // the ETH/IMD pool is hookless
         vm.expectRevert(MetamorphMD.BadPoolKey.selector);
         _deployWithKeys(key, imdPool);
+
+        // Audit L-5: a launch key with another fee names another pool on the same hook. It is initialised
+        // here, so only the rule that the key be the hook's launch pool refuses it.
+        launch = key;
+        launch.fee = 12_500;
+        manager.initialize(launch, SQRT_PRICE_OPEN);
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(launch, imdKey);
+
+        // An ETH/IMD key whose pool was never initialised.
+        imdPool = imdKey;
+        imdPool.fee = 3000;
+        imdPool.tickSpacing = 60;
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(key, imdPool);
+
+        // A PoolManager on which the ETH/IMD pool exists and the launch pool does not: the launch pool can
+        // only be initialised by the manager its hook answers to.
+        IPoolManager elsewhere = IPoolManager(address(new PoolManager(address(this))));
+        elsewhere.initialize(imdKey, IMD_SQRT_PRICE);
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployOn(elsewhere, key, imdKey);
     }
 
     function _deployWithKeys(PoolKey memory pupateKey_, PoolKey memory imdKey_)
+        private
+        returns (MetamorphMD)
+    {
+        return _deployOn(manager, pupateKey_, imdKey_);
+    }
+
+    function _deployOn(IPoolManager manager_, PoolKey memory pupateKey_, PoolKey memory imdKey_)
         private
         returns (MetamorphMD)
     {
@@ -163,7 +216,7 @@ contract MetamorphViewsTest is MetamorphFixture {
             token,
             IERC20Minimal(address(imd)),
             IERC721Minimal(address(collection)),
-            manager,
+            manager_,
             pupateKey_,
             imdKey_,
             IMetamorphArt(address(art)),

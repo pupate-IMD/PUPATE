@@ -37,6 +37,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     error BadPoolKey();
     error NotASolution();
     error SeatNotHeld();
+    error SeatTooLarge();
     error Staked();
     error NotStaked();
     error NotCardOwner();
@@ -82,7 +83,13 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     uint256 public constant TARGET_INTERVAL = 90;
     uint256 public constant ANCHOR_WINDOW = 50;
     uint256 public constant STAKER_BPS = 7000;
+    /// @notice The launch leg's bound: a sale may move the launch pool's price by at most 5%.
     uint256 public constant CONVERT_IMPACT_BPS = 500;
+    /// @notice The IMD leg's bound: a buy may move the ETH/IMD pool's price by at most 1.5%. That pool is
+    /// hookless and untaxed, so a bound against the spot of the moment holds only when one conversion
+    /// cannot move the pool's ETH depth by more than the pool's 1% fee: 1.5% moves it by at most 0.76%, so
+    /// the fees a sandwich pays the pool's liquidity exceed what the conversion's move returns (audit M-1).
+    uint256 public constant BUY_IMPACT_BPS = 150;
     uint256 public constant CALLER_REWARD_BPS = 50;
     /// @notice Blocks between two conversions: Cocoon's `burnSpacing` default, mirrored.
     uint16 public constant CONVERT_SPACING = 5;
@@ -188,6 +195,12 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
                 || address(pupateKey_.hooks) != address(hook_) || !imdKey_.currency0.isAddressZero()
                 || Currency.unwrap(imdKey_.currency1) != address(imd_) || address(imdKey_.hooks) != address(0)
         ) revert BadPoolKey();
+        // Nobody can correct a key later, and a wrong one would lock the pot for good: the launch key must be
+        // the hook's own launch pool, and both pools must exist on the PoolManager given (audit L-5).
+        if (PoolId.unwrap(pupateKey_.toId()) != PoolId.unwrap(hook_.launchPool())) revert BadPoolKey();
+        (uint160 launchPrice,,,) = poolManager_.getSlot0(pupateKey_.toId());
+        (uint160 imdPrice,,,) = poolManager_.getSlot0(imdKey_.toId());
+        if (launchPrice == 0 || imdPrice == 0) revert BadPoolKey();
         COCOON = cocoon_;
         HOOK = hook_;
         PUPATE = pupate_;
@@ -271,8 +284,10 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         }
     }
 
-    /// @notice Tell the contract about a seat the vault holds. Anyone may; the page and the keeper do.
+    /// @notice Tell the contract about a seat the vault holds. Anyone may; the page and the keeper do. A card
+    /// stores its seat in 32 bits, so a seat id above 2^32 − 1 is refused (audit L-4).
     function noteSeat(uint256 seat) external {
+        if (seat > type(uint32).max) revert SeatTooLarge();
         (bool held,) = _vaultHolds(seat);
         if (!held) revert SeatNotHeld();
         if (noted[seat]) return;
@@ -500,9 +515,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
 
     // ------------------------------------------------------------------ the conversion
 
-    /// @notice Sell the pot's PUPATE for ETH, then the ETH for IMD, each under a 5% price-impact bound,
-    /// and credit the stakers. Anyone may call, once every `CONVERT_SPACING` blocks; the caller is paid
-    /// 0.5% of the IMD bought. What the bound leaves unsold stays for the next call.
+    /// @notice Sell the pot's PUPATE for ETH under a 5% price-impact bound, then the ETH for IMD under a
+    /// 1.5% one, and credit the stakers. Anyone may call, once every `CONVERT_SPACING` blocks; the caller is
+    /// paid 0.5% of the IMD bought. What the bounds leave unsold stays for the next call.
     function convert() external nonReentrant returns (uint256 imdOut) {
         return _convert(msg.sender);
     }
@@ -571,14 +586,19 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     }
 
     /// @dev The price limits of one conversion: the sale may lift the launch pool's sqrt price by at
-    /// most sqrt(1 + impact); the buy may lower the IMD pool's by at most sqrt(1 − impact).
+    /// most sqrt(1 + CONVERT_IMPACT); the buy may lower the IMD pool's by at most sqrt(1 − BUY_IMPACT).
+    /// Both are taken from the spot of the moment, which a caller can move first. The launch leg holds
+    /// because the hook taxes both sides of a trade. The IMD pool has no hook and no tax, so its leg holds
+    /// only because `BUY_IMPACT_BPS` keeps one conversion's move of the pool's ETH depth under the pool's
+    /// fee (audit M-1). Both factors round in the contract's favour: the square root down for the sale,
+    /// and up, by the + 1, for the buy.
     function _limits() private view returns (uint160 saleLimit, uint160 buyLimit) {
         (uint160 p1,,,) = POOL_MANAGER.getSlot0(pupateKey.toId());
         uint256 up = uint256(p1) * _sqrt((BPS + CONVERT_IMPACT_BPS) * BPS) / BPS;
         if (up >= TickMath.MAX_SQRT_PRICE) up = TickMath.MAX_SQRT_PRICE - 1;
         saleLimit = uint160(up);
         (uint160 p2,,,) = POOL_MANAGER.getSlot0(imdKey.toId());
-        uint256 down = uint256(p2) * (_sqrt((BPS - CONVERT_IMPACT_BPS) * BPS) + 1) / BPS;
+        uint256 down = uint256(p2) * (_sqrt((BPS - BUY_IMPACT_BPS) * BPS) + 1) / BPS;
         if (down <= TickMath.MIN_SQRT_PRICE) down = TickMath.MIN_SQRT_PRICE + 1;
         buyLimit = uint160(down);
     }
