@@ -10,7 +10,12 @@ contract MetamorphSizeTest is MetamorphFixture {
     }
 
     function test_noOwnerNoSetters() public {
-        // The ABI has no owner, setter, pause, upgrade or withdraw: these selectors do not exist.
+        // Each probe is the selector plus 64 zero bytes of arguments, so a call cannot fail merely because
+        // its arguments are missing: an unguarded owner(), setArt(address), setPrice(uint256), pause(),
+        // withdraw(uint256) or sweep(address) would succeed here and fail this test. A pass means that no
+        // such function exists, or that it refuses even with arguments. The authoritative list is
+        // `forge inspect MetamorphMD methodIdentifiers` (at this commit: 73 functions, 13 state-changing,
+        // none privileged).
         bytes4[6] memory selectors = [
             bytes4(keccak256("owner()")),
             bytes4(keccak256("setArt(address)")),
@@ -20,7 +25,7 @@ contract MetamorphSizeTest is MetamorphFixture {
             bytes4(keccak256("sweep(address)"))
         ];
         for (uint256 i; i < selectors.length; i++) {
-            (bool ok,) = address(md).call(abi.encodeWithSelector(selectors[i]));
+            (bool ok,) = address(md).call(abi.encodePacked(selectors[i], bytes32(0), bytes32(0)));
             assertFalse(ok);
         }
     }
