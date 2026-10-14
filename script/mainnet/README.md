@@ -64,5 +64,16 @@ After the art contract is deployed (its own script, next plan) and the review is
     COCOON=… HOOK=… PUPATE=… IMD=… COLLECTION=… POOL_MANAGER=… ART=<art> MIN_BITS=20 \
     forge script script/DeployMetamorph.s.sol --rpc-url "$MAINNET_RPC_URL" --broadcast --private-key "$KEEPER_PRIVATE_KEY" -vv
 
+The script refuses any `MIN_BITS` but 20. The constructor refuses pool keys that are not the hook's launch
+pool and an initialised hookless ETH/IMD pool charging at least 1% (`BadPoolKey`), and addresses that are
+not the vault's own: IMD, the collection and the PoolManager must be the ones Cocoon names, and the hook
+must pay Cocoon (`BadWiring`). Nothing can be corrected after the deployment.
+
 Then record `metamorph` and `metamorphArt` in `keeper/addresses.mainnet.json` and `site/lib/addresses.ts`,
-and call `noteSeat` for every seat the vault holds (the keeper does it on its next tick).
+and note the seats. `noteSeat(seat)` is permissionless, so anyone can call it. The keeper does not call
+it yet: the mine page and keeper plan adds it to the keeper's tick. To find the vault's seats,
+replay Cocoon's `SeatBought` and `SeatAdopted` events from `fromBlock` in `keeper/addresses.mainnet.json`,
+drop every seat whose last event is a `SeatSold`, and call `noteSeat` for each one the vault still holds
+(it reverts `SeatNotHeld` for any other). After a sale, call `forgetSeat(seat)`, also permissionless, so
+that mints stop walking a seat the vault no longer holds. A seat the vault buys again can be noted again,
+in its new round.

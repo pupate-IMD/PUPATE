@@ -71,6 +71,13 @@ timelock.
 | Operator | approve and revoke IMD pairings for held seats | move anything; sign anything else |
 | Anyone | flush, buy, settle, adopt, burn, run the auctions, release vesting, execute matured timelock operations | |
 
+Lowering the tax has a floor once Metamorph MD is live. Its conversion sells PUPATE in the launch pool
+under a 5% (500 bps) bound taken from the spot of the moment, which a caller can move first, and that leg
+resists a sandwich only because the hook taxes both sides of a trade. By the audit's first-order estimate
+(`docs/REVIEW.md`, Metamorph MD, I-5), a standing tax below about 1.2% on the mainnet pool, whose fee is
+1.25%, would let a sandwich of a conversion pay. Metamorph MD has no key, so its bound cannot follow the
+tax down: when proposing a cut, keep the tax above that or accept the exposure knowingly.
+
 ## The launch request (IMD policy v34, 2026-10-07)
 
 - The pool's LP fee tier must be **12500** (1.25%), tick spacing 60. The ETH-paired opening valuation is fixed by policy at 10 ETH on mainnet (20 ETH on Sepolia), up to 100 ETH.
