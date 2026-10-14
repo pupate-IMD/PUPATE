@@ -763,3 +763,99 @@ footer .serif { color: var(--ink); font-size: 16px; }
 @media (max-width: 480px) {
   .duty .s, .run-note { font-size: 12px; }
 }
+
+/* --- the top bar carries seven doors since "Your cards": a label keeps to one line, and between the phone
+   menu and a wide screen the doors sit closer and the wallet's button leaves out its balance */
+.nav a { white-space: nowrap; }
+@media (min-width: 861px) and (max-width: 1100px) {
+  .nav a { padding-inline: 6px; }
+  .topbar .right .btn .dim { display: none; }
+}
+
+/* --- your cards: the bench's drawer opened out. The cards are the loud thing; around them the hairlines,
+   the one figure in the serif, the marks as small labels, and a selection drawn with the panel's corner
+   ticks in jade. Labels lower case, as on the bench. */
+.cards-page { padding-block: 40px 0; }
+.ws-head { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 40px; align-items: end; }
+.ws-head > * { min-width: 0; }
+.ws-head h1 { font-size: clamp(32px, 4.4vw, 50px); line-height: 1.05; }
+.ws-head .chip { margin-top: 16px; }
+.ws-figure { padding: 16px 18px 14px; display: grid; gap: 6px; align-self: end; }
+.ws-figure .k { font-size: 12px; color: var(--dim); }
+.ws-figure .v { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.ws-figure .v .serif { font-size: 56px; line-height: 0.95; overflow-wrap: anywhere; }
+.ws-figure .unit { font-size: 16px; color: var(--dim); }
+.ws-connect { margin-top: 28px; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.ws-connect p { font-size: 14px; max-width: 52ch; }
+.ws-bar { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; margin-top: 28px; padding: 12px 0; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+.ws-bar .sel { display: flex; align-items: baseline; gap: 6px 14px; flex-wrap: wrap; margin-right: auto; font-size: 12px; color: var(--dim); }
+/* a button that cannot act is drawn as a hairline, the jade one too */
+.ws-bar .btn.primary:disabled { background: transparent; border-color: var(--hair); color: var(--faint); }
+.ws-note { margin-top: 10px; font-size: 12px; max-width: 72ch; }
+.ws-note.jade { color: var(--jade-ink); }
+.ws-note.alarm, .ws-empty.alarm { color: var(--alarm); }
+.ws-empty { margin-top: 18px; font-size: 13px; max-width: 64ch; }
+.ws-empty a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--hair); text-underline-offset: 3px; }
+.ws-empty a:hover { color: var(--jade-ink); }
+
+.tiles { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 22px 16px; }
+.tile { position: relative; min-width: 0; display: grid; gap: 4px; align-content: start; }
+.tile > button, .tile > a, .tile > div { display: grid; gap: 8px; width: 100%; text-align: left; color: inherit; }
+.tile-img { position: relative; display: block; aspect-ratio: 1; border: 1px solid var(--hair); background: var(--paper-2); }
+.tile-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.tile-wait { display: grid; place-items: center; width: 100%; height: 100%; aspect-ratio: 1; font-size: 11px; color: var(--faint); background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--hair) 45%, transparent) 6px 7px); }
+.tile > button:hover .tile-img, .tile > a:hover .tile-img { border-color: var(--ink); }
+.tile.on .tile-img { border-color: var(--jade); }
+.tile.on .tile-img::before, .tile.on .tile-img::after { content: ""; position: absolute; width: 14px; height: 14px; pointer-events: none; }
+.tile.on .tile-img::before { top: -5px; left: -5px; border-top: 2px solid var(--jade); border-left: 2px solid var(--jade); }
+.tile.on .tile-img::after { bottom: -5px; right: -5px; border-bottom: 2px solid var(--jade); border-right: 2px solid var(--jade); }
+.tile-cap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 11px; color: var(--dim); }
+.tile-id { font-size: 20px; line-height: 1; color: var(--ink); }
+.tile > a:hover .tile-id { color: var(--jade-ink); }
+.tile-stage { color: var(--ink); }
+.tile-seat { flex-basis: 100%; color: var(--faint); }
+.tile.on .tile-id { color: var(--jade-ink); }
+.tile-open { justify-self: start; font-size: 11px; color: var(--dim); text-decoration: underline; text-decoration-color: var(--hair); text-underline-offset: 3px; }
+.tile-open:hover { color: var(--jade-ink); }
+.mark { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid var(--hair); font-size: 10px; letter-spacing: var(--track); text-transform: uppercase; }
+.mark.gilt { color: var(--gold-ink); border-color: color-mix(in srgb, var(--gold) 55%, transparent); }
+.mark.staked { color: var(--jade-ink); border-color: color-mix(in srgb, var(--jade) 55%, transparent); }
+
+.gallery, .leaders { margin-top: 48px; padding-top: 28px; border-top: 1px solid var(--hair); }
+.sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; }
+.sec-head h2 { font-size: 30px; line-height: 1.1; }
+.sec-head .dim { font-size: 12px; }
+.g-pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 24px; font-size: 12px; }
+.leaders table { min-width: 0; max-width: 640px; margin-top: 12px; }
+.leaders th, .leaders td { padding: 8px 12px 8px 0; font-size: 12px; }
+.leaders tr.me td { color: var(--jade-ink); background: color-mix(in srgb, var(--jade) 8%, transparent); }
+.leaders tr.gap td { color: var(--faint); padding-block: 2px; }
+.leaders .you { height: 18px; margin-left: 8px; }
+
+/* --- one card's page */
+.card-view { padding-block: 32px 0; }
+.cv-back { font-size: 12px; color: var(--dim); }
+.cv-back:hover { color: var(--jade-ink); }
+.cv-grid { display: grid; grid-template-columns: minmax(0, 520px) minmax(0, 1fr); gap: 40px; margin-top: 18px; align-items: start; }
+.cv-plate { margin: 0; }
+.cv-plate img, .cv-plate .tile-wait { display: block; width: 100%; height: auto; aspect-ratio: 1; border: 1px solid var(--hair); }
+.cv-facts { display: grid; gap: 12px; align-content: start; }
+.cv-facts h1 { font-size: clamp(30px, 4vw, 44px); line-height: 1.05; }
+.cv-marks { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.cv-desc { font-size: 13px; max-width: 56ch; }
+.cv-facts .rows { display: grid; }
+.cv-h { font-size: 22px; margin-top: 8px; }
+.cv-attrs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0; }
+.cv-attrs div { border: 1px solid var(--hair); padding: 8px 10px; min-width: 0; }
+.cv-attrs dt { font-size: 10px; text-transform: uppercase; letter-spacing: var(--track); color: var(--dim); }
+.cv-attrs dd { margin: 2px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+
+@media (max-width: 860px) {
+  .ws-head, .cv-grid { grid-template-columns: 1fr; gap: 20px; }
+}
+@media (max-width: 520px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
+  .ws-figure .v .serif { font-size: 44px; }
+  .ws-bar .sel { flex-basis: 100%; margin-right: 0; }
+  .ws-bar .btn { flex: 1 1 0; padding: 0 8px; }
+}

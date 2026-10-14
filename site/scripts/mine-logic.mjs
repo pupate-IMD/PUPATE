@@ -5,7 +5,11 @@
 // 8545 with Metamorph MD at one bit), where a real mint is mined and sent from anvil's account #2: the job
 // against the contract's views, the folded word against workHash, an eth_call of mint, the padded limit,
 // the receipt, the card's image, a race in one block, the anchor's window. Without the stack that part
-// says SKIP. The pending-IMD formula and the Transfer folding join as they are written.
+// says SKIP. Then the workspace (lib/metamorph/cards.ts): the Transfer folding (a card sent away and back is
+// the wallet's once), the pending-IMD formula against a model of the contract's staking (two stakers, one
+// credit), the image cache (its key, one read per (id, stage, gilt), storage missing, refused or full), the
+// leaderboard, the buttons' ids; and on the stack, anvil's account #5 mints two cards, sends one away and
+// back, stakes the other, and after a credit to the stakers unstakes and claims exactly the figure.
 //
 //   cd site && npm run mine-check        (or: node scripts/mine-logic.mjs)
 //
@@ -34,6 +38,7 @@ import {
   erc20Abi,
   getAddress,
   http,
+  parseAbi,
   isAddressEqual,
   keccak256,
   maxUint256,
@@ -603,6 +608,267 @@ check(
   );
 }
 
+// ------------------------------------------------------------------ the workspace (Task 3)
+
+const C = await import("../lib/metamorph/cards.ts");
+
+console.log("\n== the workspace (lib/metamorph/cards.ts)");
+
+// The Transfer folding: a card is the wallet's when its last transfer went to it, however the logs come.
+{
+  const ZERO = "0x0000000000000000000000000000000000000000";
+  const t = (id, from, to, block, logIndex) => ({ id: BigInt(id), from, to, blockNumber: BigInt(block), logIndex });
+  const logs = [
+    t(1, ZERO, ME, 10, 0), // minted to ME
+    t(2, ZERO, THEM, 11, 0), // minted to THEM
+    t(1, ME, THEM, 12, 3), // ME sends #1 away
+    t(3, ZERO, ME, 13, 0),
+    t(1, THEM, ME, 13, 1), // and #1 comes back
+    t(4, ZERO, ME, 14, 0), // #4 goes back and forth in one block and ends with THEM
+    t(4, ME, THEM, 14, 2),
+    t(4, THEM, ME, 14, 5),
+    t(4, ME, THEM, 14, 7),
+    t(5, ZERO, ME, 15, 0),
+    t(5, ME, ME, 16, 0), // a transfer to oneself keeps it
+  ];
+  const mine = C.heldIds(C.foldTransfers(logs, ME));
+  const theirs = C.heldIds(C.foldTransfers(logs, THEM));
+  const shuffled = [...logs, ...logs.slice(0, 5)].sort(() => Math.random() - 0.5);
+  const anyOrder = C.heldIds(C.foldTransfers(shuffled, ME));
+  // Two reads that overlap, as the poll re-reads its last blocks: the second folds onto the first.
+  const inTwo = C.heldIds(C.foldTransfers(logs.slice(4), ME, C.foldTransfers(logs.slice(0, 6), ME)));
+  check(
+    "foldTransfers: minted, sent away and sent back is the wallet's once; two wallets; any order, logs twice, in two overlapping reads",
+    mine.join() === "1,3,5" && theirs.join() === "2,4" && anyOrder.join() === "1,3,5" && inTwo.join() === "1,3,5",
+    `ME ${mine.join(",")} · THEM ${theirs.join(",")}`,
+  );
+}
+
+// The pending-IMD formula against a model of the contract's staking (MetamorphMD.sol: stake, _credit,
+// _settle): ME stakes a chrysalis, THEM a butterfly and a chrysalis; one credit (a conversion); ME stakes
+// another card after it; then ME's first card is settled, as unstake and claim(ids) do.
+{
+  const ACC = 10n ** 18n;
+  const s = { acc: 0n, total: 0n, stakes: new Map(), pending: new Map() };
+  const stake = (id, who, weight) => {
+    s.stakes.set(id, { who, weight, debt: BigInt(weight) * s.acc });
+    s.total += BigInt(weight);
+  };
+  const credit = (imd) => (s.acc += (imd * ACC) / s.total);
+  const settle = (id) => {
+    const x = s.stakes.get(id);
+    s.pending.set(x.who, (s.pending.get(x.who) ?? 0n) + (BigInt(x.weight) * s.acc - x.debt) / ACC);
+    x.debt = BigInt(x.weight) * s.acc;
+  };
+  const figure = (who) =>
+    C.earnedNotClaimed(
+      s.pending.get(who) ?? 0n,
+      s.acc,
+      [...s.stakes.values()].filter((x) => x.who === who).map((x) => ({ staked: true, weight: x.weight, debt: x.debt })),
+    );
+  stake(1, ME, 1);
+  stake(2, THEM, 2);
+  stake(3, THEM, 1);
+  const X = (35_000n * E18) / 7n + 12_345n;
+  credit(X);
+  const me1 = figure(ME);
+  const them1 = figure(THEM);
+  stake(4, ME, 1);
+  const me2 = figure(ME);
+  settle(1);
+  const booked = s.pending.get(ME);
+  const me3 = figure(ME);
+  check(
+    "the pending-IMD formula: pendingIMD + (weight × accIMDPerWeight − debt) / 1e18 per staked card; two stakers, one credit, the butterfly earns double",
+    me1 === s.acc / ACC &&
+      them1 === (2n * s.acc) / ACC + s.acc / ACC &&
+      them1 - 3n * me1 <= 1n &&
+      me1 + them1 <= X &&
+      X - (me1 + them1) < 3n &&
+      me2 === me1 &&
+      booked === me1 &&
+      me3 === me1 &&
+      C.earnedNotClaimed(5n, s.acc, [{ staked: false, weight: 0, debt: 0n }]) === 5n,
+    `credit ${X}: ME ${me1}, THEM ${them1}`,
+  );
+  check(
+    "imd4: four decimals, rounded down, thousands separated",
+    C.imd4(0n) === "0.0000" && C.imd4(123_456_789_012_345_678n) === "0.1234" && C.imd4(1234n * E18 + 5n * 10n ** 17n) === "1,234.5000" && C.imd4(99_999n * 10n ** 13n) === "0.9999",
+  );
+}
+
+// The image cache: the key, one tokenURI read per (id, stage, gilt), the JSON's own stage, other deployments'
+// entries, and storage missing, refused or full.
+class FakeStorage {
+  constructor(capacity = Infinity) {
+    this.map = new Map();
+    this.capacity = capacity;
+    this.fail = false;
+  }
+  get length() {
+    return this.map.size;
+  }
+  key(i) {
+    return [...this.map.keys()][i] ?? null;
+  }
+  getItem(k) {
+    if (this.fail) throw new Error("SecurityError");
+    return this.map.has(k) ? this.map.get(k) : null;
+  }
+  setItem(k, v) {
+    if (this.fail) throw new Error("SecurityError");
+    let used = k.length + String(v).length;
+    for (const [kk, vv] of this.map) if (kk !== k) used += kk.length + vv.length;
+    if (used > this.capacity) throw Object.assign(new Error("the quota has been exceeded"), { name: "QuotaExceededError" });
+    this.map.set(k, String(v));
+  }
+  removeItem(k) {
+    this.map.delete(k);
+  }
+}
+const useStorage = (value) => Object.defineProperty(globalThis, "localStorage", { value, configurable: true, writable: true });
+{
+  check("imageKey: metamorph:img:<id>:<stage>:<gilt>", C.imageKey(12, 1, true) === "metamorph:img:12:1:true" && C.imageKey(7n, 0, false) === "metamorph:img:7:0:false");
+  const svg = (s) => `data:image/svg+xml;base64,${Buffer.from(s).toString("base64")}`;
+  const uriOf = (id, stage, gilt) =>
+    `data:application/json;base64,${Buffer.from(
+      JSON.stringify({
+        name: `Metamorph.md #${id}`,
+        description: "Seat identity.md #1, edition 1 of 303 · ü",
+        image: svg(`<svg id="c${id}-${stage}"/>`),
+        attributes: [
+          { trait_type: "Seat", value: "1" },
+          { trait_type: "Round", value: 1 },
+          { trait_type: "Stage", value: stage ? "Butterfly" : "Chrysalis" },
+          { trait_type: "Gilt", value: gilt ? "Yes" : "No" },
+        ],
+      }),
+    ).toString("base64")}`;
+  const onChain = new Map();
+  let reads = 0;
+  let now = 0;
+  let most = 0;
+  const fake = {
+    readContract: async ({ functionName, args }) => {
+      if (functionName !== "tokenURI") throw new Error(`unexpected ${functionName}`);
+      reads++;
+      most = Math.max(most, ++now);
+      await new Promise((r) => setTimeout(r, 5));
+      now--;
+      const x = onChain.get(Number(args[0])) ?? { stage: 0, gilt: false };
+      return uriOf(Number(args[0]), x.stage, x.gilt);
+    },
+  };
+  const A = { chainId: 31337, metamorph: "0x00000000000000000000000000000000000000aa" };
+  const B = { chainId: 31337, metamorph: "0x00000000000000000000000000000000000000bb" };
+  const store = new FakeStorage();
+  useStorage(store);
+  onChain.set(12, { stage: 0, gilt: true });
+  const [i1, i2] = await Promise.all([C.tokenImage(fake, A, 12, 0, true), C.tokenImage(fake, A, 12, 0, true)]);
+  const i3 = await C.tokenImage(fake, A, 12, 0, true);
+  const kept = store.getItem("metamorph:img:12:0:true");
+  check(
+    "tokenImage: one tokenURI read for two tiles at once and none after; kept in localStorage under the key, tagged with the token",
+    reads === 1 && i1 === i2 && i1 === i3 && i1 === svg('<svg id="c12-0"/>') && kept === `31337:${A.metamorph} ${i1}`,
+    `${reads} read(s)`,
+  );
+  onChain.set(12, { stage: 1, gilt: true });
+  const i4 = await C.tokenImage(fake, A, 12, 1, true);
+  onChain.set(13, { stage: 1, gilt: false });
+  const i5 = await C.tokenImage(fake, A, 13, 0, false);
+  check(
+    "an emerged card is read again under its new stage; a card that emerged before its read is kept under the stage its JSON states",
+    reads === 3 && i4 === svg('<svg id="c12-1"/>') && !!store.getItem("metamorph:img:12:1:true") && i5 === svg('<svg id="c13-1"/>') && !!store.getItem("metamorph:img:13:1:false") && !store.getItem("metamorph:img:13:0:false"),
+  );
+  store.setItem("metamorph:img:99:0:false", `31337:${B.metamorph} ${svg("<svg/>")}`);
+  check(
+    "storage serves a later visit for its own token only: another deployment's card under the same key is not shown",
+    C.cachedImage(B, 12, 0, true) === null && C.cachedImage(A, 99, 0, false) === null && C.cachedImage(B, 99, 0, false) === svg("<svg/>"),
+  );
+  // Ten tiles at once: four reads at a time.
+  reads = 0;
+  most = 0;
+  const ten = await Promise.all(Array.from({ length: 10 }, (_, k) => C.tokenImage(fake, A, 200 + k, 0, false)));
+  check("tokenImage reads four tokenURIs at a time, and every tile gets its image", reads === 10 && most === 4 && ten.every((x, k) => x === svg(`<svg id="c${200 + k}-0"/>`)), `at most ${most} at once`);
+  // Storage refused on every access, a getter that throws, no storage at all: the images still come.
+  store.fail = true;
+  const r1 = await C.tokenImage(fake, A, 300, 0, false);
+  Object.defineProperty(globalThis, "localStorage", {
+    get() {
+      throw new Error("SecurityError");
+    },
+    configurable: true,
+  });
+  const r2 = await C.tokenImage(fake, A, 301, 0, false);
+  useStorage(undefined);
+  const r3 = await C.tokenImage(fake, A, 302, 0, false);
+  check("without storage (refused, throwing, absent) the image is read and shown all the same", r1 === svg('<svg id="c300-0"/>') && r2 === svg('<svg id="c301-0"/>') && r3 === svg('<svg id="c302-0"/>'));
+  // A full storage makes room: another deployment's images go first, then half of this token's.
+  const entry = (id) => `metamorph:img:${id}:0:false`.length + `31337:${A.metamorph} `.length + svg(`<svg id="c${id}-0"/>`).length;
+  const full = new FakeStorage(entry(400) * 3 + "pupate-theme".length + "dark".length);
+  useStorage(full);
+  full.setItem("metamorph:img:401:0:false", `31337:${B.metamorph} ${svg('<svg id="c401-0"/>')}`);
+  full.setItem("pupate-theme", "dark");
+  for (const id of [402, 403]) await C.tokenImage(fake, A, id, 0, false);
+  const before = [...full.map.keys()].join();
+  await C.tokenImage(fake, A, 404, 0, false);
+  const after = [...full.map.keys()];
+  await C.tokenImage(fake, A, 405, 0, false);
+  const later = [...full.map.keys()];
+  check(
+    "a full storage makes room for a new image: another deployment's images first, then half of this token's; the site's other keys stay",
+    before.includes("401") &&
+      after.join() === "pupate-theme,metamorph:img:402:0:false,metamorph:img:403:0:false,metamorph:img:404:0:false" &&
+      later.join() === "pupate-theme,metamorph:img:404:0:false,metamorph:img:405:0:false",
+    later.join(", "),
+  );
+  useStorage(undefined);
+  const j = C.cardJSON(uriOf(7, 1, true));
+  check(
+    "cardJSON: the name, the image, the attributes as text, the stage and gilt the JSON states; no image, no card",
+    j?.name === "Metamorph.md #7" &&
+      j.description.endsWith("ü") &&
+      j.stage === 1 &&
+      j.gilt === true &&
+      j.attributes.find((x) => x.trait === "Round")?.value === "1" &&
+      C.cardJSON(`data:application/json;base64,${Buffer.from('{"name":"x"}').toString("base64")}`) === null &&
+      C.cardJSON("https://example.com/7.json") === null,
+  );
+  check("the stage words are the page's: in the cocoon, emerged", C.stageWord(0) === "in the cocoon" && C.stageWord(1) === "emerged");
+}
+
+// The leaderboard, the buttons' ids, what a claim pays.
+{
+  const X3 = "0x00000000000000000000000000000000000000c3";
+  const rows = [
+    { id: 1, miner: ME, gilt: false },
+    { id: 2, miner: THEM, gilt: true },
+    { id: 3, miner: getAddress(THEM), gilt: false },
+    { id: 4, miner: X3, gilt: true },
+    { id: 5, miner: ME, gilt: true },
+  ];
+  const lead = C.leaderboard(rows);
+  check(
+    "leaderboard: miners by cards, gilt counted, the newest first on equal counts, one row per address whatever its case",
+    lead.length === 3 && isAddressEqual(lead[0].miner, ME) && lead[0].cards === 2 && lead[0].gilt === 1 && isAddressEqual(lead[1].miner, THEM) && lead[1].cards === 2 && lead[1].newest === 3 && lead[2].cards === 1,
+    lead.map((l) => `${l.miner.slice(0, 6)} ${l.cards}/${l.gilt}`).join(", "),
+  );
+  const cards = [
+    { id: 1, staked: true, weight: 1, debt: 0n },
+    { id: 2, staked: false, weight: 0, debt: 0n },
+    { id: 3, staked: true, weight: 2, debt: E18 },
+  ];
+  const some = C.actionIds(cards, new Set([1, 2]));
+  const none = C.actionIds(cards, new Set());
+  const read = { cards, pending: 7n, accIMDPerWeight: E18 };
+  check(
+    "the buttons: Stake sends the selected unstaked cards, Unstake and Claim IMD the selected staked ones; nothing selected, claim([]) pays what is booked",
+    some.stake.join() === "2" && some.unstake.join() === "1" && some.claim.join() === "1" && none.claim.length === 0 && C.claimable(read, []) === 7n && C.claimable(read, [1, 3]) === 7n + 1n + 1n,
+  );
+  const paid = C.claimedIn({ logs: [logOf(metamorphAbi, COCOON, "Claimed", { staker: ME, imd: 1n }), logOf(metamorphAbi, MD, "Claimed", { staker: ME, imd: 42n })] }, { metamorph: MD }, ME);
+  check("claimedIn reads the token's Claimed for this wallet only", paid === 42n && C.claimedIn({ logs: [] }, { metamorph: MD }, ME) === null);
+}
+
 // ------------------------------------------------------------------ against the local stack
 
 // The CPU worker's own 192 bytes and search (lib/miner/miner.worker.ts, run()), copied line for line: a Web
@@ -666,6 +932,11 @@ if (!(await stackUp())) {
     await onTheStack();
   } catch (e) {
     check("the local stack's checks ran to the end", false, e instanceof Error ? e.message.split("\n")[0] : String(e));
+  }
+  try {
+    await cardsOnTheStack();
+  } catch (e) {
+    check("the workspace's checks on the stack ran to the end", false, e instanceof Error ? e.message.split("\n")[0] : String(e));
   }
 }
 
@@ -890,6 +1161,162 @@ async function onTheStack() {
     `ages ${at39.block - job7.anchor} and ${at40.block - job7.anchor}`,
   );
   check("mineableSeats lists the noted seat", (await J.mineableSeats(pub, a)).join() === String(seat));
+}
+
+// The workspace on the stack: anvil's account #5 mints two cards the way the page does, sends one to #6 and
+// back, stakes the other; a conversion called by #7 credits the stakers; then unstake and claim([]) pay
+// exactly the figure the page shows. A run starts by unstaking and claiming whatever an earlier run left.
+async function cardsOnTheStack() {
+  console.log(`\n== the workspace against the local stack (${RPC})`);
+  const a = JSON.parse(readFileSync(LOCAL, "utf8"));
+  const pub = createPublicClient({ chain: foundry, transport: http(RPC), pollingInterval: 200 });
+  const WALLET = getAddress("0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc");
+  const OTHER = getAddress("0x976EA74026E726554dB657fA54763abd0C3a0aa9");
+  const CALLER = getAddress("0x14dC79964da2C08b23698B3D3cc7Ca32193d9955");
+  const FUNDER = getAddress("0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f");
+  const MOVE = parseAbi(["function transferFrom(address from, address to, uint256 id)"]);
+  const walletOf = (account) => createWalletClient({ chain: foundry, transport: http(RPC), account });
+  const writer = (account) => (call) => walletOf(account).writeContract(call);
+  const mined = async (hashPromise) => {
+    const r = await pub.waitForTransactionReceipt({ hash: await hashPromise });
+    if (r.status !== "success") throw new Error(`a transaction reverted: ${r.transactionHash}`);
+    return r;
+  };
+  const md = { address: a.metamorph, abi: metamorphAbi };
+  const view = (functionName, args) => pub.readContract({ ...md, functionName, args });
+  const imdOf = (who) => pub.readContract({ address: a.imd, abi: erc20Abi, functionName: "balanceOf", args: [who] });
+  const got = (read, id) => read.cards.filter((c) => c.id === id);
+
+  const left = await C.walletCards(pub, a, WALLET);
+  const stuck = left.cards.filter((c) => c.staked).map((c) => c.id);
+  if (stuck.length) await mined(C.sendCards(writer(WALLET), a, "unstake", stuck));
+  if ((await view("pendingIMD", [WALLET])) > 0n) await mined(C.sendCards(writer(WALLET), a, "claim", []));
+
+  // Two cards, mined and sent as the page sends them.
+  await mined(walletOf(FUNDER).writeContract({ address: a.token, abi: erc20Abi, functionName: "transfer", args: [WALLET, 1_000_000n * E18] }));
+  const ids = [];
+  for (let k = 0; k < 2; k++) {
+    const bits = await view("bits");
+    if (bits > 12) {
+      await rpc("evm_increaseTime", [360 * Math.ceil((bits - 1) / 2) + 1]);
+      await rpc("evm_mine");
+    }
+    const job = await J.liveJob(pub, a, WALLET, 100 + k);
+    const hit = workerSearch(job);
+    const prep = await M.prepareMint(pub, a, { wallet: WALLET, job, nonce: BigInt(hit.nonce), work: hit.digest, write: writer(WALLET) });
+    if (!prep.ok) throw new Error(`the mint was refused: ${prep.why}`);
+    const out = M.parseMintReceipt(await mined(M.sendMint(writer(WALLET), a, job.anchor, BigInt(hit.nonce), prep.gas)), a, WALLET);
+    if (!out.minted) throw new Error("the mint read as a lost race");
+    ids.push(Number(out.minted.id));
+  }
+  const [A, B] = ids;
+  const read1 = await C.walletCards(pub, a, WALLET);
+  const balance = Number(await view("balanceOf", [WALLET]));
+  check(
+    "walletCards: the two new cards, each once, in the cocoon and not staked, mined by the wallet; as many cards as balanceOf",
+    read1.cards.length === balance &&
+      [A, B].every((id) => {
+        const c = got(read1, id);
+        return c.length === 1 && c[0].stage === 0 && !c[0].staked && isAddressEqual(c[0].miner, WALLET) && c[0].seat > 0 && c[0].paid > 0n;
+      }),
+    `#${A}, #${B}; ${read1.cards.length} card(s) in the wallet`,
+  );
+
+  // B sent to #6 and back: the logs are read on from the last block seen.
+  await mined(walletOf(WALLET).writeContract({ address: a.metamorph, abi: MOVE, functionName: "transferFrom", args: [WALLET, OTHER, BigInt(B)] }));
+  const away = await C.walletCards(pub, a, WALLET);
+  const there = await C.walletCards(pub, a, OTHER);
+  await mined(walletOf(OTHER).writeContract({ address: a.metamorph, abi: MOVE, functionName: "transferFrom", args: [OTHER, WALLET, BigInt(B)] }));
+  const back = await C.walletCards(pub, a, WALLET);
+  const thereAfter = await C.walletCards(pub, a, OTHER);
+  check(
+    "a card sent away and back: gone from the wallet and held by the other, then the wallet's once again with its stage, and the other's no more",
+    got(away, B).length === 0 && got(there, B).length === 1 && got(back, B).length === 1 && got(back, B)[0].stage === 0 && back.cards.length === balance && got(thereAfter, B).length === 0,
+  );
+
+  // Stake A.
+  await mined(C.sendCards(writer(WALLET), a, "stake", [A]));
+  const staked = await C.walletCards(pub, a, WALLET);
+  const sa = got(staked, A)[0];
+  check("stake([A]): A is marked staked with weight 1 (a chrysalis), B is not", !!sa && sa.staked && sa.weight === 1 && !got(staked, B)[0].staked);
+
+  // The images, read once per (id, stage, gilt) through tokenURI.
+  let uris = 0;
+  const counting = {
+    readContract: (x) => {
+      if (x.functionName === "tokenURI") uris++;
+      return pub.readContract(x);
+    },
+  };
+  const img1 = await C.tokenImage(counting, a, A, sa.stage, sa.gilt);
+  const img2 = await C.tokenImage(counting, a, A, sa.stage, sa.gilt);
+  const page = await C.tokenCard(pub, a, A);
+  check(
+    "tokenImage on the stack: the card's SVG data URI from tokenURI, read once; tokenCard gives its JSON's attributes",
+    !!img1 && img1.startsWith("data:image/svg+xml;base64,") && img1 === img2 && uris === 1 && page?.image === img1 && page.stage === 0 && page.attributes.some((x) => x.trait === "Seat"),
+    `${img1?.length} characters, ${page?.attributes.length} attributes`,
+  );
+
+  // The gallery and the leaderboard.
+  const total = Number(await view("totalMinted"));
+  const all = await C.mintedCards(pub, a);
+  const me = C.leaderboard(all).find((l) => isAddressEqual(l.miner, WALLET));
+  check(
+    "mintedCards: every Minted log, newest first, the two new cards as minted by the wallet; the leaderboard counts them",
+    all.length === total && all[0].id === total && all.every((r, i) => i === 0 || all[i - 1].id > r.id) && [A, B].every((id) => all.some((r) => r.id === id && isAddressEqual(r.miner, WALLET))) && !!me && me.cards >= 2 && me.newest >= B,
+    `${all.length} minted`,
+  );
+  const facts = await C.cardFacts(pub, a, A);
+  const stages = await C.stagesOf(pub, a, [A, B]);
+  check(
+    "cardFacts: the card, its stage, its stake and its owner; an id not minted is null; stagesOf reads a gallery page's stages",
+    !!facts && facts.id === A && facts.staked && isAddressEqual(facts.owner, WALLET) && (await C.cardFacts(pub, a, total + 1)) === null && stages.get(A) === 0 && stages.get(B) === 0,
+  );
+
+  // A credit to the stakers: the pot holds 70% of each mint price; convert() (anyone, every CONVERT_SPACING
+  // blocks) sells it for IMD and spreads it over the staked weight.
+  const spacing = BigInt(await view("CONVERT_SPACING"));
+  const last = await view("lastConvertBlock");
+  const head = await pub.getBlockNumber({ cacheTime: 0 });
+  if (head < last + spacing) await rpc("anvil_mine", [`0x${(last + spacing - head).toString(16)}`]);
+  const accBefore = await view("accIMDPerWeight");
+  let why = "";
+  try {
+    await mined(walletOf(CALLER).writeContract({ ...md, functionName: "convert" }));
+    if ((await view("accIMDPerWeight")) <= accBefore) why = "the conversion credited nothing to the stakers";
+  } catch (e) {
+    why = `convert() was refused: ${M.revertName(e) ?? M.errorText(e)}`;
+  }
+  if (!why) {
+    const read2 = await C.walletCards(pub, a, WALLET);
+    const figure = await C.pendingIMD(pub, a, WALLET, read2.cards.map((c) => c.id));
+    const [pending, acc, stakeA] = await Promise.all([view("pendingIMD", [WALLET]), view("accIMDPerWeight"), view("stakeOf", [BigInt(A)])]);
+    const direct = pending + (BigInt(stakeA[1]) * acc - stakeA[2]) / E18;
+    check(
+      "after one credit: IMD earned, not claimed = pendingIMD + (weight × accIMDPerWeight − debt) / 1e18, from pendingIMD() and walletCards alike",
+      figure > 0n && figure === direct && read2.earned === figure,
+      `${C.imd4(figure)} IMD`,
+    );
+    await mined(C.sendCards(writer(WALLET), a, "unstake", [A]));
+    const booked = await view("pendingIMD", [WALLET]);
+    const read3 = await C.walletCards(pub, a, WALLET);
+    const imdBefore = await imdOf(WALLET);
+    const receipt = await mined(C.sendCards(writer(WALLET), a, "claim", []));
+    const paid = C.claimedIn(receipt, a, WALLET);
+    const imdAfter = await imdOf(WALLET);
+    const read4 = await C.walletCards(pub, a, WALLET);
+    check(
+      "unstake([A]) books exactly the figure; claim([]) pays it (the Claimed log and the IMD balance agree), and the figure is back to zero",
+      booked === figure && read3.earned === figure && !got(read3, A)[0].staked && paid === figure && imdAfter - imdBefore === figure && read4.earned === 0n,
+      `paid ${C.imd4(paid ?? 0n)} IMD`,
+    );
+  } else {
+    skip("the figure after a credit, and a claim that pays it", why);
+    await mined(C.sendCards(writer(WALLET), a, "unstake", [A]));
+    const receipt = await mined(C.sendCards(writer(WALLET), a, "claim", []));
+    const read3 = await C.walletCards(pub, a, WALLET);
+    check("unstake([A]) and claim([]) go through without a credit", !got(read3, A)[0].staked && C.claimedIn(receipt, a, WALLET) !== null);
+  }
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");

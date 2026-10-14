@@ -11,6 +11,7 @@ const PAGES = [
   { href: "/how/", label: "How it works" },
   { href: "/work/", label: "Work" },
   { href: "/mine/", label: "Mine" },
+  { href: "/cards/", label: "Your cards" },
   { href: "/run/", label: "Run" },
   { href: "/inside/", label: "Under the hood" },
 ];
@@ -23,6 +24,7 @@ function activeDoor(path: string): string | null {
   if (path.startsWith("/how")) return "/how/";
   if (path.startsWith("/work")) return "/work/";
   if (path.startsWith("/mine")) return "/mine/";
+  if (path.startsWith("/cards")) return "/cards/";
   if (path.startsWith("/run")) return "/run/";
   if (INSIDE.some((p) => path.startsWith(p))) return "/inside/";
   return null;

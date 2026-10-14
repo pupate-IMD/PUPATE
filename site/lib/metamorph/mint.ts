@@ -264,9 +264,10 @@ export async function findMinted(client: PublicClient, a: LiveAddresses, miner: 
   return hit ? ({ ...hit.args } as MintedCard) : null;
 }
 
-/// The card's image from its token URI: the art returns data:application/json;base64 with the SVG inside
-/// as a data URI. Null when the URI is not that shape.
-export function tokenImage(uri: string): string | null {
+/// The JSON a token URI carries: the art returns data:application/json;base64 (a plain data:application/json
+/// is read too). Null when the URI is not that shape or its text is not JSON. The workspace reads the
+/// attributes from it (lib/metamorph/cards.ts).
+export function tokenJSON(uri: string): unknown {
   const m = /^data:application\/json;base64,(.*)$/s.exec(uri);
   let text: string;
   try {
@@ -278,11 +279,17 @@ export function tokenImage(uri: string): string | null {
       if (!plain) return null;
       text = decodeURIComponent(plain[1]);
     }
-    const image = (JSON.parse(text) as { image?: unknown }).image;
-    return typeof image === "string" && image.startsWith("data:image/") ? image : null;
+    return JSON.parse(text);
   } catch {
     return null;
   }
+}
+
+/// The card's image from its token URI: the SVG inside the JSON as a data URI. Null when the URI is not
+/// that shape.
+export function tokenImage(uri: string): string | null {
+  const image = (tokenJSON(uri) as { image?: unknown } | null)?.image;
+  return typeof image === "string" && image.startsWith("data:image/") ? image : null;
 }
 
 /// Reads a minted card's image through the token's tokenURI.
