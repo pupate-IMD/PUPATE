@@ -284,6 +284,19 @@ contract MetamorphDutiesTest is MetamorphFixture {
         md.convert();
     }
 
+    /// A duty conversion starved by the sender's gas limit says nothing about the pool: the mint succeeds,
+    /// the conversion is skipped without a back-off, and the next mint sent with enough gas converts. At
+    /// 380,000 gas the conversion runs out inside a token transfer that the PoolManager wraps into an error
+    /// with data, so only the gas, not the revert data, can tell this starvation from a real failure.
+    function test_aStarvedDutyConversionDoesNotBackOff() public {
+        _starvedMintDoesNotBackOff(380_000);
+    }
+
+    /// The same at 420,000 gas, where the starved conversion reverts with no data.
+    function test_aStarvedDutyConversionDoesNotBackOffWhenItRevertsEmpty() public {
+        _starvedMintDoesNotBackOff(420_000);
+    }
+
     function test_aFlushOrABurnThatRevertsNeverRevertsTheMint() public {
         _buyExactIn(1 ether);
         _deposit(1 ether);
@@ -356,6 +369,46 @@ contract MetamorphDutiesTest is MetamorphFixture {
             if (k == kind) return paid;
         }
         revert("no DutyRun of that kind");
+    }
+
+    /// @dev Fills the pot past the threshold, mints with `gasLimit`, which carries the mint but leaves the
+    /// conversion short (in this fixture a mint whose duty converts needs about 470,000), and checks that the
+    /// conversion was tried, failed and did not back off; then a mint with enough gas converts.
+    function _starvedMintDoesNotBackOff(uint256 gasLimit) private {
+        _fillThePot();
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 90);
+        (,, bool c) = md.dutiesDue();
+        assertTrue(c, "due before the starved mint");
+        uint256 potBefore = md.pot();
+        // Both mints try the conversion: the starved one, then the one with enough gas.
+        vm.expectCall(address(md), abi.encodeCall(md.convertDuty, (miner)), 2);
+        uint256 a = _anchor();
+        uint256 n = _proof(miner, a);
+        vm.recordLogs();
+        vm.prank(miner);
+        uint256 id = md.mint{gas: gasLimit}(a, n);
+        assertEq(md.ownerOf(id), miner, "the starved mint still mints");
+        _assertNoDutyRun(vm.getRecordedLogs(), 2);
+        assertEq(md.pot(), potBefore + 35_000 ether, "the pot is whole");
+        assertEq(md.convertBackoffUntil(), 0, "a starved duty does not back off");
+        // The next cheap mint, sent with enough gas, converts.
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 90);
+        vm.recordLogs();
+        _mintAs(miner);
+        assertEq(md.lastConvertBlock(), block.number, "the next mint converted the pot");
+        assertGt(_paid(vm.getRecordedLogs(), 2), 0, "and its duty paid the miner");
+    }
+
+    /// @dev Fails when `logs` hold a DutyRun of `kind`.
+    function _assertNoDutyRun(Vm.Log[] memory logs, uint8 kind) private view {
+        bytes32 sig = keccak256("DutyRun(uint8,uint256)");
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].emitter != address(md) || logs[i].topics[0] != sig) continue;
+            (uint8 k,) = abi.decode(logs[i].data, (uint8, uint256));
+            assertTrue(k != kind, "no DutyRun of that kind");
+        }
     }
 
     /// @dev A change to the fixture's IMD position: full range, held by the router at salt 0.
