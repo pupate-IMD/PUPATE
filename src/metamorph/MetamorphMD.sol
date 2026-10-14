@@ -496,6 +496,102 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         if (stakeOf[id].staker != address(0)) revert Staked();
     }
 
+    // ------------------------------------------------------------------ the conversion
+
+    /// @notice Sell the pot's PUPATE for ETH, then the ETH for IMD, each under a 5% price-impact bound,
+    /// and credit the stakers. Anyone may call; the caller is paid 0.5% of the IMD bought. What the
+    /// bound leaves unsold stays for the next call.
+    function convert() external nonReentrant returns (uint256 imdOut) {
+        return _convert(msg.sender);
+    }
+
+    /// @dev The conversion as a duty inside a mint: the mint holds the lock, so this entry has none,
+    /// and only the contract itself may use it.
+    function convertDuty(address miner_) external returns (uint256 imdOut) {
+        if (msg.sender != address(this)) revert OnlySelf();
+        return _convert(miner_);
+    }
+
+    function _convert(address caller) private returns (uint256 imdOut) {
+        uint256 pupateIn = pot;
+        ethPot = address(this).balance;
+        if (pupateIn == 0 && ethPot == 0) revert NothingToConvert();
+        (uint160 saleLimit, uint160 buyLimit) = _limits();
+        bytes memory result = POOL_MANAGER.unlock(abi.encode(pupateIn, ethPot, saleLimit, buyLimit));
+        (uint256 sold, uint256 ethBought, uint256 bought) = abi.decode(result, (uint256, uint256, uint256));
+        if (bought == 0) revert NothingBought();
+        pot -= sold;
+        ethPot = address(this).balance;
+        uint256 reward = bought * CALLER_REWARD_BPS / BPS;
+        if (reward != 0) _payIMD(caller, reward);
+        _credit(bought - reward);
+        emit Converted(sold, ethBought, bought, caller, reward);
+        return bought;
+    }
+
+    /// @inheritdoc IUnlockCallback
+    /// @dev Reached only from `_convert`. Swap one: PUPATE for ETH in the launch pool, exact input,
+    /// up to the sale limit. Swap two: all the ETH in hand for IMD, exact input, up to the buy limit.
+    function unlockCallback(bytes calldata data) external returns (bytes memory) {
+        if (msg.sender != address(POOL_MANAGER)) revert OnlyPoolManager();
+        if (_tload(LOCK_SLOT) == 0) revert UnexpectedCallback();
+        (uint256 pupateIn, uint256 ethHeld, uint160 saleLimit, uint160 buyLimit) =
+            abi.decode(data, (uint256, uint256, uint160, uint160));
+
+        uint256 sold;
+        uint256 ethBought;
+        if (pupateIn != 0) {
+            BalanceDelta d = POOL_MANAGER.swap(pupateKey, SwapParams(false, -int256(pupateIn), saleLimit), "");
+            sold = uint256(uint128(-d.amount1()));
+            ethBought = uint256(uint128(d.amount0()));
+            if (sold != 0) {
+                POOL_MANAGER.sync(pupateKey.currency1);
+                if (!PUPATE.transfer(address(POOL_MANAGER), sold)) revert TransferFailed();
+                POOL_MANAGER.settle();
+            }
+            if (ethBought != 0) POOL_MANAGER.take(pupateKey.currency0, address(this), ethBought);
+        }
+
+        uint256 ethIn = ethHeld + ethBought;
+        uint256 bought;
+        if (ethIn != 0) {
+            BalanceDelta d2 = POOL_MANAGER.swap(imdKey, SwapParams(true, -int256(ethIn), buyLimit), "");
+            uint256 ethSpent = uint256(uint128(-d2.amount0()));
+            bought = uint256(uint128(d2.amount1()));
+            if (ethSpent != 0) POOL_MANAGER.settle{value: ethSpent}();
+            if (bought != 0) POOL_MANAGER.take(imdKey.currency1, address(this), bought);
+        }
+        return abi.encode(sold, ethBought, bought);
+    }
+
+    /// @dev The price limits of one conversion: the sale may lift the launch pool's sqrt price by at
+    /// most sqrt(1 + impact); the buy may lower the IMD pool's by at most sqrt(1 − impact).
+    function _limits() private view returns (uint160 saleLimit, uint160 buyLimit) {
+        (uint160 p1,,,) = POOL_MANAGER.getSlot0(pupateKey.toId());
+        uint256 up = uint256(p1) * _sqrt((BPS + CONVERT_IMPACT_BPS) * BPS) / BPS;
+        if (up >= TickMath.MAX_SQRT_PRICE) up = TickMath.MAX_SQRT_PRICE - 1;
+        saleLimit = uint160(up);
+        (uint160 p2,,,) = POOL_MANAGER.getSlot0(imdKey.toId());
+        uint256 down = uint256(p2) * (_sqrt((BPS - CONVERT_IMPACT_BPS) * BPS) + 1) / BPS;
+        if (down <= TickMath.MIN_SQRT_PRICE) down = TickMath.MIN_SQRT_PRICE + 1;
+        buyLimit = uint160(down);
+    }
+
+    function _sqrt(uint256 x) private pure returns (uint256 y) {
+        if (x == 0) return 0;
+        uint256 z = (x + 1) / 2;
+        y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
+    }
+
+    function _pay(address to, uint256 amount) private {
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+    }
+
     // ------------------------------------------------------------------ internals (reads)
 
     /// @dev Held by the vault right now: on its books and in its wallet. Returns the current round.
@@ -528,9 +624,5 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         }
     }
 
-    // The conversion and the duties follow in later tasks.
-
-    function unlockCallback(bytes calldata) external pure returns (bytes memory) {
-        revert UnexpectedCallback();
-    }
+    // The duties follow in a later task.
 }
