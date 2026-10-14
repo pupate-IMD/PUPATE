@@ -6,7 +6,8 @@
 //
 // It holds the traits (ArtTraits.sol): seeds, words, the fixed-point draws, the weighted picks, the digit
 // strings, the number formatter, the site's seat generator, the seat and card traits, the palette and the
-// density table; and the chrysalis figure (MetamorphChrysalis.sol).
+// density table; the chrysalis figure (MetamorphChrysalis.sol); and the butterfly figure with its table of
+// sines (MetamorphButterfly.sol).
 //
 // Types follow the contract's: a value the contract keeps as uint256 or int256 (tenths, hundredths, words,
 // counts before they are narrowed) is a BigInt here; a uint8 or int8 field (an index into a table, a count,
@@ -18,8 +19,12 @@
 //
 // Usage:
 //   node script/art/mirror.mjs vectors    print the Solidity vectors of test/metamorph/art/ArtTraits.t.sol
+//   node script/art/mirror.mjs sines      print the 91 sines of MetamorphButterfly.sol, sin(0°)..sin(90°) in
+//                                         ten-thousandths (test/metamorph/art/Butterfly.t.sol)
 //   node script/art/mirror.mjs figure chrysalis <seat> <round> <edition> <gilt 0|1>
 //                                         print that card's chrysalis figure (test/metamorph/art/Chrysalis.t.sol)
+//   node script/art/mirror.mjs figure butterfly <seat> <round> <edition> <gilt 0|1>
+//                                         print that card's butterfly figure (test/metamorph/art/Butterfly.t.sol)
 
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
@@ -377,6 +382,112 @@ export function chrysalisFigure(t, c, s) {
   );
 }
 
+// ------------------------------------------------------------------ the butterfly (MetamorphButterfly.sol)
+
+/// sin(d°) for d = 0..90 in ten-thousandths, Math.round(Math.sin(d × π / 180) × 10000): 0, 175, 349, …, 10000.
+/// The contract holds the same 91 numbers as a constant table; `node script/art/mirror.mjs sines` prints them.
+/// For a whole number of degrees a in −90..90: cos(a) = SINES[90 − |a|] and sin(a) = sign(a) × SINES[|a|].
+export const SINES = Array.from({ length: 91 }, (_, d) => Math.round(Math.sin((d * Math.PI) / 180) * 10000));
+
+/// The prototype's clamp(v, lo, hi), on integers.
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+/// The angle of upper vein i of n (n ≥ 2 after the clamp): −62 + 70 × i / (n − 1) degrees, rounded half up on
+/// its magnitude to a whole degree (−44.5 → −45, −38.67 → −39, −9.5 → −10), so that it indexes the table.
+export function veinAngle(i, n) {
+  const num = 70 * i - 62 * (n - 1);
+  const deg = Number(mulDiv(Math.abs(num), 1, n - 1));
+  return num < 0 ? -deg : deg;
+}
+
+/// The prototype's ray(x, y, deg, len): from (x, y) in tenths at a whole number of degrees a (−90..90), its
+/// length len / 10000 tenths (len the unrounded product of its factors), printed "Mx yLx' y'". The end is
+/// x + cos(a) × len and y + sin(a) × len: each offset is one product of the table's sine and len divided once
+/// (by 10^8), its magnitude rounded half up, and the sign of the angle goes on the rounded y offset.
+function ray(x, y, a, len) {
+  const m = Math.abs(a);
+  const dx = mulDiv(SINES[90 - m], len, 100000000);
+  const dy = mulDiv(SINES[m], len, 100000000);
+  return `M${f1(x)} ${f1(y)}L${f1(BigInt(x) + dx)} ${f1(a < 0 ? BigInt(y) - dy : BigInt(y) + dy)}`;
+}
+
+/// The prototype's upper wing from (4, −22): 4 + k × span across and −22 − k × rise up, k in hundredths, span
+/// and rise in thousandths of a unit (the seat's tenths × the edition's hundredths, unrounded); each value one
+/// product divided once by 10000, its magnitude rounded half up.
+function upperWing(span, rise) {
+  const x = (k) => f1(40n + mulDiv(span, k, 10000));
+  const y = (k) => f1(-220n - mulDiv(rise, k, 10000));
+  return `M4 -22C${x(45)} ${y(100)} ${x(100)} ${y(95)} ${x(100)} ${y(30)}C${x(98)} -4 ${x(55)} 16 4 10Z`;
+}
+
+/// The prototype's lower wing from (4, 10): 4 + k × reach across and 10 + k × drop down, as the upper wing.
+function lowerWing(reach, drop) {
+  const x = (k) => f1(40n + mulDiv(reach, k, 10000));
+  const y = (k) => f1(100n + mulDiv(drop, k, 10000));
+  return `M4 10C${x(90)} 6 ${x(110)} ${y(60)} ${x(50)} ${y(100)}C${x(25)} ${y(92)} 10 ${y(50)} 4 30Z`;
+}
+
+/// A digit wash: the prototype's text on a wing path, its size in tenths; `more` is an attribute with its
+/// leading space, or nothing.
+const wash = (size, fill, more, spacing, href, digits) =>
+  `<text font-size="${f1(size)}" fill="${fill}"${more} letter-spacing="${spacing}">` +
+  `<textPath href="#${href}">${digits}</textPath></text>`;
+
+/// The butterfly figure: the prototype's butterflyStage with the minimal layout (cx 540, cy 584 + 12, wings 2.2),
+/// in integer tenths. t: the card traits; s: the seat traits; c: the colours; seed: the drawing seed
+/// seed(seat, round, edition, 11), whose lines 11011..11014 carry the four digit strings. The seat's geometry is
+/// scaled by the edition's deltas and carried unrounded (span = s.span × dSpan, thousandths of a unit); veins
+/// and spots are clamped after the deltas (2..6, 0..4). The order of the elements, their attributes and the
+/// newlines are the prototype's, verbatim; every printed number is one mulDiv of all its factors.
+export function butterflyFigure(t, s, c, seed) {
+  const { outer, inner } = densityOf(t.density);
+  const span = s.span * t.dSpan, rise = s.rise * t.dRise, reach = s.reach * t.dReach, drop = s.drop * t.dDrop;
+  const veins = clamp(s.veins + t.dVeins, 2, 6), spots = clamp(s.spots + t.dSpots, 0, 4);
+  const upper = upperWing(span, rise), lower = lowerWing(reach, drop);
+  const vein = (d, clip) =>
+    `<path d="${d}" stroke="${c.vein}" stroke-width="0.9" fill="none" opacity="0.55" clip-path="url(#${clip})"/>`;
+  // the veins: the upper ones from (6, −8), span × 0.92 long; the lower ones from (6, 16) at 22, 48 and 74
+  // degrees, drop × 0.9 long
+  let lines = "";
+  for (let i = 0; i < veins; i++) lines += vein(ray(60, -80, veinAngle(i, veins), span * 92n), "cu");
+  for (const a of [22, 48, 74]) lines += vein(ray(60, 160, a, drop * 90n), "cl");
+  // the spots: spot i at 4 + span × (0.8 − 0.07 i), −22 − rise × 0.62 + 17 i, radius 5 − 0.6 i
+  let dots = "";
+  for (let i = 0; i < spots; i++) {
+    const cx = 40n + mulDiv(span, 80 - 7 * i, 10000);
+    const cy = -220n - mulDiv(rise, 62, 10000) + 170n * BigInt(i);
+    dots += `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(50 - 6 * i)}" fill="${c.spots}"/>`;
+  }
+  // one half: the three digit washes (outer × 3.9, outer × 3.7, inner × 3.7), the veins, the spots
+  const half =
+    "<g>" +
+    wash(mulDiv(outer, 39, 10), c.wing, "", "0.6", "up", bits(seed, 11011, 120)) +
+    wash(mulDiv(outer, 37, 10), c.wing, "", "0.6", "lo", bits(seed, 11012, 100)) +
+    wash(mulDiv(inner, 37, 10), c.inner, ` opacity="0.35"`, "0.5", "up2", bits(seed, 11013, 140)) +
+    lines +
+    dots +
+    "</g>";
+  return (
+    // the group: translate(cx cy + 12) rotate(tilt) scale(2.2 × scale)
+    `<g transform="translate(540 596) rotate(${f1(t.tilt)}) scale(${f1(mulDiv(22, t.scale, 100))})" ` +
+    `font-family="Consolas, 'Courier New', monospace">\n` +
+    `<defs><path id="up" d="${upper}"/><path id="lo" d="${lower}"/>` +
+    `<path id="up2" transform="translate(4 -6) scale(0.82)" d="${upper}"/>\n` +
+    `<clipPath id="cu"><path d="${upper}"/></clipPath><clipPath id="cl"><path d="${lower}"/></clipPath>` +
+    `<path id="body" d="M0 -36V40"/></defs>\n` +
+    // the half and its mirror image
+    `${half}<g transform="scale(-1 1)">${half}</g>\n` +
+    // the antennae, their tips, the head and the body with its fourteen digits
+    `<path d="M-2 -52C-8 -76 -22 -90 -32 -93M2 -52C8 -76 22 -90 32 -93" stroke="${c.body}" stroke-width="1.4" ` +
+    `fill="none" stroke-linecap="round"/>\n` +
+    `<circle cx="-32" cy="-93" r="2.2" fill="${c.body}"/><circle cx="32" cy="-93" r="2.2" fill="${c.body}"/>\n` +
+    `<circle cx="0" cy="-48" r="6.5" fill="${c.body}"/><ellipse cx="0" cy="2" rx="5.5" ry="44" fill="${c.body}"/>\n` +
+    `<text font-size="5.5" fill="${PAPER}" letter-spacing="0.3" writing-mode="tb">` +
+    `<textPath href="#body">${bits(seed, 11014, 14)}</textPath></text>\n` +
+    "</g>"
+  );
+}
+
 /// What the router hands a figure contract for a card: the card traits, the seat traits, the colours (the
 /// palette, or the gilt row, with the seat's jade) and the drawing seed (line 11).
 export function figureInputs(seat, round, edition, gilt) {
@@ -521,15 +632,22 @@ const isMain = (() => {
   }
 })();
 
-const USAGE = "usage: node script/art/mirror.mjs vectors | figure chrysalis <seat> <round> <edition> <gilt 0|1>";
+const USAGE =
+  "usage: node script/art/mirror.mjs vectors | sines | figure <chrysalis|butterfly> <seat> <round> <edition> <gilt 0|1>";
 
 if (isMain) {
   const [cmd, ...args] = process.argv.slice(2);
+  const figure = cmd === "figure" && args.length === 5 && ["0", "1"].includes(args[4]);
   if (cmd === "vectors") {
     console.log(vectors());
-  } else if (cmd === "figure" && args[0] === "chrysalis" && args.length === 5 && ["0", "1"].includes(args[4])) {
+  } else if (cmd === "sines" && args.length === 0) {
+    console.log(SINES.join(", "));
+  } else if (figure && args[0] === "chrysalis") {
     const { t, c, s } = figureInputs(BigInt(args[1]), Number(args[2]), Number(args[3]), args[4] === "1");
     console.log(chrysalisFigure(t, c, s));
+  } else if (figure && args[0] === "butterfly") {
+    const { t, st, c, s } = figureInputs(BigInt(args[1]), Number(args[2]), Number(args[3]), args[4] === "1");
+    console.log(butterflyFigure(t, st, c, s));
   } else {
     console.error(USAGE);
     process.exit(2);
