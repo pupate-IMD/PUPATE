@@ -4,9 +4,9 @@
 // metamorph-gen.mjs, untracked): it is the picture and is never read at run time. Where it and the spec
 // (docs/superpowers/specs/2026-10-14-metamorph-art-design.md) differ, the spec wins.
 //
-// This half holds the traits (ArtTraits.sol): seeds, words, the fixed-point draws, the weighted picks, the
-// digit strings, the number formatter, the site's seat generator, the seat and card traits, the palette and
-// the density table.
+// It holds the traits (ArtTraits.sol): seeds, words, the fixed-point draws, the weighted picks, the digit
+// strings, the number formatter, the site's seat generator, the seat and card traits, the palette and the
+// density table; and the chrysalis figure (MetamorphChrysalis.sol).
 //
 // Types follow the contract's: a value the contract keeps as uint256 or int256 (tenths, hundredths, words,
 // counts before they are narrowed) is a BigInt here; a uint8 or int8 field (an index into a table, a count,
@@ -18,6 +18,8 @@
 //
 // Usage:
 //   node script/art/mirror.mjs vectors    print the Solidity vectors of test/metamorph/art/ArtTraits.t.sol
+//   node script/art/mirror.mjs figure chrysalis <seat> <round> <edition> <gilt 0|1>
+//                                         print that card's chrysalis figure (test/metamorph/art/Chrysalis.t.sol)
 
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
@@ -252,6 +254,123 @@ export function densityOf(density) {
   return { outer: 28n, inner: 18n, dots: 42n };
 }
 
+// ------------------------------------------------------------------ the chrysalis (MetamorphChrysalis.sol)
+
+/// The prototype's FORMS, each form's six [x, y] control points flattened (x0, y0, x1, y1, …): the left side of
+/// the shell from the top to the bottom point as two cubic curves, in the prototype's local units, mirrored for
+/// the right side. BAND_FIT in hundredths: how wide the shell is where the band sits, relative to the teardrop.
+export const SHELLS = [
+  [16, 7, 21, 27, 18, 47, 15, 64, 8, 77, 0, 82], // teardrop
+  [9, 6, 19, 36, 20, 58, 17, 72, 9, 81, 0, 84], // pear
+  [8, 12, 14, 32, 14, 47, 12, 62, 6, 76, 0, 82], // spindle
+  [20, 8, 23, 40, 17, 62, 12, 74, 6, 80, 0, 82], // round
+];
+export const BAND_FIT = [100, 74, 66, 105];
+
+/// A form's control points and band fit; a form past 3 reads as the teardrop, the prototype's own path.
+function shellForm(form) {
+  const f = Number(form);
+  return f >= 1 && f <= 3 ? { p: SHELLS[f], fit: BAND_FIT[f] } : { p: SHELLS[0], fit: BAND_FIT[0] };
+}
+
+/// (a × b + 50) / 100: a product with a factor in hundredths, rounded half up. Every product of the figure goes
+/// through it on magnitudes (a and b are never negative); BigInt throws on a float, so none can slip in.
+const m = (a, b) => (BigInt(a) * BigInt(b) + 50n) / 100n;
+
+/// (k × w × 10 + 50) / 100: k units of a factor w (hundredths), in tenths, rounded half up.
+const d = (k, w) => (BigInt(k) * BigInt(w) * 10n + 50n) / 100n;
+
+/// The point k units of w across the axis x = 32 (left of it when `left`) and j units of L below `top` (tenths),
+/// printed "x y": x = 320 ∓ (k × w × 10 + 50) / 100, y = top + (j × L × 10 + 50) / 100.
+const pt = (left, k, w, j, L, top) => `${f1(left ? 320n - d(k, w) : 320n + d(k, w))} ${f1(BigInt(top) + d(j, L))}`;
+
+/// The prototype's shellPath(form, w, L, top): from the top on the axis, the left side down in two cubics to the
+/// bottom point on the axis, the right side back up in two cubics. w and L in hundredths, top in tenths.
+function shellPath(p, w, L, top) {
+  const l = (n) => pt(true, p[n], w, p[n + 1], L, top);
+  const r = (n) => pt(false, p[n], w, p[n + 1], L, top);
+  return (
+    `M32 ${f1(top)}` +
+    `C${l(0)} ${l(2)} ${l(4)}C${l(6)} ${l(8)} 32 ${f1(BigInt(top) + d(p[11], L))}` +
+    `C${r(8)} ${r(6)} ${r(4)}C${r(2)} ${r(0)} 32 ${f1(top)}Z`
+  );
+}
+
+/// The prototype's wingPath(ww, wl, top): the folded wing's fixed control points, ww across and wl down.
+function wingPath(ww, wl, top) {
+  const l = (k, j) => pt(true, k, ww, j, wl, top);
+  const r = (k, j) => pt(false, k, ww, j, wl, top);
+  return (
+    `M32 ${f1(top)}C${l(9, 10)} ${l(13, 24)} ${l(8, 44)}C${l(4, 38)} ${l(1, 31)} 32 ${f1(BigInt(top) + d(24, wl))}` +
+    `C${r(1, 31)} ${r(4, 38)} ${r(8, 44)}C${r(13, 24)} ${r(9, 10)} 32 ${f1(top)}Z`
+  );
+}
+
+/// The prototype's bandPath(w): the arc across the shell at y 29, its ends 13 units of w from the axis.
+function bandPath(w) {
+  return `M${f1(320n - d(13, w))} 29C${f1(320n - d(8, w))} 26.4 ${f1(320n + d(8, w))} 26.4 ${f1(320n + d(13, w))} 29`;
+}
+
+/// The prototype's tp: a digit string on a path, the size in tenths. `more` follows a space even when it is
+/// empty, as in the prototype (`fill="…" >`).
+const tp = (href, size, fill, text, more) =>
+  `<text font-size="${f1(size)}" fill="${fill}" ${more}><textPath href="#${href}">${text}</textPath></text>`;
+
+/// The chrysalis figure: the prototype's chrysalisStage inside its figureGroup, with the minimal layout (cx 540,
+/// cy 584, shell 6.6), in integer tenths. t: the card traits; c: the colours; s: the drawing seed
+/// seed(seat, round, edition, 11), whose lines 11001..11006 carry the six digit strings. The seat traits are not
+/// used. The order of the elements and their attributes is the prototype's, verbatim.
+export function chrysalisFigure(t, c, s) {
+  const { outer, inner } = densityOf(t.density);
+  const { p, fit } = shellForm(t.form);
+  let rings = "";
+  for (let j = 0n; j < BigInt(t.rings); j++) {
+    const w = m(140n - 30n * j, t.shellW); // (14 − 3j) × shellW
+    const y = 110n + m(530n + 70n * j, t.shellL); // 11 + (53 + 7j) × shellL
+    rings +=
+      `<path d="M${f1(320n - w)} ${f1(y)}q${f1(w)} 4 ${f1(2n * w)} 0" stroke="${c.shell}" stroke-width="0.5" ` +
+      `fill="none" opacity="0.45" stroke-dasharray="0.8 1.2"/>`;
+  }
+  const tickY = 300n + m(440, t.wingL) - 10n; // 30 + 44 × wingL − 1
+  return (
+    // the group: translate(cx cy) rotate(tilt) scale(6.6 × scale) translate(-32 -52)
+    `<g transform="translate(540 584) rotate(${f1(t.tilt)}) scale(${f1(m(66, t.scale))}) translate(-32 -52)" ` +
+    `font-family="Consolas, 'Courier New', monospace" letter-spacing="0.25">` +
+    // the defs: the shell; the inner shell at 0.86 / 0.93 from 11 + 2.5 × shellL; the wing; the inner wing at
+    // 0.73 / 0.82 from 34; the band, bandW × BAND_FIT × shellW wide; the vein, 44 × wingL long
+    `<defs><path id="shell" d="${shellPath(p, t.shellW, t.shellL, 110n)}"/>` +
+    `<path id="shell2" d="${shellPath(p, m(t.shellW, 86), m(t.shellL, 93), 110n + m(25, t.shellL))}"/>` +
+    `<path id="wing" d="${wingPath(t.wingW, t.wingL, 300n)}"/>` +
+    `<path id="wing2" d="${wingPath(m(t.wingW, 73), m(t.wingL, 82), 340n)}"/>` +
+    `<path id="band" d="${bandPath(m(m(t.bandW, fit), t.shellW))}"/>` +
+    `<path id="vein" d="M32 30v${f1(m(440, t.wingL))}"/></defs>` +
+    // the six digit strings: the prototype's bits(seed + k, n) is bits(s, 11000 + k, n)
+    tp("shell", outer, c.shell, bits(s, 11001, 190), "") +
+    tp("shell2", inner, c.inner, bits(s, 11002, 210), `opacity="0.45"`) +
+    tp("wing", m(outer, 90), c.wing, bits(s, 11003, 130), `filter="url(#soft)"`) +
+    tp("wing2", m(inner, 95), c.wing2, bits(s, 11004, 140), `opacity="0.55"`) +
+    tp("vein", m(inner, 105), c.vein, bits(s, 11005, 40), `opacity="0.8"`) +
+    tp("band", m(outer, 95), c.band, bits(s, 11006, 30), "") +
+    // the segment rings
+    rings +
+    // the gold tick, moved down to the end of the vein
+    `<path transform="translate(0 ${f1(tickY - 730n)})" d="M${f1(320n - m(75, t.wingW))} 73c${f1(m(20, t.wingW))}` +
+    `-3.6 ${f1(m(48, t.wingW))}-6.6 ${f1(m(75, t.wingW))}-9.4 ${f1(m(27, t.wingW))} 2.8 ${f1(m(55, t.wingW))} 5.8 ` +
+    `${f1(m(75, t.wingW))} 9.4" stroke="${c.band}" stroke-width="0.9" fill="none" stroke-linecap="round"/>` +
+    // the stem
+    `<path d="M32 2v9" stroke="${c.shell}" stroke-width="0.8" fill="none"/>` +
+    "</g>"
+  );
+}
+
+/// What the router hands a figure contract for a card: the card traits, the seat traits, the colours (the
+/// palette, or the gilt row, with the seat's jade) and the drawing seed (line 11).
+export function figureInputs(seat, round, edition, gilt) {
+  const t = cardTraits(seat, round, edition);
+  const st = seatTraits(seat);
+  return { t, st, c: colours(t.palette, gilt, st.tone), s: seed(seat, round, edition, 11) };
+}
+
 // ------------------------------------------------------------------ the vectors
 
 const q = (str) => JSON.stringify(str);
@@ -388,12 +507,17 @@ const isMain = (() => {
   }
 })();
 
+const USAGE = "usage: node script/art/mirror.mjs vectors | figure chrysalis <seat> <round> <edition> <gilt 0|1>";
+
 if (isMain) {
-  const [cmd] = process.argv.slice(2);
+  const [cmd, ...args] = process.argv.slice(2);
   if (cmd === "vectors") {
     console.log(vectors());
+  } else if (cmd === "figure" && args[0] === "chrysalis" && args.length === 5 && ["0", "1"].includes(args[4])) {
+    const { t, c, s } = figureInputs(BigInt(args[1]), Number(args[2]), Number(args[3]), args[4] === "1");
+    console.log(chrysalisFigure(t, c, s));
   } else {
-    console.error("usage: node script/art/mirror.mjs vectors");
+    console.error(USAGE);
     process.exit(2);
   }
 }
