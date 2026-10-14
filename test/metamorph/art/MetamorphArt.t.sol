@@ -125,6 +125,9 @@ contract MetamorphArtTest is Test {
     /// The address of the private key 1, as a miner.
     address internal constant MINER = 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf;
 
+    /// The most gas one transaction may spend since EIP-7825 (2^24).
+    uint256 internal constant TX_GAS_CAP = 16_777_216;
+
     MetamorphArt internal art;
 
     function setUp() public {
@@ -265,51 +268,76 @@ contract MetamorphArtTest is Test {
         );
     }
 
-    /// The heaviest card (`node script/art/mirror.mjs worst`): (8296, 2, 1),
-    /// a holotype with bold density, a double halo and the rain, whose butterfly has six veins and four
-    /// spots; gilt, id 3333 (the last of the supply, epoch 11), a billion PUPATE paid. In both stages
-    /// `tokenURI` costs under 20,000,000 gas, the SVG is under 24,576 bytes and the JSON under 40,960, and
-    /// both are the mirror's.
+    /// The heaviest cards the tests can construct, each gilt, id 3333 (the last of the supply, epoch 11), a
+    /// billion PUPATE paid. (8296, 2, 1) (`node script/art/mirror.mjs worst`) is a holotype with bold density, a
+    /// double halo and the rain, whose butterfly has six veins and four spots: the heaviest butterfly, and
+    /// its chrysalis. (1095, 4, 1) is the heaviest chrysalis: a holotype pear with no halo, so the nine notes
+    /// are drawn besides the rain, bold density and five segment rings. Each costs `tokenURI` under 20,000,000
+    /// gas and under the 16,777,216 that EIP-7825 lets one transaction spend, has an SVG under 24,576 bytes
+    /// and a JSON under 40,960, and both are the mirror's (`digest …`).
     function test_worstCaseStaysUnderTheLimits() public {
-        for (uint8 stage; stage < 2; stage++) {
-            IMetamorphArt.View memory v = IMetamorphArt.View({
-                id: 3333,
-                seat: 8296,
-                round: 2,
-                edition: 1,
-                stage: stage,
-                gilt: true,
-                epoch: 11,
-                miner: address(type(uint160).max),
-                mintedAt: 1_760_000_000,
-                paid: 1e27
-            });
-            uint256 before = gasleft();
-            string memory uri = art.tokenURI(v);
-            uint256 used = before - gasleft();
-            string memory svg = art.svg(v);
-            string memory json = art.json(v);
-            emit log_named_uint(stage == 0 ? "chrysalis: tokenURI gas" : "butterfly: tokenURI gas", used);
-            emit log_named_uint("  svg bytes", bytes(svg).length);
-            emit log_named_uint("  json bytes", bytes(json).length);
-            emit log_named_uint("  uri bytes", bytes(uri).length);
-            assertLt(used, 20_000_000, "gas");
-            assertLt(bytes(svg).length, 24_576, "svg");
-            assertLt(bytes(json).length, 40_960, "json");
-            assertEq(uri.jsonOf(), json);
-            assertEq(
-                keccak256(bytes(svg)),
-                stage == 0
-                    ? bytes32(0xc8bf9d1ed1f8995f6e01e9fe16797a0c8cb695f5b83127f29abf9b5959506045)
-                    : bytes32(0x3e226e57d672f277ca093a47c25ac57850118f052041b345503d92c9b6e86725)
-            );
-            assertEq(
-                keccak256(bytes(json)),
-                stage == 0
-                    ? bytes32(0xc24087160bb370b7222329e28c5d0b5156d6bb6391dcc34300f448e44e358f3c)
-                    : bytes32(0x8f28e3407a277344da743777f4a895c54e1ef821f30fab9b96df1a4314f2e4d0)
-            );
-        }
+        _worst(
+            8296,
+            2,
+            0,
+            0xc8bf9d1ed1f8995f6e01e9fe16797a0c8cb695f5b83127f29abf9b5959506045,
+            0xc24087160bb370b7222329e28c5d0b5156d6bb6391dcc34300f448e44e358f3c
+        );
+        _worst(
+            8296,
+            2,
+            1,
+            0x3e226e57d672f277ca093a47c25ac57850118f052041b345503d92c9b6e86725,
+            0x8f28e3407a277344da743777f4a895c54e1ef821f30fab9b96df1a4314f2e4d0
+        );
+        _worst(
+            1095,
+            4,
+            0,
+            0x78643838d550d325ec5352bfff915ae9e2f820c7e4c27f501b39fcc394807ff1,
+            0x439cff5dea92eeac1712247f69c3a2be15ea81d199e171fa8cba397cf416a2b7
+        );
+    }
+
+    /// The card (seat, round, 1) in a stage, measured at the worst a real card can be: gilt, id 3333 of epoch
+    /// 11, a billion PUPATE paid, the highest address as its miner.
+    function _worst(uint256 seat, uint16 round, uint8 stage, bytes32 svgDigest, bytes32 jsonDigest) internal {
+        IMetamorphArt.View memory v = IMetamorphArt.View({
+            id: 3333,
+            seat: seat,
+            round: round,
+            edition: 1,
+            stage: stage,
+            gilt: true,
+            epoch: 11,
+            miner: address(type(uint160).max),
+            mintedAt: 1_760_000_000,
+            paid: 1e27
+        });
+        uint256 before = gasleft();
+        string memory uri = art.tokenURI(v);
+        uint256 used = before - gasleft();
+        string memory svg = art.svg(v);
+        string memory json = art.json(v);
+        string memory name = string.concat(
+            "(",
+            vm.toString(seat),
+            ", ",
+            vm.toString(uint256(round)),
+            ", 1) ",
+            stage == 0 ? "chrysalis" : "butterfly"
+        );
+        emit log_named_uint(string.concat(name, ": tokenURI gas"), used);
+        emit log_named_uint("  svg bytes", bytes(svg).length);
+        emit log_named_uint("  json bytes", bytes(json).length);
+        emit log_named_uint("  uri bytes", bytes(uri).length);
+        assertLt(used, 20_000_000, string.concat(name, ": gas"));
+        assertLt(used, TX_GAS_CAP, string.concat(name, ": gas under the transaction cap"));
+        assertLt(bytes(svg).length, 24_576, string.concat(name, ": svg"));
+        assertLt(bytes(json).length, 40_960, string.concat(name, ": json"));
+        assertEq(uri.jsonOf(), json, string.concat(name, ": the URI holds the JSON"));
+        assertEq(keccak256(bytes(svg)), svgDigest, string.concat(name, ": svg digest"));
+        assertEq(keccak256(bytes(json)), jsonDigest, string.concat(name, ": json digest"));
     }
 
     // ------------------------------------------------------------------ helpers

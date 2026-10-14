@@ -158,9 +158,10 @@ contract ChrysalisTest is Test {
         assertEq(chrysalis.figure(t, none, c, s), chrysalis.figure(t, st, c, s));
     }
 
-    /// Every card draws: no coordinate of any card's traits goes below zero (the arithmetic is unsigned and
-    /// would revert), and the figure is one group.
-    function testFuzz_everyCardDraws(uint256 seat, uint16 round, uint16 edition, bool gilt) public view {
+    /// Random cards draw: each fuzz run (256 by default, a sample of the cards and not all of them) draws the
+    /// figure of a random seat, round, edition and proof without a revert, so no coordinate went below zero
+    /// (the arithmetic is unsigned and would revert), and the figure is one group.
+    function testFuzz_randomCardsDraw(uint256 seat, uint16 round, uint16 edition, bool gilt) public view {
         bytes memory f = bytes(_figure(seat, round, edition, gilt));
         bytes memory head = bytes('<g transform="translate(540 584) rotate(');
         for (uint256 k; k < head.length; k++) {

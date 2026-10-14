@@ -12,9 +12,11 @@ import {ArtTraits} from "./ArtTraits.sol";
 /// `script/art/mirror.mjs` (`chrysalisFigure`) is its twin, byte for byte.
 /// @dev Lengths and font sizes in tenths, factors in hundredths, the tilt in tenths of a degree. Every
 /// printed coordinate, size and length is the integer product of all its factors divided once, at the end,
-/// rounded half up on its magnitude (`_mulDiv`); intermediate values are never rounded. Drawn for the traits
-/// `ArtTraits.cardTraits` gives (a form past 3 reads as the teardrop); a trait far outside its range can take
-/// a coordinate below zero, and the unsigned arithmetic then reverts.
+/// rounded half up on its magnitude (`_mulDiv`); intermediate values are never rounded, with one exception:
+/// the inner shell's top, 11 + 2.5 × shellL, is rounded to a tenth and printed, and each y value of that
+/// shell adds one rounded product to the rounded top. Drawn for the traits `ArtTraits.cardTraits` gives (a
+/// form past 3 reads as the teardrop); a trait far outside its range can take a coordinate below zero, and
+/// the unsigned arithmetic then reverts.
 contract MetamorphChrysalis is IMetamorphFigure {
     /// The prototype's MONO, the figure's font.
     string private constant MONO = "Consolas, 'Courier New', monospace";
@@ -268,8 +270,10 @@ contract MetamorphChrysalis is IMetamorphFigure {
 
     /// The figure's one rounding: the product of the integer factors, divided once by `den` (a power of ten),
     /// rounded half up. Every printed coordinate, size and length goes through it with all of its factors at
-    /// once: intermediate values are never rounded (shellW × 0.86 is carried unrounded as shellW × 86). The
-    /// factors are never negative. The mirror's `mulDiv` is the same function.
+    /// once: intermediate values are never rounded (shellW × 0.86 is carried unrounded as shellW × 86), but
+    /// for one. The inner shell's top, 11 + 2.5 × shellL (`_defs`), is rounded to a tenth and printed, and
+    /// each y value of that shell (`_pt`, `_axis`) adds one rounded product to the rounded top. The factors
+    /// are never negative. The mirror's `mulDiv` is the same function.
     function _mulDiv(uint256 a, uint256 b, uint256 den) private pure returns (uint256) {
         return (a * b + den / 2) / den;
     }

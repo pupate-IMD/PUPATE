@@ -397,8 +397,9 @@ contract ButterflyTest is Test {
         assertEq(_upperRay(f, 1), "M6 -8L84.5 -85.1");
     }
 
-    /// Every card draws: no revert for any seat, round, edition or proof, and the figure is one group.
-    function testFuzz_everyCardDraws(uint256 seat, uint16 round, uint16 edition, bool gilt) public view {
+    /// Random cards draw: each fuzz run (256 by default, a sample of the cards and not all of them) draws the
+    /// figure of a random seat, round, edition and proof without a revert, and the figure is one group.
+    function testFuzz_randomCardsDraw(uint256 seat, uint16 round, uint16 edition, bool gilt) public view {
         bytes memory f = bytes(_figure(seat, round, edition, gilt));
         bytes memory head = bytes('<g transform="translate(540 596)');
         for (uint256 k; k < head.length; k++) {

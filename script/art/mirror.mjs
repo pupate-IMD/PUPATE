@@ -293,7 +293,9 @@ function shellForm(form) {
 /// The figure's one rounding (the contract's _mulDiv): the product of the integer factors, then one division by
 /// the last argument (a power of ten), rounded half up. Every printed coordinate, size and length goes through it
 /// with all of its factors at once: intermediate values are never rounded (shellW × 0.86 is carried unrounded as
-/// shellW × 86). The factors are never negative, and BigInt throws on a float.
+/// shellW × 86), but for one. The inner shell's top, 11 + 2.5 × shellL, is rounded to a tenth and printed,
+/// and each y value of that shell adds one rounded product to the rounded top. The factors are never
+/// negative, and BigInt throws on a float.
 const mulDiv = (...xs) => {
   const den = BigInt(xs[xs.length - 1]);
   return (xs.slice(0, -1).reduce((acc, x) => acc * BigInt(x), 1n) + den / 2n) / den;
