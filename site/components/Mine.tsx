@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { EPOCH_ONE_BITS, type Power, fmtHashes, fmtRate } from "@/lib/miner/job";
 import { type Found, type GpuState, useMiner } from "@/lib/miner/useMiner";
+import { GpuSelfTestDev } from "./GpuSelfTestDev";
 import { Incubator } from "./Incubator";
 import { useSim } from "./SimContext";
 
@@ -281,6 +282,7 @@ export function Mine() {
           </a>
         </p>
       </section>
+      {process.env.NODE_ENV !== "production" ? <GpuSelfTestDev /> : null}
     </section>
   );
 }
