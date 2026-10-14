@@ -56,3 +56,13 @@ polls before reading what the previous one did, because the RPC provider's nodes
 with the reason if IMD parks it; while it waits for the swarm (about an hour) it waits out network
 errors as well, so a laptop that slept in between picks the same job up when it wakes, and a rerun
 never pays twice.
+
+## Metamorph MD
+
+After the art contract is deployed (its own script, next plan) and the review is clean:
+
+    COCOON=… HOOK=… PUPATE=… IMD=… COLLECTION=… POOL_MANAGER=… ART=<art> MIN_BITS=20 \
+    forge script script/DeployMetamorph.s.sol --rpc-url "$MAINNET_RPC_URL" --broadcast --private-key "$KEEPER_PRIVATE_KEY" -vv
+
+Then record `metamorph` and `metamorphArt` in `keeper/addresses.mainnet.json` and `site/lib/addresses.ts`,
+and call `noteSeat` for every seat the vault holds (the keeper does it on its next tick).
