@@ -9,7 +9,28 @@ import {ModifyLiquidityParams} from "v4-core/src/types/PoolOperation.sol";
 import {MetamorphFixture} from "./MetamorphFixture.sol";
 import {Cocoon} from "../../src/Cocoon.sol";
 import {PupateHook} from "../../src/PupateHook.sol";
+import {PupateToken} from "../../src/PupateToken.sol";
+import {IERC721TokenReceiver} from "../../src/metamorph/ERC721Lite.sol";
 import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
+
+/// @dev A miner that is a contract with no way to take ETH: no `receive`, no `fallback`. It accepts the
+/// card, which the mint delivers with the receiver check.
+contract EthRejectingMiner {
+    MetamorphMD internal immutable md;
+
+    constructor(MetamorphMD md_, PupateToken token_) {
+        md = md_;
+        token_.approve(address(md_), type(uint256).max);
+    }
+
+    function mint(uint256 anchor, uint256 nonce) external returns (uint256) {
+        return md.mint(anchor, nonce);
+    }
+
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return IERC721TokenReceiver.onERC721Received.selector;
+    }
+}
 
 contract MetamorphDutiesTest is MetamorphFixture {
     function setUp() public override {
@@ -205,6 +226,42 @@ contract MetamorphDutiesTest is MetamorphFixture {
         assertEq(_claims(), claims, "the claims wait in the hook");
         assertEq(cocoon.burnPot(), burnPot, "the burn pot is whole");
         assertEq(miner.balance, balance, "and nothing was paid");
+    }
+
+    function test_aMinerThatRejectsEthStillGetsTheCard() public {
+        EthRejectingMiner cm = new EthRejectingMiner(md, token);
+        deal(address(token), address(cm), 100_000 ether);
+        _deposit(1 ether);
+        (, bool b,) = md.dutiesDue();
+        assertTrue(b, "a burn is due");
+        uint256 burnPot = cocoon.burnPot();
+        uint256 held = address(md).balance;
+        uint256 a = _anchor();
+        uint256 n = _proof(address(cm), a);
+        vm.recordLogs();
+        uint256 id = cm.mint(a, n);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(md.ownerOf(id), address(cm), "the miner got the card");
+        assertLt(cocoon.burnPot(), burnPot, "the vault burned");
+        assertEq(_paid(logs, 1), 0, "the duty reports nothing paid");
+        uint256 reward = _burnReward(logs);
+        assertGt(reward, 0);
+        assertEq(address(md).balance - held, reward, "the reward stays in the contract");
+        // And the next conversion spends it with the rest of the ETH it holds.
+        vm.prank(keeper);
+        md.convert();
+        assertEq(address(md).balance, 0, "spent by the next conversion");
+    }
+
+    /// @dev The caller reward of the vault's burn among `logs`; fails when there is none.
+    function _burnReward(Vm.Log[] memory logs) private view returns (uint256 reward) {
+        bytes32 sig = keccak256("Burned(uint256,uint256,address,uint256)");
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].emitter != address(cocoon) || logs[i].topics[0] != sig) continue;
+            (,, reward) = abi.decode(logs[i].data, (uint256, uint256, uint256));
+            return reward;
+        }
+        revert("no Burned");
     }
 
     /// @dev What the DutyRun of `kind` among `logs` reports paid; fails when there is none.

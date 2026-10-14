@@ -619,9 +619,16 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         if (burnDue) {
             uint256 before = address(this).balance;
             try COCOON.burn{gas: DUTY_GAS}() {
-                uint256 got = address(this).balance - before;
-                if (got != 0) _pay(miner_, got);
-                emit DutyRun(1, got);
+                uint256 reward = address(this).balance - before;
+                uint256 paid;
+                if (reward != 0) {
+                    // The send may fail, and that changes nothing: a miner that cannot take ETH loses only
+                    // this reward, never the mint. The ETH stays here, and the next conversion spends it
+                    // with the ETH pot.
+                    (bool ok,) = miner_.call{value: reward}("");
+                    if (ok) paid = reward;
+                }
+                emit DutyRun(1, paid);
             } catch {}
         }
         if (convertDue) {
@@ -629,11 +636,6 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
                 emit DutyRun(2, bought * CALLER_REWARD_BPS / BPS);
             } catch {}
         }
-    }
-
-    function _pay(address to, uint256 amount) private {
-        (bool ok,) = to.call{value: amount}("");
-        if (!ok) revert TransferFailed();
     }
 
     // ------------------------------------------------------------------ internals (reads)
