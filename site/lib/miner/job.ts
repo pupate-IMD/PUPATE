@@ -1,7 +1,7 @@
 // The mining job as the page and the workers share it. The preimage is the spec's 192 bytes:
 //   keccak256(abi.encode(DOMAIN, chainId, contract, keccak256(abi.encode(anchorHash, prevWork)), miner, nonce))
-// Live, every field comes from the contract; in a practice run they are random, the target is the
-// practice target, and a found hash mints nothing.
+// Live, every field comes from the contract (lib/metamorph/job.ts builds the job); in a practice run they
+// are random, the target is the practice target, and a found hash mints nothing.
 import type { Hex } from "viem";
 
 export interface MinerJob {
@@ -15,8 +15,12 @@ export interface MinerJob {
   /// The target's top 64 bits as two uint32 words; a digest wins when its first two words are below them.
   targetHi: number;
   targetLo: number;
-  /// The leading zero bits the target asks for; the page shows it and tells a gilt hash by it (4 more).
+  /// The leading zero bits the target asks for. The page shows it, and a practice run tells a gilt hash by
+  /// it (4 more); live, gilt is read from the mint's receipt.
   bits: number;
+  /// A job from the contract, whose finds are sent as mints. A practice job says false, and its finds are
+  /// never sent anywhere.
+  live?: boolean;
 }
 
 export type Power = 25 | 50 | 75 | 100;
@@ -64,6 +68,16 @@ export function targetWords(bits: number): { targetHi: number; targetLo: number 
   return { targetHi: Number(top >> 32n), targetLo: Number(top & 0xffffffffn) };
 }
 
+/// The two target words of a uint256 target: its top 64 bits. A digest whose first eight bytes are below
+/// them is below the target whatever its other 24 bytes, so the engines' two-word compare never passes a
+/// hash the contract refuses; it passes over only digests whose top 64 bits equal the target's (one hash
+/// in 2^64 at most).
+export function targetWordsFrom(target: bigint): { targetHi: number; targetLo: number } {
+  if (target < 0n || target >> 256n !== 0n) throw new RangeError("a target is a uint256");
+  const top = target >> 192n;
+  return { targetHi: Number(top >> 32n), targetLo: Number(top & 0xffffffffn) };
+}
+
 export function practiceJob(id: number, miner?: Hex, bits: number = PRACTICE_BITS): MinerJob {
   return {
     id,
@@ -74,6 +88,7 @@ export function practiceJob(id: number, miner?: Hex, bits: number = PRACTICE_BIT
     miner: miner ?? randomHex(20),
     ...targetWords(bits),
     bits,
+    live: false,
   };
 }
 

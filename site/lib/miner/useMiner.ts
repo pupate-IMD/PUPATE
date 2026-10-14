@@ -6,22 +6,63 @@
 // whose hits are re-hashed on the CPU before they count. The GPU is offered when the browser has WebGPU
 // and an adapter; the first time it is picked it runs a self-test, and its practice target follows the
 // rate that test measured. A GPU that is lost or fails puts the miner back on the CPU by itself.
-// Live mode (jobs from the contract, auto-mint through the wallet) plugs into the same hook when the
-// contracts exist; today every run is a practice run, and a found hash is logged, never minted.
+//
+// Live mode, when the page hands over a LiveLink (the contracts exist on the chain): start({ live: true,
+// wallet }) mines the contract's job (lib/metamorph/job.ts) on whichever engine is picked. Every three
+// seconds, and at once after a mint, the job is read again and swapped in through the same dispatch when
+// someone minted (prevWork moved), the target moved, or the anchor is ten blocks from leaving its window;
+// a hash waiting to be minted is dropped then with the spec's line. A find is checked on the main thread
+// against the job's own proof and whole target, then sent as a mint (lib/metamorph/mint.ts): at once with
+// auto-mint on, else from the Mint button. A wallet rejection turns auto-mint off; gilt comes from the
+// receipt. A practice job says live: false, and its finds are never sent.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Hex } from "viem";
+import { isAddressEqual, type Address, type Hex, type PublicClient } from "viem";
+import { metamorphAbi } from "../metamorph/abi";
+import { type LiveAddresses, type LiveJob, anchorExpiring, isLiveJob, jobChanged, liveJob, meets, mineableSeats, workOf } from "../metamorph/job";
+import {
+  LINES,
+  type MintOutcome,
+  type WriteContract,
+  approvePupate,
+  cardImage,
+  errorText,
+  findMinted,
+  gasLine,
+  isUserRejection,
+  outcomeLines,
+  parseMintReceipt,
+  prepareMint,
+  sendMint,
+} from "../metamorph/mint";
 import { type GpuFailure, GpuMiner } from "./gpu/gpuMiner";
 import { type Engine, type FromWorker, type MinerJob, type Power, PRACTICE_BITS, fmtRate, leadingZeroBits, practiceBitsFor, practiceJob, randomHex } from "./job";
+
+/// A card this session minted, read from the mint's receipt.
+export interface MintCard {
+  id: number;
+  seat: number;
+  gilt: boolean;
+  /// This session's mints, counted from 1: the drawer's places.
+  k: number;
+  /// The mint's transaction, when the receipt was seen.
+  hash?: Hex;
+  /// The card's image from tokenURI (a data URI), once read.
+  image?: string;
+}
 
 export interface Found {
   n: number;
   nonce: Hex;
   digest: Hex;
-  /// Four more leading zero bits than the target asks: a gilt hash, one in sixteen.
+  /// Practice: four more leading zero bits than the target asks, one in sixteen. Live: the receipt's word.
   gilt: boolean;
   at: number;
   sinceStart: number;
   minted: boolean;
+  /// Found on a job from the contract.
+  live?: boolean;
+  /// Live: the card the mint made.
+  card?: MintCard;
 }
 
 export interface LogLine {
@@ -57,6 +98,8 @@ export interface GpuState {
 export interface MinerState {
   running: boolean;
   practice: boolean;
+  /// The run (or the hash waiting to be minted) is on the contract's job: finds are sent as mints.
+  live: boolean;
   engine: Engine;
   power: Power;
   threads: number;
@@ -72,9 +115,34 @@ export interface MinerState {
   /// A found hash waiting for the Mint button (auto-mint off).
   pending: Found | null;
   log: LogLine[];
-  /// The practice target of the engine in use, in leading zero bits.
+  /// The leading zero bits of the job being mined: the practice target, or live the contract's bits().
   bits: number;
   gpu: GpuState;
+  /// Live: the mint price of the job being mined, in PUPATE wei; null in a practice run.
+  price: bigint | null;
+  /// Live: a mint is on its way (the wallet is open, or the block is awaited).
+  minting: boolean;
+  /// The PUPATE approval is on its way.
+  approving: boolean;
+  /// Live: the newest card this session minted.
+  lastMint: MintCard | null;
+}
+
+/// What live mode needs from the page: the target chain's public client and addresses (with Metamorph
+/// MD), the wallet's write, and the wallet connected right now (a live run stops when it changes).
+export interface LiveLink {
+  client: PublicClient;
+  addresses: LiveAddresses;
+  write: WriteContract;
+  wallet: Address | null;
+}
+
+export interface StartOptions {
+  /// Mine the contract's job and send finds as mints from `wallet`; needs the LiveLink.
+  live?: boolean;
+  wallet?: Address;
+  /// A practice run's miner word (the wallet when one is connected, for realism; random otherwise).
+  miner?: Hex;
 }
 
 const CHUNK = 2000;
@@ -83,18 +151,25 @@ const FOUND_KEPT = 64;
 /// CPU threads write their index (0..254) into nonce byte 24 and the GPU writes 0xff there, so the two
 /// engines' nonces never meet: at most 255 threads, whatever the machine reports.
 const MAX_CPU_THREADS = 255;
+/// How often a live run reads the chain for its job.
+const POLL_MS = 3000;
+/// The pause before the one retry of a mint that met a network error.
+const RETRY_MS = 1500;
 
 function stamp(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-export function useMiner() {
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+export function useMiner(link: LiveLink | null = null) {
   const [engine, setEngineState] = useState<Engine>("cpu");
   const [power, setPowerState] = useState<Power>(75);
   const [auto, setAuto] = useState(true);
   const [running, setRunning] = useState(false);
   const [practice, setPractice] = useState(true);
+  const [live, setLive] = useState(false);
   const [rate, setRate] = useState(0);
   const [hashes, setHashes] = useState(0);
   const [seconds, setSeconds] = useState(0);
@@ -108,6 +183,10 @@ export function useMiner() {
   const [threads, setThreads] = useState(1);
   const [bits, setBits] = useState(PRACTICE_BITS);
   const [gpu, setGpuState] = useState<GpuState>({ checked: false, available: false });
+  const [price, setPrice] = useState<bigint | null>(null);
+  const [minting, setMintingState] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [lastMint, setLastMint] = useState<MintCard | null>(null);
 
   const workers = useRef<Worker[]>([]);
   const gpuMiner = useRef<GpuMiner | null>(null);
@@ -118,9 +197,12 @@ export function useMiner() {
   const timer = useRef<number | null>(null);
   const foundN = useRef(0);
   const sampledAt = useRef(0);
-  // What callbacks that outlive a render (worker and GPU messages, the self-test) read at call time.
+  // What callbacks that outlive a render (worker and GPU messages, the self-test, the poller, a mint on its
+  // way) read at call time.
   const autoRef = useRef(auto);
   autoRef.current = auto;
+  const linkRef = useRef<LiveLink | null>(link);
+  linkRef.current = link;
   const engineRef = useRef<Engine>("cpu");
   const powerRef = useRef<Power>(75);
   const threadsRef = useRef(1);
@@ -135,6 +217,35 @@ export function useMiner() {
   // dispatch and the found handler call each other, and the GPU's failure handler switches engines.
   const dispatchRef = useRef<(j: MinerJob) => void>(() => {});
   const switchRef = useRef<(e: Engine) => void>(() => {});
+  /// Every job gets a fresh id, practice or live, so a message from an engine about an older job (a
+  /// practice find arriving after a live run started, say) never matches the job being mined.
+  const jobSeq = useRef(0);
+  /// Bumped by every start and stop, so a live start still reading the chain knows it was overtaken.
+  const runSeq = useRef(0);
+  /// Live mode's own: the run is on the contract's job, the wallet it mines for, the job of the hash
+  /// waiting for the Mint button, a mint on its way, the engines paused (a find waits or is being sent),
+  /// the poll timer and its guard, the polls that failed in a row, and this session's mints.
+  const liveRef = useRef(false);
+  const walletRef = useRef<Address | null>(null);
+  const pendingJob = useRef<LiveJob | null>(null);
+  const mintingRef = useRef(false);
+  const idle = useRef(true);
+  const poll = useRef<number | null>(null);
+  const polling = useRef(false);
+  /// A poll asked for while another was on its way runs when that one ends.
+  const pollAgain = useRef(false);
+  /// Bumped when a mint starts and when it ends: a job read across either is stale and is dropped.
+  const mintGen = useRef(0);
+  /// The prevWork this session's last mint replaced: a node that still shows it is behind the receipt, and
+  /// its job is skipped rather than mined (a find on it would read as someone else's win), for a few polls
+  /// at most, in case the block that held the mint was dropped.
+  const replaced = useRef<Hex | null>(null);
+  const replacedSkips = useRef(0);
+  const misses = useRef(0);
+  const mintsK = useRef(0);
+  const approvingRef = useRef(false);
+  const mintRef = useRef<(f: Found, j: LiveJob) => Promise<void>>(async () => {});
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   const engineBits = () => (engineRef.current === "gpu" ? gpuBits.current : PRACTICE_BITS);
   const engineText = (e: Engine) =>
@@ -148,6 +259,12 @@ export function useMiner() {
   const setPending = useCallback((f: Found | null) => {
     pendingRef.current = f;
     setPendingState(f);
+  }, []);
+
+  const setMinting = useCallback((on: boolean) => {
+    mintingRef.current = on;
+    mintGen.current++;
+    setMintingState(on);
   }, []);
 
   /// The drawing redraws at most ten times a second, so the sample needs no more; every extra update is a
@@ -171,18 +288,74 @@ export function useMiner() {
     workers.current = [];
   }, []);
 
-  /// Stops both engines and the rate timer.
+  /// Stops both engines, the rate timer and the live poll.
   const terminate = useCallback(() => {
     dropWorkers();
     gpuMiner.current?.stop();
+    idle.current = true;
     if (timer.current) window.clearInterval(timer.current);
     timer.current = null;
+    if (poll.current) window.clearInterval(poll.current);
+    poll.current = null;
   }, [dropWorkers]);
+
+  /// Rests both engines without ending the run: a find waits for the Mint button or is being sent. The
+  /// next dispatch wakes them.
+  const pauseEngines = useCallback(() => {
+    for (const w of workers.current) w.postMessage({ type: "stop" });
+    gpuMiner.current?.stop();
+    idle.current = true;
+  }, []);
+
+  const autoOff = useCallback(() => {
+    autoRef.current = false;
+    setAuto(false);
+  }, []);
+
+  /// A live find: checked on the main thread before the wallet is asked, as the contract will check it (the
+  /// proof through viem's encoder, apart from the engines' byte builders, must be the digest reported and
+  /// below the job's whole target; a practice find cannot pass, its preimage is a practice job's). Then the
+  /// engines rest, and the hash is sent at once with auto-mint on, or waits for the Mint button.
+  const foundLive = useCallback(
+    (j: LiveJob, nonce: Hex, digest: Hex) => {
+      const work = workOf(j, BigInt(nonce));
+      if (work !== digest.toLowerCase() || !meets(j, work)) {
+        say("a find failed its check on the CPU and was set aside", "dim");
+        return;
+      }
+      const f: Found = {
+        n: ++foundN.current,
+        nonce,
+        digest: work,
+        gilt: false,
+        at: Date.now(),
+        sinceStart: (performance.now() - t0.current) / 1000,
+        minted: false,
+        live: true,
+      };
+      setFound((list) => [f, ...list].slice(0, FOUND_KEPT));
+      setTally((t) => ({ ...t, found: t.found + 1 }));
+      pauseEngines();
+      if (autoRef.current) {
+        void mintRef.current(f, j);
+        return;
+      }
+      pendingJob.current = j;
+      setPending(f);
+      say("valid hash found · mint it now", "jade");
+    },
+    [pauseEngines, say, setPending],
+  );
 
   const onFound = useCallback(
     (jobId: number, nonce: Hex, digest: Hex) => {
       const j = job.current;
-      if (!j || jobId !== j.id || pendingRef.current) return;
+      if (!j || jobId !== j.id || pendingRef.current || mintingRef.current) return;
+      if (isLiveJob(j)) {
+        // Resting engines may still have a find in the post; it is for a job already being minted or dropped.
+        if (!idle.current) foundLive(j, nonce, digest);
+        return;
+      }
       const f: Found = {
         n: ++foundN.current,
         nonce,
@@ -197,7 +370,7 @@ export function useMiner() {
       if (f.minted) {
         say(f.gilt ? `valid hash, a gilt one · practice mint · mining the next one` : `valid hash found · practice mint · mining the next one`, f.gilt ? "gold" : "jade");
         // A real mint changes prevWork for everyone; a practice mint changes the folded word the same way.
-        dispatchRef.current(practiceJob(j.id + 1, j.miner, engineBits()));
+        dispatchRef.current(practiceJob(++jobSeq.current, j.miner, engineBits()));
       } else {
         setPending(f);
         say(f.gilt ? `valid hash found, a gilt one · mint it now` : `valid hash found · mint it now`, f.gilt ? "gold" : "jade");
@@ -207,7 +380,7 @@ export function useMiner() {
     },
     // engineBits reads refs only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [say, setPending],
+    [foundLive, say, setPending],
   );
 
   const onWorker = useCallback(
@@ -245,9 +418,11 @@ export function useMiner() {
     [say, setGpu],
   );
 
+  /// Hands a job to the engine in use: the CPU workers or the GPU, practice or live alike.
   const dispatch = useCallback(
     (j: MinerJob) => {
       job.current = j;
+      idle.current = false;
       counts.current = [];
       t0.current = performance.now();
       setHashes(0);
@@ -283,49 +458,315 @@ export function useMiner() {
   );
   dispatchRef.current = dispatch;
 
-  const start = useCallback(
-    (opts: { miner?: Hex } = {}) => {
+  /// The rate timer: hashes and seconds of the job being mined, twice a second.
+  const startClock = useCallback(() => {
+    if (timer.current) window.clearInterval(timer.current);
+    timer.current = window.setInterval(() => {
+      const total = counts.current.reduce((a, b) => a + b, 0);
+      const s = (performance.now() - t0.current) / 1000;
+      setHashes(total);
+      setSeconds(s);
+      setRate(s > 0.5 ? total / s : 0);
+    }, 500);
+  }, []);
+
+  /// A minted card: the receipt's lines, the find marked with its card, the card's image read once.
+  const landed = useCallback(
+    (f: Found, o: MintOutcome, hash?: Hex) => {
+      const lines = outcomeLines(o, runningRef.current);
+      const m = o.minted;
+      lines.forEach((line, i) => say(line, !m ? "dim" : i === 0 && m.gilt ? "gold" : "jade"));
+      if (!m) return;
+      const card: MintCard = { id: Number(m.id), seat: Number(m.seat), gilt: m.gilt, k: ++mintsK.current, hash };
+      setFound((list) => list.map((x) => (x.n === f.n ? { ...x, minted: true, gilt: m.gilt, card } : x)));
+      if (m.gilt) setTally((t) => ({ ...t, gilt: t.gilt + 1 }));
+      setLastMint(card);
+      const l = linkRef.current;
+      if (!l) return;
+      void cardImage(l.client, l.addresses, m.id)
+        .then((image) => {
+          if (!image) return;
+          setFound((list) => list.map((x) => (x.card?.k === card.k ? { ...x, card: { ...x.card, image } } : x)));
+          setLastMint((c) => (c?.k === card.k ? { ...c, image } : c));
+        })
+        .catch(() => undefined);
+    },
+    [say],
+  );
+
+  /// Ends a live run that cannot go on (nothing to mine, all minted, the wallet changed).
+  const halt = useCallback(
+    (line: string) => {
+      runSeq.current++;
       terminate();
-      setPractice(true);
+      runningRef.current = false;
+      setRunning(false);
+      say(line, "dim");
+    },
+    [say, terminate],
+  );
+
+  /// Sends a live find as a mint: the checks and the approval (prepareMint), the padded gas limit, the
+  /// wallet, the block, the receipt. One retry after a network error before the send; once the mint is
+  /// sent it is never sent again, and a receipt that does not come is settled by reading prevWork. A
+  /// refusal of the wallet turns auto-mint off and leaves the hash waiting for the Mint button. Afterwards
+  /// the job is read at once.
+  const mintLive = useCallback(
+    async (f: Found, j: LiveJob) => {
+      const l = linkRef.current;
+      const wallet = walletRef.current;
+      if (!l || !wallet || mintingRef.current) return;
+      // A proof is bound to the wallet it was mined for; sent from another it can only revert.
+      if (!l.wallet || !isAddressEqual(l.wallet, wallet)) {
+        say("the wallet changed · that hash was mined for the other one", "dim");
+        return;
+      }
+      setMinting(true);
+      say(LINES.found, "jade");
+      const nonce = BigInt(f.nonce);
+      const wait = (why: string, tone: LogLine["tone"]) => {
+        say(why, tone);
+        pendingJob.current = j;
+        setPending(f);
+      };
+      try {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const prep = await prepareMint(l.client, l.addresses, {
+              wallet,
+              job: j,
+              nonce,
+              work: f.digest,
+              write: l.write,
+              onApprove: () => say(LINES.approving),
+            });
+            if (!prep.ok) {
+              if (prep.why === "short") {
+                autoOff();
+                wait(LINES.short, "gold");
+              } else if (prep.why === "landed") {
+                // The send's answer went missing but the mint landed: prevWork is this hash's proof.
+                replaced.current = j.prevWork;
+                replacedSkips.current = 0;
+                const card = await findMinted(l.client, l.addresses, wallet, f.digest, j.block - 1n).catch(() => null);
+                if (card) landed(f, { status: "success", minted: card, duties: [], lost: false });
+                else say(`your mint landed${runningRef.current ? " · mining the next one" : ""}`, "jade");
+              } else if (prep.why === "nothing" || prep.why === "soldOut") {
+                halt(prep.why === "nothing" ? LINES.nothing : LINES.soldOut);
+              } else {
+                say(prep.why === "lost" ? LINES.lost : prep.why === "expired" ? LINES.expired : LINES.difficulty, "dim");
+              }
+              return;
+            }
+            say(gasLine(prep.gas, prep.gas > prep.estimate), "dim");
+            const hash = await sendMint(l.write, l.addresses, j.anchor, nonce, prep.gas);
+            let receipt;
+            try {
+              receipt = await l.client.waitForTransactionReceipt({ hash, timeout: 600_000 });
+            } catch (e) {
+              // Sent, but its block was not seen: the chain says whether it landed; it is not sent again.
+              const now = await l.client.readContract({ address: l.addresses.metamorph, abi: metamorphAbi, functionName: "prevWork" }).catch(() => null);
+              const card = now?.toLowerCase() === f.digest ? await findMinted(l.client, l.addresses, wallet, f.digest, j.block - 1n).catch(() => null) : null;
+              if (card) {
+                replaced.current = j.prevWork;
+                replacedSkips.current = 0;
+                landed(f, { status: "success", minted: card, duties: [], lost: false }, hash);
+              } else say(`the mint was sent but its block was not seen: ${errorText(e)} · mining again`, "dim");
+              return;
+            }
+            const outcome = parseMintReceipt(receipt, l.addresses, wallet);
+            if (outcome.minted) {
+              replaced.current = j.prevWork;
+              replacedSkips.current = 0;
+            }
+            landed(f, outcome, hash);
+            return;
+          } catch (e) {
+            if (isUserRejection(e)) {
+              autoOff();
+              wait(LINES.declined, "dim");
+              return;
+            }
+            if (attempt >= 1) {
+              say(`the mint did not go through: ${errorText(e)} · mining again`, "dim");
+              return;
+            }
+            say(`the network stumbled: ${errorText(e)} · trying once more`, "dim");
+            await sleep(RETRY_MS);
+          }
+        }
+      } finally {
+        setMinting(false);
+        void refreshRef.current();
+      }
+    },
+    [autoOff, halt, landed, say, setMinting, setPending],
+  );
+  mintRef.current = mintLive;
+
+  /// The live poll: the job as the chain stands, swapped in when someone minted, the target moved, the
+  /// anchor nears the end of its window, or the engines rest after a mint. A hash waiting for the Mint
+  /// button is dropped once someone minted or its anchor is about to expire. Skipped while a mint is on its
+  /// way; that mint reads the job itself when it is done.
+  const refreshJob = useCallback(async () => {
+    const l = linkRef.current;
+    const wallet = walletRef.current;
+    if (!liveRef.current || !l || !wallet || mintingRef.current) return;
+    if (polling.current) {
+      pollAgain.current = true;
+      return;
+    }
+    if (!l.wallet || !isAddressEqual(l.wallet, wallet)) {
+      if (runningRef.current) halt(l.wallet ? "the wallet changed · mining stopped" : "the wallet disconnected · mining stopped");
+      return;
+    }
+    polling.current = true;
+    const gen = mintGen.current;
+    try {
+      const next = await liveJob(l.client, l.addresses, wallet);
+      misses.current = 0;
+      if (gen !== mintGen.current || !liveRef.current || mintingRef.current) return;
+      if (replaced.current && next.prevWork === replaced.current && ++replacedSkips.current <= 5) return;
+      replaced.current = null;
+      setPrice(next.price);
+      const held = pendingJob.current;
+      if (pendingRef.current && held) {
+        const voided = held.prevWork !== next.prevWork;
+        if (!voided && !anchorExpiring(held, next.block)) return;
+        setPending(null);
+        pendingJob.current = null;
+        say(voided ? LINES.lost : LINES.expired, "dim");
+      }
+      if (!runningRef.current) return;
+      const cur = job.current;
+      if (idle.current || !isLiveJob(cur) || jobChanged(cur, next) || anchorExpiring(cur, next.block)) dispatch({ ...next, id: ++jobSeq.current });
+    } catch (e) {
+      if (++misses.current === 3) say(`the chain is not answering: ${errorText(e)} · still trying`, "dim");
+    } finally {
+      polling.current = false;
+      if (pollAgain.current) {
+        pollAgain.current = false;
+        void refreshRef.current();
+      }
+    }
+  }, [dispatch, halt, say, setPending]);
+  refreshRef.current = refreshJob;
+
+  /// A live run: the miner runs at once (the button turns to Stop), reads whether anything is mineable and
+  /// the first job, then mines it and polls every three seconds. A stop or another start meanwhile wins.
+  const startLive = useCallback(
+    async (wallet: Address | undefined, run: number) => {
+      const l = linkRef.current;
+      if (!l || !wallet) {
+        say("live mining needs the contracts on this chain and a wallet", "dim");
+        return;
+      }
+      liveRef.current = true;
+      setLive(true);
+      setPractice(false);
+      setPrice(null);
+      walletRef.current = wallet;
+      job.current = null;
+      runningRef.current = true;
+      setRunning(true);
+      startClock();
+      let first: LiveJob;
+      try {
+        const [open, j] = await Promise.all([mineableSeats(l.client, l.addresses), liveJob(l.client, l.addresses, wallet)]);
+        if (run !== runSeq.current) return;
+        if (open.length === 0) return halt(LINES.nothing);
+        first = j;
+      } catch (e) {
+        if (run !== runSeq.current) return;
+        return halt(`the chain did not answer: ${errorText(e)}`);
+      }
+      setPrice(first.price);
+      dispatch({ ...first, id: ++jobSeq.current });
+      const n = threadsRef.current;
+      const where = engineRef.current === "gpu" ? `${gpuRef.current.name ?? "WebGPU"}` : `${n} thread${n > 1 ? "s" : ""}`;
+      say(`started on ${engineRef.current.toUpperCase()} at ${powerRef.current}% power · ${where} · live, ${first.bits} bits`);
+      poll.current = window.setInterval(() => void refreshRef.current(), POLL_MS);
+    },
+    [dispatch, halt, say, startClock],
+  );
+
+  const start = useCallback(
+    (opts: StartOptions = {}) => {
+      terminate();
       setPending(null);
-      dispatch(practiceJob(1, opts.miner, engineBits()));
+      pendingJob.current = null;
+      const run = ++runSeq.current;
+      if (opts.live) {
+        void startLive(opts.wallet, run);
+        return;
+      }
+      liveRef.current = false;
+      setLive(false);
+      setPrice(null);
+      setPractice(true);
+      dispatch(practiceJob(++jobSeq.current, opts.miner, engineBits()));
       runningRef.current = true;
       setRunning(true);
       const n = threadsRef.current;
       const where = engineRef.current === "gpu" ? `${gpuRef.current.name ?? "WebGPU"}` : `${n} thread${n > 1 ? "s" : ""}`;
       say(`started on ${engineRef.current.toUpperCase()} at ${powerRef.current}% power · ${where} · practice job, real speed`);
-      timer.current = window.setInterval(() => {
-        const total = counts.current.reduce((a, b) => a + b, 0);
-        const s = (performance.now() - t0.current) / 1000;
-        setHashes(total);
-        setSeconds(s);
-        setRate(s > 0.5 ? total / s : 0);
-      }, 500);
+      startClock();
     },
-    // engineBits and engineText read refs only.
+    // engineBits reads refs only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dispatch, say, setPending, terminate],
+    [dispatch, say, setPending, startClock, startLive, terminate],
   );
 
   const stop = useCallback(() => {
     if (!runningRef.current) return;
+    runSeq.current++;
     terminate();
     runningRef.current = false;
     setRunning(false);
     say("stopped");
   }, [say, terminate]);
 
-  /// The Mint button in a practice run: nothing is sent; the log says what a live mint would do.
+  /// The Mint button. Live, the waiting hash is sent as a mint. In a practice run nothing is sent; the log
+  /// says what a live mint would do.
   const mintPending = useCallback(() => {
     const f = pendingRef.current;
-    if (!f || !job.current) return;
+    if (!f) return;
+    if (f.live) {
+      const j = pendingJob.current;
+      if (!j || mintingRef.current) return;
+      setPending(null);
+      pendingJob.current = null;
+      void mintRef.current(f, j);
+      return;
+    }
+    if (!job.current) return;
     setFound((list) => list.map((x) => (x.n === f.n ? { ...x, minted: true } : x)));
     setPending(null);
     say("practice mint · live, your wallet would open to sign here", "dim");
-    if (runningRef.current) dispatch(practiceJob(job.current.id + 1, job.current.miner, engineBits()));
+    if (runningRef.current) dispatch(practiceJob(++jobSeq.current, job.current.miner, engineBits()));
     // engineBits reads refs only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, say, setPending]);
+
+  /// The Approve PUPATE button: the token may take PUPATE for every mint from now on. True when it landed.
+  const approve = useCallback(async (): Promise<boolean> => {
+    const l = linkRef.current;
+    if (!l || approvingRef.current) return false;
+    approvingRef.current = true;
+    setApproving(true);
+    say(LINES.approving);
+    try {
+      await approvePupate(l.client, l.addresses, l.write);
+      say(LINES.approved, "jade");
+      return true;
+    } catch (e) {
+      say(isUserRejection(e) ? "you declined the approval in your wallet" : `the approval did not go through: ${errorText(e)}`, "dim");
+      return false;
+    } finally {
+      approvingRef.current = false;
+      setApproving(false);
+    }
+  }, [say]);
 
   const setPower = useCallback((p: Power) => {
     powerRef.current = p;
@@ -334,14 +775,22 @@ export function useMiner() {
     gpuMiner.current?.setPower(p);
   }, []);
 
-  /// Puts the miner on engine `e`; a running miner moves its search there with a fresh job.
+  /// Puts the miner on engine `e`. A running practice miner moves its search there with a fresh practice
+  /// job; a live run moves the contract's job as it is (both engines grind the same MinerJob), and never a
+  /// practice job, whether or not its first job has arrived.
   const switchTo = useCallback(
     (e: Engine) => {
       engineRef.current = e;
       setEngineState(e);
+      if (liveRef.current) {
+        say(`engine: ${engineText(e)}`);
+        const cur = job.current;
+        if (isLiveJob(cur) && runningRef.current && !pendingRef.current && !mintingRef.current && !idle.current) dispatch({ ...cur, id: ++jobSeq.current });
+        return;
+      }
       const b = engineBits();
       say(`engine: ${engineText(e)} · practice target ${b} bits`);
-      if (runningRef.current && !pendingRef.current && job.current) dispatch(practiceJob(job.current.id + 1, job.current.miner, b));
+      if (runningRef.current && !pendingRef.current && job.current) dispatch(practiceJob(++jobSeq.current, job.current.miner, b));
       else setBits(b);
     },
     // engineBits and engineText read refs only.
@@ -406,9 +855,31 @@ export function useMiner() {
   useEffect(() => () => terminate(), [terminate]);
 
   const state: MinerState = useMemo(
-    () => ({ running, practice, engine, power, threads, auto, rate, hashes, seconds, sample, found, tally, pending, log, bits, gpu }),
-    [running, practice, engine, power, threads, auto, rate, hashes, seconds, sample, found, tally, pending, log, bits, gpu],
+    () => ({
+      running,
+      practice,
+      live,
+      engine,
+      power,
+      threads,
+      auto,
+      rate,
+      hashes,
+      seconds,
+      sample,
+      found,
+      tally,
+      pending,
+      log,
+      bits,
+      gpu,
+      price,
+      minting,
+      approving,
+      lastMint,
+    }),
+    [running, practice, live, engine, power, threads, auto, rate, hashes, seconds, sample, found, tally, pending, log, bits, gpu, price, minting, approving, lastMint],
   );
 
-  return { state, start, stop, setPower, setEngine, setAuto, mintPending, fmtRate };
+  return { state, start, stop, setPower, setEngine, setAuto, mintPending, approve, fmtRate };
 }

@@ -1,6 +1,11 @@
-// Pure-logic checks of the Metamorph MD page, in Node: no chain, no browser. It starts with the ABI the
-// page and the keeper share (site/lib/metamorph/abi.ts); the job builder, the gas padding, the
-// pending-IMD formula and the Transfer folding join it as they are written.
+// Logic checks of the Metamorph MD page, in Node, no browser: the ABI the page and the keeper share
+// (site/lib/metamorph/abi.ts); then the live job and the mint (lib/metamorph/job.ts, mint.ts): the target
+// words, the gas padding, the field-note lines, the receipt reading, the allowance re-checked at an epoch
+// step, the refusals; then the same against the local stack when it is up (script/local/up.mjs: anvil on
+// 8545 with Metamorph MD at one bit), where a real mint is mined and sent from anvil's account #2: the job
+// against the contract's views, the folded word against workHash, an eth_call of mint, the padded limit,
+// the receipt, the card's image, a race in one block, the anchor's window. Without the stack that part
+// says SKIP. The pending-IMD formula and the Transfer folding join as they are written.
 //
 //   cd site && npm run mine-check        (or: node scripts/mine-logic.mjs)
 //
@@ -12,10 +17,30 @@
 // so re-paste them when a contract changes. Outputs, mutability and indexed flags are held against the
 // compiled ABI in ../out when `forge build` has run, and keeper/lib/abi.mjs's metamorphAbi against the
 // site's when the keeper's dependencies are installed; each of those two says SKIP otherwise.
+import { keccak_256 } from "@noble/hashes/sha3";
 import { existsSync, readFileSync } from "node:fs";
+import { registerHooks } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { toEventSelector, toFunctionSelector } from "viem";
+import {
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  UserRejectedRequestError,
+  createPublicClient,
+  createWalletClient,
+  encodeAbiParameters,
+  encodeEventTopics,
+  erc20Abi,
+  getAddress,
+  http,
+  isAddressEqual,
+  keccak256,
+  maxUint256,
+  toBytes,
+  toEventSelector,
+  toFunctionSelector,
+} from "viem";
+import { foundry } from "viem/chains";
 import { formatAbiItem } from "viem/utils";
 import {
   METAMORPH_ART_SIGNATURES,
@@ -278,6 +303,575 @@ for (const [name, abi, artifact] of [
   } catch (e) {
     skip(what, `keeper/lib/abi.mjs did not load (npm ci in keeper/): ${e.code ?? e.message}`);
   }
+}
+
+// ------------------------------------------------------------------ live jobs and the mint (Task 2)
+
+// lib/metamorph/job.ts and mint.ts import their neighbours without an extension, as the site's bundler
+// resolves them; Node needs the ".ts" spelled out, so a resolve hook adds it for relative imports. The
+// modules are imported after the hook is in place (a static import would be resolved before it).
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (/^\.\.?\//.test(specifier) && !/\.[cm]?[jt]sx?$/.test(specifier)) return nextResolve(`${specifier}.ts`, context);
+    return nextResolve(specifier, context);
+  },
+});
+const J = await import("../lib/metamorph/job.ts");
+const M = await import("../lib/metamorph/mint.ts");
+const { cocoonAbi } = await import("../lib/abi.ts");
+const { buildSwap } = await import("../lib/swap.ts");
+const { PRACTICE_BITS, practiceBitsFor, targetWords, targetWordsFrom } = await import("../lib/miner/job.ts");
+const { preimage, bytesHex, hexBytes } = await import("../lib/miner/gpu/words.ts");
+
+console.log("\n== live jobs and the mint (lib/metamorph/job.ts, lib/metamorph/mint.ts)");
+
+const MAX = (1n << 256n) - 1n;
+const words64 = (w) => (BigInt(w.targetHi) << 32n) | BigInt(w.targetLo);
+
+// The engines' two words: the top 64 bits of the contract's target, never passing a hash it refuses.
+{
+  let same = true;
+  for (let b = 1; b < 64; b++) {
+    const a = targetWordsFrom(1n << BigInt(256 - b));
+    const w = targetWords(b);
+    same &&= a.targetHi === w.targetHi && a.targetLo === w.targetLo;
+  }
+  check("targetWordsFrom(2^(256-b)) equals the practice targetWords(b) for b = 1..63", same);
+  let exact = true;
+  let safe = true;
+  for (let i = 0; i < 2000; i++) {
+    const t = BigInt(bytesHex(crypto.getRandomValues(new Uint8Array(32)))) >> BigInt(i % 40);
+    const w = words64(targetWordsFrom(t));
+    exact &&= w === t >> 192n;
+    // Any digest whose first eight bytes are below the words is below w * 2^192 <= t.
+    safe &&= w << 192n <= t;
+  }
+  check("targetWordsFrom is the top 64 bits, and a hash it passes is below the whole target (2,000 random)", exact && safe);
+  const ceil1 = targetWordsFrom(MAX >> 1n);
+  let refused = 0;
+  try {
+    targetWordsFrom(1n << 256n);
+  } catch {
+    refused++;
+  }
+  try {
+    targetWordsFrom(-1n);
+  } catch {
+    refused++;
+  }
+  check(
+    "the one-bit ceiling (max >> 1) gives 0x7fffffff ffffffff; a uint256 out of range is refused",
+    ceil1.targetHi === 0x7fffffff && ceil1.targetLo === 0xffffffff && refused === 2,
+  );
+}
+
+// The practice target is untouched: the GPU's bits from its measured rate, as before this task.
+{
+  const table = [
+    [0, 20],
+    [-5, 20],
+    [NaN, 20],
+    [1e3, 20],
+    [1e6, 22],
+    [5e7, 28],
+    [1e8, 29],
+    [1e9, 32],
+    [3e10, 37],
+    [1e12, 40],
+  ];
+  const off = table.filter(([rate, want]) => practiceBitsFor(rate) !== want).map(([rate, want]) => `${rate}: ${practiceBitsFor(rate)} not ${want}`);
+  check("practiceBitsFor unchanged (rate -> bits, 20..40) and PRACTICE_BITS is 20", off.length === 0 && PRACTICE_BITS === 20, off.join("; "));
+}
+
+// The gas rule: the estimate + 400,000 per due flush or burn + 1,000,000 for a due conversion.
+{
+  const est = 180_000n;
+  const off = [];
+  for (let k = 0; k < 8; k++) {
+    const d = { flushDue: !!(k & 1), burnDue: !!(k & 2), convertDue: !!(k & 4) };
+    const want = est + (d.flushDue ? 400_000n : 0n) + (d.burnDue ? 400_000n : 0n) + (d.convertDue ? 1_000_000n : 0n);
+    if (M.paddedGas(est, d) !== want) off.push(`${JSON.stringify(d)}: ${M.paddedGas(est, d)}`);
+  }
+  check(
+    "paddedGas: all eight duty combinations (180,000 -> 580,000 / 980,000 / 1,180,000 ... 1,980,000)",
+    off.length === 0 && M.DUTY_PAD === 400_000n && M.CONVERT_PAD === 1_000_000n && M.paddedGas(est, { flushDue: true, burnDue: true, convertDue: true }) === 1_980_000n,
+    off.join("; "),
+  );
+}
+
+// The field notes: the spec's lines word for word, and the duty lines with their amounts.
+{
+  const e18 = 10n ** 18n;
+  const got = [
+    [M.LINES.found, "found a valid hash · sending the mint"],
+    [M.LINES.lost, "someone minted first, your hash expired · mining again"],
+    [M.LINES.short, "not enough PUPATE for the mint price"],
+    [M.LINES.approving, "approving PUPATE once for every mint"],
+    [M.mintedLine({ id: 212n, seat: 1376n, gilt: false }), "Metamorph.md #212 is yours · seat identity.md #1376 · mining the next one"],
+    [M.mintedLine({ id: 212n, seat: 1376n, gilt: true }), "Metamorph.md #212 is yours · seat identity.md #1376 · gilt · mining the next one"],
+    [M.mintedLine({ id: 3n, seat: 9n, gilt: false }, false), "Metamorph.md #3 is yours · seat identity.md #9"],
+    [M.dutyLine({ kind: 1, paid: (23n * e18) / 100_000n, burned: (46n * e18) / 1000n }), "your mint also burned 0.046 ETH of tax for the vault · you earned 0.00023 ETH"],
+    [M.dutyLine({ kind: 1, paid: (23n * e18) / 100_000n }), "your mint also burned the vault's tax · you earned 0.00023 ETH"],
+    [M.dutyLine({ kind: 2, paid: (15n * e18) / 10n }), "your mint also converted the stakers' share · you earned 1.5 IMD"],
+    [M.dutyLine({ kind: 0, paid: 0n }), "your mint also flushed the vault's tax"],
+    [M.gasLine(580_000n, true), "sending with 580,000 gas, the vault's duties included"],
+    [M.gasLine(180_000n, false), "sending with 180,000 gas"],
+  ];
+  const off = got.filter(([a, b]) => a !== b).map(([a, b]) => `"${a}" is not "${b}"`);
+  check(`the field-note lines are the spec's (${got.length})`, off.length === 0, off.join("; "));
+}
+
+// The receipt, read from logs built as the contracts emit them: the card only from the token's own Minted
+// for this miner, the duties from its DutyRun, a burn's ETH from Cocoon's Burned whose caller is the token.
+const MD = "0x5bdc0de333c5e37f4a8f567c332bb1de6e669589";
+const COCOON = "0xcb3bae124cbeefc23b678497a9547d4fcb5e7a03";
+const ME = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc";
+const THEM = "0x90f79bf6eb2c4f870365e785982e1f101e93b906";
+function logOf(abi, address, eventName, args) {
+  const item = abi.find((x) => x.type === "event" && x.name === eventName);
+  const topics = encodeEventTopics({ abi: [item], eventName, args });
+  const plain = item.inputs.filter((p) => !p.indexed);
+  const data = encodeAbiParameters(plain, plain.map((p) => args[p.name]));
+  return { address, topics, data, blockNumber: 1n, transactionHash: `0x${"ab".repeat(32)}`, logIndex: 0, blockHash: `0x${"cd".repeat(32)}`, transactionIndex: 0, removed: false };
+}
+const minted = (miner, id) =>
+  logOf(metamorphAbi, MD, "Minted", { id, seat: 1376n, round: 1, edition: Number(id), miner, work: `0x${"0f".repeat(32)}`, gilt: id === 7n, price: 50_000n * 10n ** 18n, epoch: 1 });
+const dutyRun = (address, kind, paid) => logOf(metamorphAbi, address, "DutyRun", { kind, paid });
+const burned = (address, caller, ethSpent) => logOf(cocoonAbi, address, "Burned", { ethSpent, pupateBurned: 10n ** 24n, caller, reward: ethSpent / 200n });
+{
+  const a = { metamorph: MD, cocoon: COCOON };
+  const spent = 46n * 10n ** 15n;
+  const full = M.parseMintReceipt(
+    {
+      status: "success",
+      logs: [burned(COCOON, THEM, 99n), burned(COCOON, MD, spent), minted(ME, 7n), dutyRun(MD, 0, 0n), dutyRun(MD, 1, spent / 200n), dutyRun(THEM, 2, 5n), dutyRun(MD, 2, 3n * 10n ** 18n)],
+    },
+    a,
+    ME,
+  );
+  check(
+    "parseMintReceipt: the card from Minted (id 7, gilt), the three duties from the token's DutyRun, the burn's ETH from Cocoon's Burned by the token",
+    full.minted?.id === 7n && full.minted.gilt === true && !full.lost && full.duties.length === 3 && full.duties[1].kind === 1 && full.duties[1].burned === spent && full.duties[0].burned === undefined,
+    JSON.stringify(full.duties, (k, v) => (typeof v === "bigint" ? v.toString() : v)),
+  );
+  const lines = M.outcomeLines(full);
+  check(
+    "outcomeLines: the success line, then each duty's line",
+    lines.length === 4 &&
+      lines[0] === "Metamorph.md #7 is yours · seat identity.md #1376 · gilt · mining the next one" &&
+      lines[1] === "your mint also flushed the vault's tax" &&
+      lines[2] === "your mint also burned 0.046 ETH of tax for the vault · you earned 0.00023 ETH" &&
+      lines[3] === "your mint also converted the stakers' share · you earned 3 IMD",
+    lines.join(" | "),
+  );
+  const other = M.parseMintReceipt({ status: "success", logs: [minted(THEM, 8n), dutyRun(MD, 0, 0n)] }, a, ME);
+  const reverted = M.parseMintReceipt({ status: "reverted", logs: [] }, a, ME);
+  const fake = M.parseMintReceipt({ status: "success", logs: [{ ...minted(ME, 9n), address: THEM }] }, a, ME);
+  check(
+    "parseMintReceipt: someone else's Minted, a reverted mint, or a Minted from another address is the lost race, never a card",
+    other.lost && !other.minted && other.duties.length === 0 && reverted.lost && !reverted.minted && fake.lost && M.outcomeLines(reverted).join() === M.LINES.lost,
+  );
+}
+
+// tokenImage: the SVG data URI out of the art's base64 JSON; anything else is null.
+{
+  const svg = "data:image/svg+xml;base64,PHN2Zy8+";
+  const uri = `data:application/json;base64,${Buffer.from(JSON.stringify({ name: "Metamorph.md #1 — ü", image: svg })).toString("base64")}`;
+  check(
+    "tokenImage decodes the art's JSON (UTF-8 included) and refuses other shapes",
+    M.tokenImage(uri) === svg && M.tokenImage("https://example.com/1.json") === null && M.tokenImage("data:application/json;base64,!!") === null,
+  );
+}
+
+// prepareMint against a stand-in client, so each branch is pinned without a chain: the allowance re-checked
+// at an epoch step (approved for epoch 1's price exactly, then the price of epoch 2), the short balance, and
+// a refused estimate told apart by prevWork.
+const E18 = 10n ** 18n;
+const PRICE1 = 50_000n * E18;
+const PRICE2 = 62_500n * E18;
+const PREV = `0x${"11".repeat(32)}`;
+const WORK = `0x${"22".repeat(32)}`;
+function standIn(s) {
+  const sent = [];
+  const client = {
+    multicall: async ({ contracts }) =>
+      contracts.map((c) => (c.functionName === "mintPrice" ? s.price : c.functionName === "balanceOf" ? s.balance : c.functionName === "allowance" ? s.allowance : undefined)),
+    readContract: async ({ functionName }) => (functionName === "dutiesDue" ? s.duties : functionName === "prevWork" ? s.prevWorkNow : undefined),
+    estimateContractGas: async () => {
+      if (s.revert) throw s.revert;
+      return 200_000n;
+    },
+    waitForTransactionReceipt: async () => ({ status: "success" }),
+  };
+  const write = async (call) => {
+    sent.push(call);
+    if (call.functionName === "approve") s.allowance = call.args[1];
+    return `0x${"ee".repeat(32)}`;
+  };
+  return { client, write, sent };
+}
+const reverted = (name) =>
+  new ContractFunctionExecutionError(new ContractFunctionRevertedError({ abi: metamorphAbi, data: toFunctionSelector(`${name}()`), functionName: "mint" }), {
+    abi: metamorphAbi,
+    functionName: "mint",
+    args: [1n, 2n],
+    contractAddress: MD,
+  });
+{
+  const a = { metamorph: MD, cocoon: COCOON, token: `0x${"77".repeat(20)}`, chainId: 31337 };
+  const job = { anchor: 100n, prevWork: PREV };
+  const s = { price: PRICE2, balance: 10n ** 6n * E18, allowance: PRICE1, duties: [true, false, false], prevWorkNow: PREV };
+  const t = standIn(s);
+  let told = 0;
+  const first = await M.prepareMint(t.client, a, { wallet: ME, job, nonce: 5n, write: t.write, onApprove: () => told++ });
+  const again = await M.prepareMint(t.client, a, { wallet: ME, job, nonce: 6n, write: t.write });
+  check(
+    "test_allowanceReCheckedAtAnEpochStep: allowed epoch 1's price, asked epoch 2's, approves once to the maximum, then never again",
+    first.ok && first.approved && told === 1 && t.sent.length === 1 && t.sent[0].functionName === "approve" && t.sent[0].args[0] === MD && t.sent[0].args[1] === maxUint256 && again.ok && !again.approved,
+    `${t.sent.length} write(s)`,
+  );
+  check("prepareMint pads the stand-in's estimate for the due flush (200,000 -> 600,000)", first.ok && first.estimate === 200_000n && first.gas === 600_000n);
+
+  const poor = standIn({ ...s, balance: PRICE2 - 1n, allowance: 0n });
+  const short = await M.prepareMint(poor.client, a, { wallet: ME, job, nonce: 5n, write: poor.write });
+  check("prepareMint: a balance under the price is 'short', and nothing is approved or sent", !short.ok && short.why === "short" && poor.sent.length === 0);
+
+  const why = async (revert, prevWorkNow, work) => {
+    const r = await M.prepareMint(standIn({ ...s, allowance: maxUint256, revert, prevWorkNow }).client, a, { wallet: ME, job, nonce: 5n, work, write: async () => "0x" });
+    return r.ok ? "ok" : r.why;
+  };
+  const read = [
+    [await why(reverted("NotASolution"), `0x${"33".repeat(32)}`, WORK), "lost"],
+    [await why(reverted("NotASolution"), PREV, WORK), "difficulty"],
+    [await why(reverted("NotASolution"), WORK, WORK), "landed"],
+    [await why(reverted("BadAnchor"), PREV, WORK), "expired"],
+    [await why(reverted("NothingMineable"), PREV, WORK), "nothing"],
+    [await why(reverted("SupplyExhausted"), PREV, WORK), "soldOut"],
+  ];
+  let other = "no throw";
+  try {
+    await why(new Error("connection reset"), PREV, WORK);
+  } catch (e) {
+    other = e.message;
+  }
+  check(
+    "a refused estimate: NotASolution with prevWork moved is the lost race, unmoved the difficulty, equal to the hash its own landed mint; BadAnchor expired; other errors are thrown",
+    read.every(([g, w]) => g === w) && other === "connection reset",
+    read.map(([g, w]) => `${g}${g === w ? "" : ` (want ${w})`}`).join(", "),
+  );
+}
+
+// A wallet's "no", however deep in the error; nothing else counts as one.
+check(
+  "isUserRejection: viem's UserRejectedRequestError, wrapped or bare, and code 4001; not a revert or a network error",
+  M.isUserRejection(new UserRejectedRequestError(new Error("User rejected the request."))) &&
+    M.isUserRejection(new ContractFunctionExecutionError(new UserRejectedRequestError(new Error("no")), { abi: metamorphAbi, functionName: "mint", args: [] })) &&
+    M.isUserRejection({ code: 4001, message: "User denied" }) &&
+    !M.isUserRejection(reverted("NotASolution")) &&
+    !M.isUserRejection(new Error("fetch failed")),
+);
+
+// When the poller rebuilds the job.
+{
+  const base = { live: true, prevWork: PREV, target: MAX >> 20n, ...targetWordsFrom(MAX >> 20n), chainId: 1, contract: MD, miner: ME, anchor: 100n };
+  check(
+    "jobChanged on a new prevWork or target, not on a fresh read of the same state; anchorExpiring from age 40",
+    !J.jobChanged(base, { ...base, anchor: 130n }) &&
+      J.jobChanged(base, { ...base, prevWork: WORK }) &&
+      J.jobChanged(base, { ...base, target: MAX >> 18n, ...targetWordsFrom(MAX >> 18n) }) &&
+      J.jobChanged(base, { ...base, miner: THEM }) &&
+      !J.anchorExpiring(base, 139n) &&
+      J.anchorExpiring(base, 140n),
+  );
+}
+
+// ------------------------------------------------------------------ against the local stack
+
+// The CPU worker's own 192 bytes and search (lib/miner/miner.worker.ts, run()), copied line for line: a Web
+// Worker cannot be imported in Node, so this copy is what the contract is held against, next to the GPU
+// engine's builder (gpu/words.ts) and viem's encoder (workOf).
+function workerPreimage(job, nonceHex) {
+  const buf = new Uint8Array(192);
+  buf.set(hexBytes(job.domain), 0);
+  let c = job.chainId;
+  for (let i = 63; i >= 32 && c > 0; i--) {
+    buf[i] = c & 255;
+    c = Math.floor(c / 256);
+  }
+  buf.set(hexBytes(job.contract), 64 + 12);
+  buf.set(hexBytes(job.folded), 96);
+  buf.set(hexBytes(job.miner), 128 + 12);
+  buf.set(hexBytes(nonceHex), 160);
+  return buf;
+}
+function workerSearch(job, limit = 4_000_000) {
+  const buf = workerPreimage(job, bytesHex(crypto.getRandomValues(new Uint8Array(32))));
+  const nonce = buf.subarray(160, 192);
+  nonce[24] = 0; // worker 0's lane
+  for (let i = 25; i < 32; i++) nonce[i] = 0;
+  for (let t = 1; t <= limit; t++) {
+    let k = 31;
+    while (k >= 25) {
+      nonce[k] = (nonce[k] + 1) & 255;
+      if (nonce[k] !== 0) break;
+      k--;
+    }
+    const h = keccak_256(buf);
+    const hi = ((h[0] << 24) | (h[1] << 16) | (h[2] << 8) | h[3]) >>> 0;
+    if (hi < job.targetHi || (hi === job.targetHi && ((h[4] << 24) | (h[5] << 16) | (h[6] << 8) | h[7]) >>> 0 < job.targetLo)) {
+      return { nonce: bytesHex(nonce), digest: bytesHex(h), tries: t };
+    }
+  }
+  throw new Error(`no hash under the target in ${limit} tries`);
+}
+
+const RPC = `http://127.0.0.1:${process.env.ANVIL_PORT || 8545}`;
+const LOCAL = join(REPO, "site", "public", "addresses.local.json");
+async function rpc(method, params = []) {
+  const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(`${method}: ${j.error.message}`);
+  return j.result;
+}
+async function stackUp() {
+  try {
+    return Number(await rpc("eth_chainId")) === 31337 && existsSync(LOCAL) && !!JSON.parse(readFileSync(LOCAL, "utf8")).metamorph;
+  } catch {
+    return false;
+  }
+}
+
+if (!(await stackUp())) {
+  skip("live jobs and a real mint on the local stack", `nothing answers on ${RPC} with Metamorph MD: start it with node script/local/up.mjs`);
+} else {
+  try {
+    await onTheStack();
+  } catch (e) {
+    check("the local stack's checks ran to the end", false, e instanceof Error ? e.message.split("\n")[0] : String(e));
+  }
+}
+
+async function onTheStack() {
+  console.log(`\n== the same, against the local stack (${RPC}, Metamorph MD at one bit)`);
+  const a = JSON.parse(readFileSync(LOCAL, "utf8"));
+  const pub = createPublicClient({ chain: foundry, transport: http(RPC), pollingInterval: 200 });
+  // anvil's unlocked default accounts, signed by the node: #2 mines, #3 races it, #8 (the swarm share's
+  // stand-in, 100M PUPATE after up.mjs) pays them their PUPATE.
+  const MINER = getAddress("0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC");
+  const RIVAL = getAddress("0x90F79bf6EB2c4f870365E785982E1f101E93b906");
+  const FUNDER = getAddress("0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f");
+  const walletOf = (account) => createWalletClient({ chain: foundry, transport: http(RPC), account });
+  const writes = [];
+  const writer = (account) => async (call) => {
+    writes.push({ account, fn: call.functionName });
+    return walletOf(account).writeContract(call);
+  };
+  const mined = async (hashPromise) => pub.waitForTransactionReceipt({ hash: await hashPromise });
+  const md = { address: a.metamorph, abi: metamorphAbi };
+  const view = (functionName, args) => pub.readContract({ ...md, functionName, args });
+  const [seat] = await view("notedSeats");
+  // Mints in quick succession quarter the target each (a GPU run on this stack leaves it at 20 bits and
+  // more); silence eases it by four per DECAY_INTERVAL (360 s). The stack is a fixture, so its clock is
+  // moved on until a CPU search in Node takes a moment again.
+  const bitsNow = await view("bits");
+  if (bitsNow > 12) {
+    const wait = 360 * Math.ceil((bitsNow - 1) / 2) + 1;
+    await rpc("evm_increaseTime", [wait]);
+    await rpc("evm_mine");
+    console.log(`        the stack was at ${bitsNow} bits after quick mints; its clock moved on ${wait} s, now ${await view("bits")}`);
+  }
+
+  // The job, field by field, against the contract's own views at the same block.
+  const job1 = await J.liveJob(pub, a, MINER, 1);
+  const [domain, prevWork, target, bits, price, anchorHash] = await Promise.all([
+    view("DOMAIN"),
+    view("prevWork"),
+    view("effectiveTarget"),
+    view("bits"),
+    view("mintPrice"),
+    view("anchorHash", [job1.anchor]),
+  ]);
+  check(
+    "liveJob: DOMAIN, prevWork, effectiveTarget, bits and mintPrice as the contract reads them; chain 31337; the anchor is block - 1 with the contract's anchorHash",
+    job1.live === true &&
+      job1.domain === domain &&
+      domain === keccak256(toBytes("Metamorph MD work v1")) &&
+      job1.prevWork === prevWork &&
+      job1.target === target &&
+      job1.bits === bits &&
+      job1.price === price &&
+      job1.chainId === 31337 &&
+      job1.anchor === job1.block - 1n &&
+      job1.anchorHash === anchorHash &&
+      BigInt(anchorHash) !== 0n &&
+      isAddressEqual(job1.contract, a.metamorph) &&
+      isAddressEqual(job1.miner, MINER),
+    `block ${job1.block}, ${bits} bit(s), price ${Number(price / E18).toLocaleString("en-US")} PUPATE`,
+  );
+  check(
+    "liveJob: folded = keccak256(abi.encode(anchorHash, prevWork)); the two words are effectiveTarget's top 64 bits",
+    job1.folded === keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "bytes32" }], [anchorHash, prevWork])) && words64(job1) === target >> 192n,
+  );
+
+  // One proof four ways: the worker's bytes, the GPU engine's bytes, viem's encoder, the contract's workHash.
+  let agree = 0;
+  for (let i = 0; i < 8; i++) {
+    const nonce = bytesHex(crypto.getRandomValues(new Uint8Array(32)));
+    const w = bytesHex(keccak_256(workerPreimage(job1, nonce)));
+    const g = bytesHex(keccak_256(preimage(job1, hexBytes(nonce))));
+    const v = J.workOf(job1, BigInt(nonce));
+    const c = await view("workHash", [job1.anchorHash, MINER, BigInt(nonce)]);
+    if (w === g && g === v && v === c) agree++;
+  }
+  check("the CPU worker's 192 bytes, the GPU engine's, viem's abi.encode and the contract's workHash give one proof (8 random nonces)", agree === 8, `${agree} of 8`);
+
+  // PUPATE for the two miners, their allowances back to zero (so a second run of this script starts as a
+  // first visit does), and a buy through the Universal Router (the site's own swap) so the hook holds tax
+  // and the next mint has a flush to run.
+  for (const to of [MINER, RIVAL]) {
+    await mined(walletOf(FUNDER).writeContract({ address: a.token, abi: erc20Abi, functionName: "transfer", args: [to, 1_000_000n * E18] }));
+    await mined(walletOf(to).writeContract({ address: a.token, abi: erc20Abi, functionName: "approve", args: [a.metamorph, 0n] }));
+  }
+  const head = await pub.getBlock();
+  const buy = buildSwap(a, true, E18 / 5n, 0n, head.timestamp + 1200n);
+  await mined(walletOf(MINER).sendTransaction({ to: buy.to, data: buy.data, value: buy.value }));
+
+  // A real mint from the miner's wallet, every step the page takes.
+  const job2 = await J.liveJob(pub, a, MINER, 2);
+  const hit = workerSearch(job2);
+  check(
+    "the worker's search finds a hash under the contract's two words, and it passes the whole target (viem's proof is the digest)",
+    J.meets(job2, hit.digest) && J.workOf(job2, BigInt(hit.nonce)) === hit.digest,
+    `${hit.tries} hash(es) at ${job2.bits} bit(s)`,
+  );
+  const dueBefore = await view("dutiesDue");
+  let told = 0;
+  const w0 = writes.length;
+  const prep = await M.prepareMint(pub, a, { wallet: MINER, job: job2, nonce: BigInt(hit.nonce), work: hit.digest, write: writer(MINER), onApprove: () => told++ });
+  check(
+    "prepareMint: the first mint approves PUPATE once, to the maximum (the allowance was 0)",
+    prep.ok && prep.approved && told === 1 && writes.slice(w0).map((x) => x.fn).join() === "approve" && (await pub.readContract({ address: a.token, abi: erc20Abi, functionName: "allowance", args: [MINER, a.metamorph] })) === maxUint256,
+  );
+  const [fl, bu, co] = dueBefore;
+  check(
+    "prepareMint: the limit is the estimate + 400,000 per due flush or burn + 1,000,000 for a due conversion, as dutiesDue() reads",
+    prep.ok && prep.duties.flushDue === fl && prep.duties.burnDue === bu && prep.duties.convertDue === co && prep.gas === prep.estimate + 400_000n * (BigInt(fl) + BigInt(bu)) + (co ? 1_000_000n : 0n),
+    prep.ok ? `dutiesDue (${fl}, ${bu}, ${co}); estimate ${prep.estimate} -> limit ${prep.gas}` : prep.why,
+  );
+  const minted0 = await view("totalMinted");
+  const sim = await pub.simulateContract({ ...md, functionName: "mint", args: [job2.anchor, BigInt(hit.nonce)], account: MINER });
+  check("eth_call mint(anchor, nonce) from the miner succeeds on the page's job: its folded word is the one workHash needs", sim.result === BigInt(minted0) + 1n, `returns id ${sim.result}`);
+  const hash = await M.sendMint(writer(MINER), a, job2.anchor, BigInt(hit.nonce), prep.gas);
+  const receipt = await pub.waitForTransactionReceipt({ hash });
+  const tx = await pub.getTransaction({ hash });
+  const out = M.parseMintReceipt(receipt, a, MINER);
+  check("the mint lands, sent with prepareMint's padded limit", receipt.status === "success" && tx.gas === prep.gas, `limit ${tx.gas}, used ${receipt.gasUsed}`);
+  check(
+    "parseMintReceipt on the real receipt: Minted for this miner, the noted seat, the find's proof",
+    !!out.minted && !out.lost && out.minted.id === BigInt(minted0) + 1n && out.minted.seat === seat && out.minted.work === hit.digest && isAddressEqual(out.minted.miner, MINER),
+  );
+  if (fl) check("the flush that was due ran inside the mint, and the notes say so (DutyRun kind 0)", out.duties.some((d) => d.kind === 0) && M.outcomeLines(out).includes("your mint also flushed the vault's tax"));
+  else skip("the flush inside the mint", "no flush was due before the mint");
+  const lines1 = M.outcomeLines(out);
+  console.log(`        block ${receipt.blockNumber}, tx ${hash}\n        ${lines1.join("\n        ")}`);
+  const image = await M.cardImage(pub, a, out.minted.id);
+  check("the card's image is read from tokenURI: an SVG data URI", typeof image === "string" && image.startsWith("data:image/svg+xml;base64,"), image ? `${image.length} characters` : "none");
+
+  const job3 = await J.liveJob(pub, a, MINER, 3);
+  check("after the mint the job moves: prevWork is the mint's proof, and jobChanged says so", job3.prevWork === hit.digest && J.jobChanged(job2, job3), `${job2.bits} -> ${job3.bits} bit(s)`);
+  const status = await M.mintStatus(pub, a, MINER);
+  check(
+    "mintStatus: the price, the epoch, the difficulty, the wallet's PUPATE and its allowance",
+    status.price === job3.price && status.epoch === 1 && status.bits === job3.bits && status.allowance === maxUint256 && status.balance === (await pub.readContract({ address: a.token, abi: erc20Abi, functionName: "balanceOf", args: [MINER] })),
+  );
+
+  // A burn, when the flush left the burn pot full enough: a second mint runs it and pays the miner.
+  const [, burnDue] = await view("dutiesDue");
+  if (burnDue) {
+    const hitB = workerSearch(job3);
+    const prepB = await M.prepareMint(pub, a, { wallet: MINER, job: job3, nonce: BigInt(hitB.nonce), work: hitB.digest, write: writer(MINER) });
+    const rB = await pub.waitForTransactionReceipt({ hash: await M.sendMint(writer(MINER), a, job3.anchor, BigInt(hitB.nonce), prepB.gas) });
+    const oB = M.parseMintReceipt(rB, a, MINER);
+    const burn = oB.duties.find((d) => d.kind === 1);
+    check(
+      "a due burn runs inside the next mint: DutyRun kind 1 with the ETH Cocoon's Burned spent, and the spec's line",
+      prepB.ok &&
+        prepB.duties.burnDue &&
+        prepB.gas === M.paddedGas(prepB.estimate, prepB.duties) &&
+        !!burn &&
+        burn.burned > 0n &&
+        /^your mint also burned [\d.,]+ ETH of tax for the vault · you earned [\d.,]+ ETH$/.test(M.dutyLine(burn)),
+      burn ? M.dutyLine(burn) : "no burn ran",
+    );
+  } else {
+    skip("a burn inside a mint", "no burn is due after that flush (the burn pot under MIN_BURN, or within its spacing); the line is pinned on built logs above");
+  }
+
+  // A race in one block: two wallets with valid hashes for the same prevWork. One mint lands; the other
+  // reverts in the same block and must read as the lost race, never as a card.
+  const jobM = await J.liveJob(pub, a, MINER, 4);
+  const jobR = await J.liveJob(pub, a, RIVAL, 5);
+  const hitM = workerSearch(jobM);
+  const hitR = workerSearch(jobR);
+  const prepR = await M.prepareMint(pub, a, { wallet: RIVAL, job: jobR, nonce: BigInt(hitR.nonce), work: hitR.digest, write: writer(RIVAL) });
+  const prepM = await M.prepareMint(pub, a, { wallet: MINER, job: jobM, nonce: BigInt(hitM.nonce), work: hitM.digest, write: writer(MINER) });
+  let hM;
+  let hR;
+  await rpc("evm_setAutomine", [false]);
+  try {
+    hM = await M.sendMint(writer(MINER), a, jobM.anchor, BigInt(hitM.nonce), prepM.gas);
+    hR = await M.sendMint(writer(RIVAL), a, jobR.anchor, BigInt(hitR.nonce), prepR.gas);
+    await rpc("evm_mine");
+  } finally {
+    await rpc("evm_setAutomine", [true]);
+  }
+  const rM = await pub.waitForTransactionReceipt({ hash: hM });
+  const rR = await pub.waitForTransactionReceipt({ hash: hR });
+  const oM = M.parseMintReceipt(rM, a, MINER);
+  const oR = M.parseMintReceipt(rR, a, RIVAL);
+  const won = oM.minted ? { who: MINER, job: jobM, hit: hitM, out: oM } : { who: RIVAL, job: jobR, hit: hitR, out: oR };
+  const lost = oM.minted ? { who: RIVAL, job: jobR, hit: hitR, out: oR, r: rR } : { who: MINER, job: jobM, hit: hitM, out: oM, r: rM };
+  check(
+    "a race in one block: one mint lands, the other reverts and reads as the lost race with the spec's line",
+    prepM.ok && prepR.ok && rM.blockNumber === rR.blockNumber && !!won.out.minted && lost.out.lost && !lost.out.minted && lost.r.status === "reverted" && M.outcomeLines(lost.out).join() === M.LINES.lost,
+    `block ${rM.blockNumber}: ${won.who === MINER ? "the miner" : "the rival"} won #${won.out.minted?.id}`,
+  );
+  const retry = await M.prepareMint(pub, a, { wallet: lost.who, job: lost.job, nonce: BigInt(lost.hit.nonce), work: lost.hit.digest, write: writer(lost.who) });
+  const resent = await M.prepareMint(pub, a, { wallet: won.who, job: won.job, nonce: BigInt(won.hit.nonce), work: won.hit.digest, write: writer(won.who) });
+  const found = await M.findMinted(pub, a, won.who, won.hit.digest, won.job.block - 1n);
+  check(
+    "the losing hash is refused before the wallet as the lost race (NotASolution, prevWork moved); the winning one reads as landed and findMinted finds its card",
+    !retry.ok && retry.why === "lost" && !resent.ok && resent.why === "landed" && found?.id === won.out.minted?.id,
+  );
+
+  // The allowance re-checked before every mint, on the chain: one wei under the price is approved again.
+  await mined(walletOf(MINER).writeContract({ address: a.token, abi: erc20Abi, functionName: "approve", args: [a.metamorph, (await view("mintPrice")) - 1n] }));
+  const job7 = await J.liveJob(pub, a, MINER, 7);
+  const hit7 = workerSearch(job7);
+  const w7 = writes.length;
+  const prep7 = await M.prepareMint(pub, a, { wallet: MINER, job: job7, nonce: BigInt(hit7.nonce), work: hit7.digest, write: writer(MINER) });
+  check(
+    "on the stack, an allowance one wei under the price is approved again, to the maximum, before the mint",
+    prep7.ok && prep7.approved && writes.slice(w7).map((x) => x.fn).join() === "approve" && (await pub.readContract({ address: a.token, abi: erc20Abi, functionName: "allowance", args: [MINER, a.metamorph] })) === maxUint256,
+  );
+
+  // The anchor's window: the poller rebuilds the job from age 40; past age 50 the mint is refused.
+  const mineTo = async (age) => {
+    const now = await pub.getBlockNumber({ cacheTime: 0 });
+    const want = job7.anchor + BigInt(age);
+    if (want > now) await rpc("anvil_mine", [`0x${(want - now).toString(16)}`]);
+    return J.liveJob(pub, a, MINER, 8);
+  };
+  const at39 = await mineTo(39);
+  const at40 = await mineTo(40);
+  await mineTo(52);
+  const late = await M.prepareMint(pub, a, { wallet: MINER, job: job7, nonce: BigInt(hit7.nonce), work: hit7.digest, write: writer(MINER) });
+  check(
+    "the anchor: a read at age 39 keeps the job, at 40 rebuilds it; past the window the mint is refused as expired (BadAnchor)",
+    !J.anchorExpiring(job7, at39.block) && J.anchorExpiring(job7, at40.block) && !late.ok && late.why === "expired",
+    `ages ${at39.block - job7.anchor} and ${at40.block - job7.anchor}`,
+  );
+  check("mineableSeats lists the noted seat", (await J.mineableSeats(pub, a)).join() === String(seat));
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
