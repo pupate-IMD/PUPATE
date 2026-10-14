@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
   UserRejectedRequestError,
   createPublicClient,
   createWalletClient,
@@ -412,13 +413,30 @@ const words64 = (w) => (BigInt(w.targetHi) << 32n) | BigInt(w.targetLo);
     [M.mintedLine({ id: 3n, seat: 9n, gilt: false }, false), "Metamorph.md #3 is yours · seat identity.md #9"],
     [M.dutyLine({ kind: 1, paid: (23n * e18) / 100_000n, burned: (46n * e18) / 1000n }), "your mint also burned 0.046 ETH of tax for the vault · you earned 0.00023 ETH"],
     [M.dutyLine({ kind: 1, paid: (23n * e18) / 100_000n }), "your mint also burned the vault's tax · you earned 0.00023 ETH"],
-    [M.dutyLine({ kind: 2, paid: (15n * e18) / 10n }), "your mint also converted the stakers' share · you earned 1.5 IMD"],
+    [M.dutyLine({ kind: 2, paid: (15n * e18) / 10n }), "your mint also turned the stakers' share into IMD · you earned 1.5 IMD"],
     [M.dutyLine({ kind: 0, paid: 0n }), "your mint also flushed the vault's tax"],
-    [M.gasLine(580_000n, true), "sending with 580,000 gas, the vault's duties included"],
+    [M.gasLine(580_000n, true), "sending with 580,000 gas, the vault's work included"],
     [M.gasLine(180_000n, false), "sending with 180,000 gas"],
   ];
   const off = got.filter(([a, b]) => a !== b).map(([a, b]) => `"${a}" is not "${b}"`);
   check(`the field-note lines are the spec's (${got.length})`, off.length === 0, off.join("; "));
+  // The page's words (the spec's "Copy and words"): none of these in anything the notes print.
+  const FORBIDDEN = /series|target|anchor|prevwork|retarget|\bpots?\b|convert|refresh|duties/i;
+  const printed = [...Object.values(M.LINES), ...got.map(([a]) => a)];
+  const bad = printed.filter((l) => FORBIDDEN.test(l));
+  check("no line the notes print says series, target, anchor, prevWork, retarget, pot, convert, refresh or duties", bad.length === 0, bad.join(" | "));
+  const zero = new ContractFunctionExecutionError(new ContractFunctionZeroDataError({ functionName: "anchorHash" }), { abi: metamorphAbi, functionName: "anchorHash", args: [1n] });
+  const rev = new ContractFunctionExecutionError(new ContractFunctionRevertedError({ abi: metamorphAbi, data: toFunctionSelector("NotASolution()"), functionName: "prevWork" }), {
+    abi: metamorphAbi,
+    functionName: "prevWork",
+    args: [],
+  });
+  const texts = [M.errorText(zero), M.errorText(rev)];
+  check(
+    "errorText keeps viem's reason and drops the contract function's name",
+    texts[0] === 'a contract call returned no data ("0x").' && texts[1] === "a contract call reverted." && !texts.some((t) => FORBIDDEN.test(t)),
+    texts.join(" | "),
+  );
 }
 
 // The receipt, read from logs built as the contracts emit them: the card only from the token's own Minted
@@ -461,7 +479,7 @@ const burned = (address, caller, ethSpent) => logOf(cocoonAbi, address, "Burned"
       lines[0] === "Metamorph.md #7 is yours · seat identity.md #1376 · gilt · mining the next one" &&
       lines[1] === "your mint also flushed the vault's tax" &&
       lines[2] === "your mint also burned 0.046 ETH of tax for the vault · you earned 0.00023 ETH" &&
-      lines[3] === "your mint also converted the stakers' share · you earned 3 IMD",
+      lines[3] === "your mint also turned the stakers' share into IMD · you earned 3 IMD",
     lines.join(" | "),
   );
   const other = M.parseMintReceipt({ status: "success", logs: [minted(THEM, 8n), dutyRun(MD, 0, 0n)] }, a, ME);

@@ -186,10 +186,13 @@ export function isUserRejection(e: unknown): boolean {
   return said(e);
 }
 
-/// An error in one short line for the field notes.
+/// An error in one short line for the field notes, in the page's words: viem's messages name the contract
+/// function that failed (`The contract function "anchorHash" returned no data`), and the page never shows
+/// those names.
 export function errorText(e: unknown): string {
   const x = e as { shortMessage?: string; message?: string } | null;
-  return String(x?.shortMessage ?? x?.message ?? e).split("\n")[0].slice(0, 120);
+  const line = String(x?.shortMessage ?? x?.message ?? e).split("\n")[0];
+  return line.replace(/the contract function "[^"]*"/gi, "a contract call").slice(0, 120);
 }
 
 // ------------------------------------------------------------------ the mint and its receipt
@@ -322,13 +325,13 @@ export function dutyLine(d: DutyPaid): string {
       ? `your mint also burned ${amount(d.burned)} ETH of tax for the vault · you earned ${amount(d.paid)} ETH`
       : `your mint also burned the vault's tax · you earned ${amount(d.paid)} ETH`;
   }
-  if (d.kind === 2) return `your mint also converted the stakers' share · you earned ${amount(d.paid)} IMD`;
+  if (d.kind === 2) return `your mint also turned the stakers' share into IMD · you earned ${amount(d.paid)} IMD`;
   return "your mint also flushed the vault's tax";
 }
 
 /// The gas limit chosen, so a mint that costs more than a transfer says why.
 export function gasLine(gas: bigint, padded: boolean): string {
-  return `sending with ${gas.toLocaleString("en-US")} gas${padded ? ", the vault's duties included" : ""}`;
+  return `sending with ${gas.toLocaleString("en-US")} gas${padded ? ", the vault's work included" : ""}`;
 }
 
 /// The lines a mint's receipt gives: the lost race, or the card and each duty it ran.

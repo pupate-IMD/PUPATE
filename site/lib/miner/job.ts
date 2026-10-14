@@ -73,7 +73,7 @@ export function targetWords(bits: number): { targetHi: number; targetLo: number 
 /// hash the contract refuses; it passes over only digests whose top 64 bits equal the target's (one hash
 /// in 2^64 at most).
 export function targetWordsFrom(target: bigint): { targetHi: number; targetLo: number } {
-  if (target < 0n || target >> 256n !== 0n) throw new RangeError("a target is a uint256");
+  if (target < 0n || target >> 256n !== 0n) throw new RangeError("not a uint256");
   const top = target >> 192n;
   return { targetHi: Number(top >> 32n), targetLo: Number(top & 0xffffffffn) };
 }
