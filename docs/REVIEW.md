@@ -177,3 +177,268 @@ After two parked launches the whole of Cocoon was given to a fresh auditor, with
 Checked and found clean: every pot-changing path against the balance identity, the lock on every value-moving and balance-reading entry point, `_checkOrder` against Seaport 1.6's rules (signature skipped only for the caller, the sweep of Seaport's whole balance to the fulfiller, criteria resolvers refused, validate and cancel offerer-only), the operator's and developer's powers, the owner's bounds, harvest auctions with reverting, silent and re-entering tokens, the burn limit at every allowed `burnImpactBps`, FloorFeed stale, tiny and huge, and the hook interplay. The fix was confirmed by the same auditor on the repository's tree before the third attempt.
 
 After these changes the suite is 245 tests on forge 1.7.1 and 237 as forge 1.8.3 counts them, none failing, in default and `--isolate` modes. Cocoon's runtime is 24,490 bytes of the 24,576 allowed.
+
+## Metamorph MD (2026-10-14)
+
+Reviewer: an agent that had not seen the design, given one paragraph describing the contract and asked to break it as an adversarial auditor. Commit reviewed: `e115b54`. Scope: `src/metamorph/MetamorphMD.sol` (672 lines), `src/metamorph/ERC721Lite.sol` (111 lines) and the twelve files of `test/metamorph/`. The deployed contracts (Cocoon, PupateHook, PupateToken) and v4-core's PoolManager were read as the environment and not reviewed. The contracts were read in full before the tests. The suite was 84 tests on forge 1.7.1, all passing. Every candidate was tried on the fixture in a scratch test file: two proofs, eleven checks, a profitability sweep, a model of the bound, and one mutant run through the invariant campaign. The file was deleted afterwards. Nothing ran against a live RPC, and the fork test was not run.
+
+### Findings and outcomes
+
+| # | Finding | Severity | Outcome |
+|---|---|---|---|
+| M-1 | The IMD leg of a conversion is bounded against a spot price the caller can move, so a sandwich of `convert()` or of a mint's duty conversion pays on the hookless ETH/IMD pool. | Medium | **Fixed** in `c2d9321`: the IMD leg has its own bound, `BUY_IMPACT_BPS = 150`; the launch leg keeps 500. Pinned by `test_sandwichingAPublicConvertDoesNotPay` and `test_aMinerSandwichingItsOwnDutyConversionDoesNotPay`. Both proofs reproduced before the fix. A residual for an attacker that is also a large share of the pool's liquidity is recorded below. |
+| L-1 | The difficulty eases only on a successful mint, so a burst of fast mints leaves it high for as long as nobody mints. | Low | **Accepted**: the retarget runs only on a mint, as the spec designs it, and each mint after a silence eases it by up to ×4. Verified. |
+| L-2 | A conversion runs both legs or neither: a parked launch price or an empty IMD pool stops the ETH and the PUPATE together, and every cheap mint retries the failure. | Low | **Accepted**: both legs or neither; every cheap mint retries a failing conversion, and the keeper's convert duty is the backstop. Verified. |
+| L-3 | Rewards are paid per conversion, not per time staked. Staking, converting and unstaking in one transaction takes a full share. | Low | **Accepted**: no time locks is the spec's choice; a stake-age rule is a possible later change, the owner's to decide. Verified. |
+| L-4 | `uint32(seat)` silently cuts seat ids of 2^32 and above. | Low | **Fixed** in `c2d9321`: `noteSeat` refuses seat ids above 2^32 − 1 (`SeatTooLarge`). Pinned by `test_noteSeatRefusesSeatIdsAbove32Bits`. Verified; latent on mainnet. |
+| L-5 | The constructor accepts a launch-pool key that is not the hook's launch pool, and the pot is then locked forever. | Low | **Fixed** in `c2d9321`: the launch key must be the hook's `launchPool`, and both pools must be initialised (`BadPoolKey`). Pinned by `test_constructorRefusesBadBitsAndBadKeys`. Verified. |
+| L-6 | A card's stage can fall back from butterfly to chrysalis, while its stake keeps the butterfly weight. | Low | **Accepted and pinned** in `c2d9321` by `test_aStageCanFallBackUntilTheSeatIsSettled`; documented in the spec's errata, and the keeper settles promptly. Verified. |
+| I-1 to I-9 | Duty starvation by gas limit, stray tokens, seat pick drift, the seat list's walk, the launch leg's reliance on the hook tax, proof-of-work properties, ERC-721 details, lazy reweighing, test gaps. | Info | **Accepted**: recorded, no change, except I-9, whose weight invariant was added in `c2d9321` (`invariant_totalWeightIsTheSumOfStakedWeights`). |
+
+#### M-1. The IMD buy is bounded against a spot price the caller can move
+
+**Lines.** `src/metamorph/MetamorphMD.sol:575-584` (`_limits`; the buy limit is set at 580-583 from the spot of the moment), `:524` (the limits are read when the call is made), `:561-569` (the ETH/IMD swap), `:506-508` (`convert` is open to anyone), `:316-318` (the receiver hook runs before `_duties`), `:634-638` (the duty conversion), `:85` (`CONVERT_IMPACT_BPS = 500`, used for both legs).
+
+**Sequence.** 1. A conversion is due, with ETH to spend: what its sale brings plus `ethPot`. 2. In one transaction or bundle, the attacker borrows ETH (a flash loan works) and buys IMD in the ETH/IMD pool, which pushes its price down. 3. The attacker calls `convert()`. `_limits` reads the moved spot, so the 5% bound starts from there, and because it is a fraction of the moved pool, it widens with the front-run. The contract spends its ETH at the moved price. 4. The attacker sells the IMD back and repays. `unlock` cannot nest, so the three steps are three separate unlocks, and nothing in the contract prevents that. A contract miner needs no mempool at all: it makes the same front-run from `onERC721Received`, which runs before `_duties`, so it sandwiches the conversion its own mint runs and also collects the 0.5% reward.
+
+**Impact.** The IMD the stakers are credited per ETH falls as far as the attacker's fees allow. On the fixture's pool (100 ETH deep, 1% fee), the best of seven front-runs (2 to 100 ETH) lost money when the contract had ETH worth 1.0% of the pool's ETH depth to spend, and earned 0.083, 0.27, 0.83 and 2.20 ETH at 1.5, 2, 3 and 5%. At 5% the stakers received 25% of the honest rate. The buy bound itself binds at about 2.6% of depth, so any conversion big enough to hit it can be sandwiched for a profit, and hitting the bound is exactly how ETH comes to wait in `ethPot`. Since the bound scales with the moved pool, the only cap on the attacker is the ETH the conversion holds. Against a buyer with unlimited ETH, the 500 bps bound let a 400 ETH front-run net 7.5 ETH. Whether mainnet reaches this depends on the depth of the ETH/IMD pool against the size of a conversion. Small, frequent duty conversions against a deep pool are safe. A thin pool, a large pot (gas dear for a while and nobody calling `convert`) or a rising PUPATE price are not. The launch leg is not exposed while the hook taxes both sides of a trade (see "Not exploitable, considered"). The hook's owner can lower that tax but never raise it (I-5).
+
+**PoC** (`test/metamorph/MetamorphAudit.t.sol`, run with `forge test --match-contract MetamorphAuditTest -vv`):
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.26;
+
+import {console2} from "forge-std/console2.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
+import {PoolKey} from "v4-core/src/types/PoolKey.sol";
+import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
+import {PupateToken} from "../../src/PupateToken.sol";
+import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
+import {MockERC20} from "../mocks/MockERC20.sol";
+import {PoolRouter} from "../utils/PoolRouter.sol";
+import {MetamorphFixture} from "./MetamorphFixture.sol";
+
+/// @dev A miner that sandwiches the conversion its own mint runs: it buys IMD while the card is
+/// delivered (before the duties), and sells it back once the mint returns.
+contract SandwichMiner {
+    MetamorphMD internal immutable md;
+    PoolRouter internal immutable router;
+    MockERC20 internal immutable imdToken;
+    PoolKey internal imdKey;
+    uint256 internal front;
+    uint256 internal got;
+
+    constructor(MetamorphMD md_, PoolRouter router_, PupateToken pupate_, MockERC20 imd_, PoolKey memory imdKey_) {
+        md = md_;
+        router = router_;
+        imdToken = imd_;
+        imdKey = imdKey_;
+        pupate_.approve(address(md_), type(uint256).max);
+        imd_.approve(address(router_), type(uint256).max);
+    }
+
+    function run(uint256 anchor, uint256 nonce, uint256 front_) external {
+        front = front_;
+        md.mint(anchor, nonce); // the duties convert inside, after the front-run
+        router.swap(imdKey, SwapParams(false, -int256(got), TickMath.MAX_SQRT_PRICE - 1)); // back-run
+    }
+
+    function onERC721Received(address, address, uint256, bytes calldata) external returns (bytes4) {
+        uint256 before = imdToken.balanceOf(address(this));
+        router.swap{value: front}(imdKey, SwapParams(true, -int256(front), TickMath.MIN_SQRT_PRICE + 1));
+        got = imdToken.balanceOf(address(this)) - before;
+        return this.onERC721Received.selector;
+    }
+
+    receive() external payable {}
+}
+
+contract MetamorphAuditTest is MetamorphFixture {
+    /// The IMD leg's bound is relative to the spot price at the call. A searcher moves the hookless
+    /// ETH/IMD pool first, lets convert() buy at the moved price, and moves it back.
+    function test_poc_sandwichTheImdLeg() public {
+        // ETH waiting in the contract, 3% of the IMD pool's 100 ETH: what a conversion leaves when its buy
+        // bound refused part of the ETH (MetamorphConvertTest builds that state with a thinned pool).
+        vm.deal(address(md), 3 ether);
+
+        // The honest conversion, on a copy of the state.
+        uint256 copy = vm.snapshotState();
+        uint256 honestImd = md.convert();
+        uint256 honestSpent = 3 ether - address(md).balance;
+        vm.revertToState(copy);
+
+        // The sandwich, as one transaction: front-run, convert(), back-run. The 60 ETH can be flash-borrowed.
+        uint256 imd0 = imd.balanceOf(address(this));
+        uint256 eth0 = address(this).balance;
+        _swap(router, imdKey, true, -int256(60 ether)); // front-run: buy IMD
+        uint256 got = imd.balanceOf(address(this)) - imd0;
+        uint256 sandwichedImd = md.convert(); // anyone may call; the 0.5% reward is the attacker's as well
+        uint256 sandwichedSpent = 3 ether - address(md).balance;
+        _swap(router, imdKey, false, -int256(got)); // back-run: sell the same IMD
+        int256 profit = int256(address(this).balance) - int256(eth0);
+
+        console2.log("honest: IMD bought", honestImd, "ETH spent", honestSpent);
+        console2.log("sandwiched: IMD bought", sandwichedImd, "ETH spent", sandwichedSpent);
+        console2.log("attacker ETH profit (wei)", profit);
+        assertGt(profit, 0.8 ether, "the sandwich nets the attacker over 0.8 ETH");
+        assertLt(
+            sandwichedImd * 1e18 / sandwichedSpent,
+            (honestImd * 1e18 / honestSpent) * 40 / 100,
+            "the stakers get under 40% of the honest IMD per ETH"
+        );
+    }
+
+    /// The same, inside a mint: a contract miner front-runs from its receiver hook, before the duties run.
+    function test_poc_minerSandwichesItsOwnDutyConversion() public {
+        _endLaunch();
+        for (uint256 i; i < 3; i++) {
+            vm.roll(block.number + 1);
+            vm.warp(block.timestamp + 90);
+            _mintAs(miner); // gas is dear: 105,000 PUPATE wait in the pot, a conversion is due
+        }
+        vm.deal(address(md), 3 ether); // and ETH waits, as in the test above
+        SandwichMiner sm = new SandwichMiner(md, router, token, imd, imdKey);
+        deal(address(token), address(sm), 1_000_000 ether);
+        vm.deal(address(sm), 60 ether);
+        vm.fee(1 gwei); // gas is cheap: the mint runs its duties
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 90);
+        uint256 a = _anchor();
+        uint256 n = _proof(address(sm), a);
+        sm.run(a, n, 60 ether);
+        console2.log("miner ETH after (wei)", address(sm).balance);
+        console2.log("miner IMD reward", imd.balanceOf(address(sm)));
+        assertEq(md.lastConvertBlock(), block.number, "the duty converted inside the mint");
+        assertGt(address(sm).balance, 60.8 ether, "and the miner kept over 0.8 ETH more than it started with");
+    }
+}
+```
+
+**Outcome.** Both tests pass, so both attacks reproduce. `test_poc_sandwichTheImdLeg`: run honestly, the conversion bought 647.68 IMD for 2.6219 ETH (247.0 IMD per ETH; its bound left 0.378 ETH waiting). Sandwiched, it bought 293.77 IMD for all 3 ETH (97.9 IMD per ETH, 39.6% of the honest rate), and the attacker kept 0.8264 ETH. `test_poc_minerSandwichesItsOwnDutyConversion`: the duty converted inside the mint, and the miner finished with 60.8273 ETH from 60 plus 1.4696 IMD of reward.
+
+**Fix.** Bound the IMD leg so that one conversion cannot move the pool's ETH depth by more than the pool's fee, whatever spot it starts from. On a 1% pool that is a price impact of at most 150 bps: the ETH reserve then moves by at most 0.76%. I checked this by modelling the buy with the router: a buyer with unlimited ETH, limited exactly as `_limits` limits it, and front-runs from 1 to 400 ETH. At 150 bps every front-run lost (at best −0.005 ETH). At 200 bps the best broke even, and at 300 bps one still paid 2.5 ETH. Keep 500 bps for the taxed launch leg. The cost is that waiting ETH is spent more slowly, over more conversions five blocks apart. Optionally, also refuse a conversion whose IMD spot has moved by more than the bound from a price recorded in an earlier block (at the last mint, say), which takes away the same-block lever altogether. Keep the two proofs as tests.
+
+**Resolution.** Fixed in `c2d9321`. The IMD leg has its own bound, `BUY_IMPACT_BPS = 150`, and the taxed launch leg keeps `CONVERT_IMPACT_BPS = 500`. The two proofs are kept in `test/metamorph/MetamorphConvert.t.sol` as `test_sandwichingAPublicConvertDoesNotPay` (front-runs of 1 to 400 ETH) and `test_aMinerSandwichingItsOwnDutyConversionDoesNotPay`, which now assert that the sandwich costs its maker ETH. On the same state, the public sandwich (a 60 ETH front-run, 3 ETH waiting) went from +0.8264 ETH to −0.2458 ETH, and the miner's from +0.8273 ETH to −0.2458 ETH (its IMD reward from 1.4696 to 0.6023). The honest conversion now buys 192.0 IMD for 0.7633 ETH and leaves 2.24 ETH waiting. Over front-runs of 0.5 to 400 ETH with 0.5 to 30 ETH waiting, the attacker's best result was −0.0025 ETH. The three bound tests now end exactly at the limit, 9,925/10,000 of the sqrt price: with 500 bps on the buy leg, six tests fail, and without the `+ 1`, three do.
+
+Two things the bound does not do. The stakers' rate in a sandwiched conversion is set by the size of the front-run, not by the bound: 39.35% of the honest IMD per ETH at 60 ETH, against 39.6% before. The bound caps the ETH exposed (1.22 of the 3 ETH, where all 3 went before), and the rest waits for a later conversion, but a griefer still pays less than the stakers lose (0.25 ETH against about 0.74 ETH of IMD at the honest rate). And the protection rests on the fees going to someone else: an attacker that is also about a quarter or more of the pool's in-range liquidity gets enough of them back. On the fixture (its wealth after withdrawing its position, IMD valued at 256 per ETH, against the honest conversion), a 60 ETH front-run netted +0.05 ETH at a 30% share, +0.16 ETH at 40%, +0.26 ETH at 50% and +0.73 ETH as the only LP; at 25%, every size lost. The earlier-block reference price would close both. By ruling, it was not added.
+
+#### L-1. The difficulty eases only on a successful mint
+
+**Lines.** `MetamorphMD.sol:343-359` (`_retarget` runs only inside `mint`), `:292-293` (the target that is checked is the stored one).
+
+**Sequence.** Each mint 22 seconds or less after the last one divides the target by four. Five mints in consecutive blocks raised the requirement from 1 bit to 11 on the fixture; at the mainnet floor that is 20 bits to 30. After a month of silence `bits()` was still 11, and a proof that met a target four times easier was refused with `NotASolution`. By estimate, a miner hashing about 1.5 GH/s (one strong GPU) finds each next proof within a 12-second block up to roughly 34 bits, which leaves the target at about 36 bits. Browser miners then need about 2^36 hashes for the next proof. After that, each mint eases the target by at most 2 bits, and only when it came at least 360 seconds after the one before.
+
+**Impact.** Liveness only. After a burst, or after a large share of the hash rate leaves, the pace can stay far below one mint per 90 seconds until the miners who remain grind through about 1.33 times the work of the last proof. No funds are at risk.
+
+**Fix.** Apply the elapsed time when a proof is checked. For example, the effective target could be `min(ceiling, target × 4^((now − lastMintAt) / 360))`, or the same `mulDiv` formula with the current elapsed time. Silence then eases the difficulty without a mint, and the retarget after a mint starts from the effective target.
+
+**Resolution.** Accepted: the retarget runs only on a mint, as the spec designs it, and after a silence each mint eases it by up to ×4. Recorded in the spec's errata as a design trade-off.
+
+#### L-2. A conversion runs both legs or neither, and a failure is retried by every cheap mint
+
+**Lines.** `MetamorphMD.sol:549-559` (the sale is tried whenever `pot != 0`), `:577-579` (the sale limit is clamped to `MAX_SQRT_PRICE − 1`, which equals a parked spot, so the swap reverts `PriceLimitAlreadyExceeded`), `:527` (`NothingBought` also undoes the sale), `:605-606` and `:634-638` (there is no back-off: `lastConvertBlock` moves only on success).
+
+**Sequence.** (a) Sells take the launch pool's last ETH and leave its price parked at `MAX_SQRT_PRICE − 1`. On the fixture that took one sale of 100M PUPATE into its pool of about 1 ETH. Every `convert()` then reverts inside the unlock, the waiting ETH included, until any buy brings the price back; in the test, a buy of 0.01 ETH did. (b) If the ETH/IMD pool has no liquidity within the bound, `NothingBought` undoes the PUPATE sale as well. Neither leg then runs while the IMD pool is down, and the pot stays exposed to the PUPATE price. (c) In either state, every cheap mint after the spacing tries the conversion again. The measured cost was about 300k gas per cheap mint, against 121k for a mint without duties: 180k more per mint, for as long as the state lasts, because a failure never moves `lastConvertBlock`.
+
+**Impact.** Liveness and miners' gas. No funds are lost. (a) is temporary and heals itself. (b) lasts as long as the IMD pool stays empty, and the contract cannot switch to another pool.
+
+**Fix.** Skip the sale when `saleLimit <= spot`, since nothing can be sold. Let a conversion that sold but could not buy keep its ETH in `ethPot` rather than revert, or run the two legs separately. In `_duties`, back off after a failure: record the block it happened in, and treat the conversion as not due for `CONVERT_SPACING` blocks.
+
+**Resolution.** Accepted: a conversion runs both legs or neither, and every cheap mint retries a failing one; the keeper's convert duty is the backstop. Recorded in the spec's errata as a design trade-off.
+
+#### L-3. Rewards are per conversion, not per time staked
+
+**Lines.** `MetamorphMD.sol:418-431` (`stake`), `:434-444` (`unstake`), `:478-486` (`_credit`), `:506-508` (`convert`).
+
+**Sequence.** A long-term staker held one card. Another holder with three unstaked cards staked them, called `convert()`, unstaked and claimed, all in one transaction. The holder got 0.3079 of the 0.4105 IMD credited (three quarters) and the long-term staker 0.1026. The three cards could be traded again in the same transaction.
+
+**Impact.** The transfer lock that staking imposes costs a just-in-time staker nothing. Long-term stakers are diluted by weight that is there for one block. With lent cards, if a lending market for them ever exists, that weight need not even be owned. Nobody takes more than a permanent staker of the same weight would.
+
+**Fix.** Stream each conversion's IMD over a period (a reward rate, as Synthetix does), or let a stake earn only from conversions at least N blocks after it was made.
+
+**Resolution.** Accepted: no time locks is the spec's choice, so a stake made just before a conversion takes a full share of it. A stake-age rule is a possible later change, the owner's to decide. Recorded in the spec's errata as a design trade-off.
+
+#### L-4. `uint32(seat)` cuts seat ids of 2^32 and above
+
+**Lines.** `MetamorphMD.sol:306-307` (the cast), `:117-118` (`Card.seat`), `:373` (`stageOf` reads the stored seat), `:391` (`tokenURI`), `:275-282` (`noteSeat` accepts any id).
+
+**Sequence.** Seat 2^32 + 999 was given to the vault, noted, and picked by a mint. The card stored seat 999. `stageOf` then read seat 999, which the vault does not hold, so the card was a butterfly at once and staked at weight 2 from its first block. The art receives seat 999.
+
+**Impact.** Latent. The mainnet collection's ids look small (the fork tests use seat 1376), so this matters only if ids of 2^32 or more exist.
+
+**Fix.** Refuse such seats in `noteSeat` (`if (seat > type(uint32).max) revert`), or store the seat in full.
+
+**Resolution.** Fixed in `c2d9321`: `noteSeat` refuses seat ids above 2^32 − 1 with `SeatTooLarge`. `test_noteSeatRefusesSeatIdsAbove32Bits` (`test/metamorph/MetamorphViews.t.sol`) refuses 2^32, and notes, picks and stores 2^32 − 1 whole.
+
+#### L-5. The constructor accepts a launch-pool key that is not the hook's launch pool
+
+**Lines.** `MetamorphMD.sol:186-190`.
+
+**Sequence.** The constructor checks the keys' currencies and hooks, but not their fee or tick spacing. On the fixture, whose launch pool has a fee of 3,000, a key with fee 12,500 deployed and minted, and then every `convert()` reverted (`PoolNotInitialized`). The PUPATE pot can never be sold, and there is no owner to correct it. An ETH/IMD key that names an uninitialised or empty pool behaves the same way.
+
+**Impact.** A deployment mistake would lock 70% of every fee for good. `script/DeployMetamorph.s.sol` hard-codes 12,500/60 and 10,000/200, matching the fork test, so this is a guard against a mistake, not a live defect.
+
+**Fix.** In the constructor, require `PoolId.unwrap(pupateKey_.toId()) == PoolId.unwrap(hook_.launchPool())`, and a non-zero `sqrtPriceX96` for both pools.
+
+**Resolution.** Fixed in `c2d9321`, as proposed: the launch key must be the hook's `launchPool`, and both pools must be initialised on the PoolManager given, else `BadPoolKey`. `test_constructorRefusesBadBitsAndBadKeys` (`test/metamorph/MetamorphViews.t.sol`) adds three cases, each breaking one rule alone: a launch key with fee 12,500, initialised on the same hook; an ETH/IMD key whose pool was never initialised; and a PoolManager on which only the ETH/IMD pool exists. With any one rule removed, the test fails. The fork test and `script/DeployMetamorph.s.sol` need no change: they name the mainnet launch pool (fee 12,500, spacing 60), which Cocoon's `wire` already checked against the hook's `launchPool()`, and both pools exist.
+
+#### L-6. A card's stage can fall back
+
+**Lines.** `MetamorphMD.sol:369-374` (`stageOf`), `:644-652` (`_vaultHolds` reads the books and the wallet as they stand), `:468-473` (`_settle` reweighs to whatever the stage reads).
+
+**Sequence.** A listing fills and the seat leaves the vault, so the cards of that round become butterflies. A staker touches its card, which reweighs it to 2. The buyer then sends the seat back to the vault before anyone calls `settleSeat`. The cards read as chrysalises again, and the touched stake keeps weight 2. `settleSeat`, which anyone can call, ends the state for good.
+
+**Impact.** Until the next settle, the art and the weights contradict "a chrysalis until the vault no longer holds its seat", and the weights are slightly unfair. The round trip costs the buyer the seat. `invariant_stagesNeverGoBack` holds only because the handler settles a seat in the same call that sells it.
+
+**Fix.** Accept it and document it (the keeper settles promptly), and add a test that pins the behaviour. Optionally, make emergence sticky by recording the first butterfly reading in `_settle`.
+
+**Resolution.** Accepted and pinned in `c2d9321` by `test_aStageCanFallBackUntilTheSeatIsSettled` (`test/metamorph/MetamorphStages.t.sol`): the card falls back to a chrysalis when the seat comes back unsettled, its stake keeps weight 2 until a `claim` touches it and reweighs it to 1, and a settle while the seat is out makes the card a butterfly for good. Documented in the spec's errata; the keeper settles promptly. Emergence is not made sticky.
+
+#### Info
+
+- **I-1. A gas limit can skip the duties.** Each duty runs with a fixed allowance under EIP-150's 63/64 rule (`:615`, `:621`, `:635`). With a flush due, a gas limit close to the mint's own needs (330k on the fixture) skipped the flush, and the mint still succeeded. The same starves any duty. A gas estimator that settles near the gas used can do the same. If the front-end wants the duties run, it should send headroom: the mint plus the 1.7M of allowances. The duties can cost a miner up to about 1.7M gas at 2 gwei or less, against rewards that may be smaller.
+- **I-2. Stray tokens and dust stay in the contract.** PUPATE or IMD sent to the contract outside a mint or a conversion is never sold, credited or recovered, because `pot` (`:146`, `:302`) and `imdOwed` (`:485`) count only their own flows. The invariants' exact `balance == pot` would fail on a donation, which the handler never makes. `imdOwed` also keeps each credit's rounding dust forever (`:484`): it cannot be claimed and does no harm.
+- **I-3. A pending proof can land on a different seat.** `noteSeat` (open to anyone), a fill, a settle, an adoption or an edition cap can reorder the open list without changing `prevWork` (`:329-334`). The price and the difficulty stay the same; only the seat changes, or the mint reverts `NothingMineable`.
+- **I-4. Every mint walks the whole seat list.** `_seats` only grows, and `mint` walks every noted seat with two external calls each (`:259-272`), about 5k gas per seat. The list is bounded by the number of distinct seats the vault holds during the mint, and nothing prunes it.
+- **I-5. The launch leg's protection is the hook tax.** The launch leg resists a sandwich because the hook takes 6% on each side, against a 5% bound. PupateHook's owner can lower that tax and never raise it (`src/PupateHook.sol:237-242`). By a first-order estimate, below a standing tax of about 1.2% on the mainnet pool (whose fee is 1.25%), the launch leg could be sandwiched the way M-1 sandwiches the IMD leg.
+- **I-6. Proof of work favours GPUs.** GPU miners outpace browser miners at any floor, because the retarget follows the strongest hardware. A miner can also pre-mine a short chain of proofs on its own unpublished work within the 50-block anchor window and land them in one block, each needing four times the work of the one before.
+- **I-7. ERC721Lite differs from the standard in small ways.** `balanceOf(address(0))` and `getApproved` of an unminted id return 0, where ERC-721 says to throw (`ERC721Lite.sol:29-30`). A receiver whose fallback returns nothing makes the transfer revert with empty data instead of `UnsafeRecipient` (`:103-110`). None of this does harm.
+- **I-8. Only the staker can reweigh a card.** Reweighing is lazy (`:448-453`, `:468-473`). A passive staker's butterfly keeps earning at weight 1 indefinitely while active stakers move to 2. The NatSpec documents this ("reweighed to 2 here"). A permissionless `poke(ids)` would keep the weights current.
+- **I-9. Test gaps.**
+  - No invariant ties `totalWeight` to the stakes. A mutant whose `unstake` subtracts the weight from before `_settle` passed all seven invariants and `test_theHandlerActuallyActs` (48 runs × 48 calls). An added `invariant_totalWeightIsTheSumOfStakes`, which sums `stakeOf(id).weight` over `handler.minted`, caught it at once (`1 != 0`: weight left behind with nothing staked, so later credits are owed to nobody). The same invariant passes on the real contract.
+  - No test sandwiches a conversion (M-1). The conversion tests run at about 0.2% of the IMD pool's depth, where a sandwich does not pay.
+  - No test shows the difficulty easing with time alone (L-1); it never does.
+  - The handler settles every seat in the call that sells it, which rules out the stage regression of L-6 by construction.
+  - The parked launch price, the emptied IMD pool and the cost of the retries (L-2) are tested only as far as "the mint survives".
+  - Nothing covers a seat id of 2^32 or more (L-4), a launch key that is not the hook's launch pool (L-5), just-in-time staking (L-3) or a gas-starved duty (I-1).
+  - The `+ 1` in the buy limit is not pinned. Both impact tests accept 9,746/10,000, which the limit still meets without it.
+
+**Resolution.** Accepted as recorded, with no change, except I-9. I-1's advice, to pad a mint's gas limit by the allowances of the duties due, is in the spec's errata for the page and the keeper. I-9: `invariant_totalWeightIsTheSumOfStakedWeights` was added in `c2d9321`. With the audit's mutant (`unstake` subtracting the weight from before its settle) it fails at once (`2 != 1`), while the seven other invariants and `test_theHandlerActuallyActs` still pass; on the real contract it holds at 48 runs × 48 calls. Of I-9's other gaps, the sandwich (M-1), the seat id (L-4), the launch key (L-5), the stage's fall-back (L-6) and the `+ 1` of the buy limit are now pinned. Easing with time alone (L-1), the parked price and the empty pool (L-2), just-in-time staking (L-3) and a starved duty (I-1) stay untested, their findings accepted.
+
+### What the suite pins well
+
+- The chain of work: the preimage, the binding to the miner, stale proofs refused before any fee is taken, the anchor window at both edges, and an anchor without a hash.
+- The retarget: both clamps, the ceiling to the unit, and saturation at the 1-bit floor between 181 and 360 seconds.
+- Supply and pricing: all 3,333 cards over 11 seats, each round starting its own editions, the pick formula, and the price step at the 303rd and 304th mints.
+- Reentrancy through the receiver hook (`ProbingMiner`), both guards of the callback, and `convertDuty` refusing every caller but the contract.
+- The staking arithmetic in isolation: splits by weight over time, settling before unstaking, reweighing on touch, the transfer lock on all three paths, and payouts never above credits (fuzzed).
+- Conversions: both legs' amounts replayed through the router, the bound in an unmoved pool, the refused remainder waiting in both pots, the spacing, ETH-only conversions, and routing to the developer when nobody stakes.
+- Duties: each duty, the base-fee gate at exactly 2 gwei, each gas allowance, isolation of every failure, and a miner that refuses ETH.
+- Invariants: `prevWork`, the edition cap crossed within a campaign, the pot as 70% of fees less what was sold, IMD owed covered, ETH equal to the ETH pot, and the target never above the ceiling. The size test and the no-owner probe, which sends arguments.
+
+### Not exploitable, considered
+
+- **Reentrancy from mint through the duties into `convertDuty` and `unlockCallback`.** The lock is held from the first line of `mint` to the end of the duties. Miner code runs at two points only: the receiver hook and the burn reward's ETH send. From either one, every guarded entry reverts `Reentrancy` and `convertDuty` reverts `OnlySelf`. A scratch test confirmed this for the reward callback; the suite already covers the receiver hook. The unguarded calls a miner can reach (`noteSeat`, ERC-721 approvals and transfers of other cards, `receive`) cannot change the mint's books. The PoolManager calls back only the caller of `unlock`, and `unlock` cannot nest.
+- **A sandwich of the launch (PUPATE) leg.** Dropped as a finding: it did not reproduce. After a 50 ETH buy into the launch pool, front-runs of 2M, 5M, 10M and 20M PUPATE lost 0.07, 0.17, 0.32 and 0.58 ETH, because the hook taxes both legs. The fixture's launch pool charges a 0.3% fee and the mainnet pool 1.25%, so on mainnet the loss is larger.
+- **The staking accumulator.** Each credit distributes at most what it credits, and a settle that rounds down never adds. `_settle` keeps `totalWeight` equal to the sum of the stakes' weights. So total claims never exceed total credits, and `imdOwed -= paid` cannot underflow. At realistic amounts the accumulator cannot overflow. The order in which stakers claim does not matter.
+- **Rounding of the bounds.** The sale limit uses 10,246/10,000 against sqrt(1.05) = 1.024695, and the buy limit 9,747/10,000 against sqrt(0.95) = 0.974679. Both round in the contract's favour, and the clamps never widen them.
+- **The fee split.** The split is 70/30 to the wei. The developer cannot be the zero address, and PUPATE and IMD transfers never call the recipient, so the developer cannot make a mint or a conversion revert.
+- **Retarget overflow.** The saturation guard is exact, and the target cannot fall to zero in practice.
+- **Seat pick bias and the edition cap.** The modulo bias is about n/2^236, the round read in `_pick` is the round the filter used, and the edition cap cannot be crossed.
+- **Replay.** The chain id, the contract's address and `prevWork` are all in the preimage. A stale or foreign proof reverts before any transfer.
+- **The hook's deltas on the sale.** An exact-in PUPATE sale is not a trade that names the ETH amount, so it cannot trigger `PartialFill`. The tax comes out of the ETH the pool moved, and settling the PUPATE resets the synced currency before the native settle.
+- **ETH bookkeeping.** Only the burn reward can arrive during the duties, and a reward the miner refuses is spent by the next conversion. Forced ETH, or a donation of one wei, does not make a conversion due.
+- **Gas allowances.** A full conversion used 334k gas of its 900k allowance on the fixture.
+
+After the fixes (`c2d9321`) the suite is 335 tests on forge 1.7.1: 324 pass and none fail, and the 11 fork tests skip without an RPC. `test/metamorph/` holds 89 of them, with eight invariants at 48 runs × 48 calls. MetamorphMD's runtime is 19,187 bytes of the 24,576 allowed.

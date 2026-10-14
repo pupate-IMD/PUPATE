@@ -221,10 +221,13 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
 | `ANCHOR_WINDOW` | 50 blocks | about ten minutes on Ethereum; `blockhash` reaches 256 |
 | gilt | `work < target >> 4` | 1 in 16, the Overclocked rule |
 | fee split | 70% pot, 30% treasury | the owner's figures |
-| `CONVERT_IMPACT` | 500 bps | the vault's burn bound, mirrored |
-| `CALLER_REWARD` | 50 bps | the vault's figure, for `convert` |
+| `CONVERT_IMPACT_BPS` | 500 bps | the launch leg's bound: the vault's burn bound, mirrored |
+| `BUY_IMPACT_BPS` | 150 bps | the IMD leg's bound: the ETH/IMD pool is untaxed, so one conversion may move its ETH depth by at most 0.76%, under the pool's 1% fee (audit M-1) |
+| `CONVERT_SPACING` | 5 blocks | Cocoon's `burnSpacing` default: conversions in a row cannot stack the bounds |
+| `CALLER_REWARD_BPS` | 50 bps | the vault's figure, for `convert` |
 | `DUTY_MAX_BASEFEE` | 2 gwei | duties ride along only when gas is cheap |
-| `MIN_FLUSH`, `MIN_BURN`, `MIN_CONVERT` | 0.005 ETH, 0.01 ETH, 2 × price | the keeper's thresholds |
+| `MIN_FLUSH`, `MIN_BURN`, the conversion's threshold | 0.005 ETH, 0.01 ETH, a pot of 2 × price or any ETH in `ethPot` | the keeper's thresholds |
+| `DUTY_GAS`, `CONVERT_GAS` | 400,000 and 900,000 gas | each duty's allowance inside a mint |
 | butterfly ceiling | 90 days from the mint | no card waits forever for a sale |
 | staking weights | chrysalis 1, butterfly 2 | yield follows the vault's success |
 | royalty | 500 bps | the owner's 5% |
@@ -234,28 +237,97 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
 `MetamorphMD`:
 
 - `mint(uint256 anchor, uint256 nonce)`, `convert()`, `stake(uint256[] ids)`, `unstake(uint256[] ids)`,
-  `claim(uint256[] ids)`.
-- Views: `target()`, `bits()` (for display), `prevWork()`, `lastMintAt()`, `epoch()`, `mintPrice()`,
-  `totalMinted()`, `editionsMinted(seat, round)`, `mineableSeats()` (the held seats with editions left, in
-  pick order), `workHash(anchorHash, miner, nonce)`, `anchorHash(block)`, `cards(id)` (seat, round, edition,
-  gilt, mintedAt, miner, work), `stageOf(id)`, `pot()`, `pendingIMD(ids)`, `stakeOf(id)` (staker, weight),
-  `totalWeight()`, `dutiesDue()` (flush, burn, convert as booleans with the expected rewards), `tokenURI`,
-  `royaltyInfo`, `supportsInterface` (ERC-165, 721, 721Metadata, 2981).
+  `claim(uint256[] ids)`, `noteSeat(uint256 seat)`. Two entry points are not for callers:
+  `convertDuty(address miner)`, the conversion a mint runs as a duty (the contract itself only, else
+  `OnlySelf`), and `unlockCallback(bytes)` (the PoolManager only, during a conversion).
+- Views: `target()`, `bits()` (for display), `prevWork()`, `lastMintAt()`, `epoch()`, `priceAt(epoch)`,
+  `mintPrice()`, `totalMinted()`, `editionsMinted(seat, round)`, `notedSeats()`, `noted(seat)`,
+  `mineableSeats()` (the noted seats the vault holds with editions left, in pick order),
+  `workHash(anchorHash, miner, nonce)`, `anchorHash(block)`, `cards(id)` (seat, round, edition, gilt,
+  mintedAt, paid, miner, work), `stageOf(id)`, `pot()`, `ethPot()`, `lastConvertBlock()`,
+  `accIMDPerWeight()`, `totalWeight()`, `imdOwed()`, `pendingIMD(staker)`, `stakeOf(id)` (staker, weight,
+  debt), `dutiesDue()` (flush, burn and convert as three booleans), `tokenURI`, `royaltyInfo`,
+  `supportsInterface` (ERC-165, 721, 721Metadata, 2981), the constants of the table above (among them
+  `CONVERT_IMPACT_BPS`, `BUY_IMPACT_BPS`, `CONVERT_SPACING`) and the immutables (`COCOON`, `HOOK`, `PUPATE`,
+  `IMD`, `COLLECTION`, `POOL_MANAGER`, `ART`, `MIN_BITS`).
 - Events: `Minted(id, seat, round, edition, miner, work, gilt, price, epoch)`, `Retargeted(target)`,
-  `Converted(pupateSold, ethBought, imdBought, caller, reward)`, `Staked(id, staker, weight)`,
-  `Unstaked(id, staker)`, `Claimed(staker, imd)`, `Reweighed(id, weight)`, `DutyRun(kind, paid)`.
-- Errors: `SupplyExhausted`, `NothingMineable`, `BadAnchor`, `NotASolution`, `StaleWork`, `Staked`,
-  `NotStaked`, `NotCardOwner`, `NothingToConvert`, `NothingBought`, `ZeroAddress`.
-- Constructor: `(Cocoon cocoon, PupateHook hook, PupateToken pupate, IERC20 imd, IERC721Minimal collection,
-  IPoolManager poolManager, PoolKey pupateKey, PoolKey imdKey, MetamorphArt art, uint8 minBits)`, all
-  immutable. `minBits` is epoch 1's difficulty floor: 20 on mainnet, 1 in the test suite so that proofs can
-  be found inside a test (about every other nonce passes). The developer address is never stored; it is
-  read from Cocoon at each payment and each royalty query.
+  `SeatNoted(seat)`, `Converted(pupateSold, ethBought, imdBought, caller, reward)`, `StakedCard(id, staker,
+  weight)`, `Unstaked(id, staker)`, `Claimed(staker, imd)`, `Reweighed(id, weight)`, `DutyRun(kind, paid)`
+  (kind 0 flush, 1 burn, 2 convert; paid is what the miner actually received, in ETH or IMD wei).
+- Errors: `SupplyExhausted`, `NothingMineable`, `BadAnchor`, `BadBits`, `BadPoolKey`, `NotASolution`,
+  `SeatNotHeld`, `SeatTooLarge`, `Staked`, `NotStaked`, `NotCardOwner`, `NothingToConvert`, `NothingBought`,
+  `TooSoon`, `OnlyPoolManager`, `OnlySelf`, `UnexpectedCallback`, `Reentrancy`, `TransferFailed`, and
+  ERC721Lite's `ZeroAddress`, `NotOwner`, `NotAuthorized`, `AlreadyMinted`, `NotMinted`, `UnsafeRecipient`.
+- Constructor: `(Cocoon cocoon, PupateHook hook, PupateToken pupate, IERC20Minimal imd, IERC721Minimal
+  collection, IPoolManager poolManager, PoolKey pupateKey, PoolKey imdKey, IMetamorphArt art, uint8
+  minBits)`, all immutable. `minBits` is epoch 1's difficulty floor: 20 on mainnet, 1 in the test suite so
+  that proofs can be found inside a test (about every other nonce passes). The developer address is never
+  stored; it is read from Cocoon at each payment and each royalty query.
 
 `MetamorphArt`: `render(View calldata v) pure returns (string memory svg)` with `View = {seat, round,
 edition, stage, gilt, miner, mintedAt}`; `tokenURI` wraps it as `data:application/json;base64,…` with the
 image as `data:image/svg+xml;base64,…`. If it does not fit under 24,576 bytes in one piece, it is split into
 the chrysalis renderer and the butterfly renderer, both immutables of `MetamorphMD`.
+
+### Errata from the implementation (2026-10-14)
+
+Where an item here and the rest of this spec disagree, the item holds: it is what
+`src/metamorph/MetamorphMD.sol` does. The audit's findings are in `docs/REVIEW.md`, "Metamorph MD
+(2026-10-14)".
+
+- `StaleWork` does not exist: a proof found against an older `prevWork` fails as `NotASolution`; the page
+  tells the two apart by re-reading `prevWork`.
+- `convertDuty(address)` is the self-call entry the mint uses for the conversion; `OnlySelf` guards it.
+- `ethPot` holds ETH a conversion bought that the IMD pool could not absorb under the bound; the next
+  conversion spends it first; the contract's ETH equals `ethPot` after every call.
+- The art contract returns the whole token URI (`IMetamorphArt.tokenURI(View)`), not only the SVG.
+- `noteSeat(seat)` and `notedSeats()`: Cocoon keeps no list of held seats, so the contract keeps a
+  permissionless registry the page and the keeper feed.
+- `Card.paid` stores the mint price for the attributes.
+- Staking: `stake`, `unstake`, `claim(ids)`; `claim` settles only the ids given plus pays everything pending.
+- `mineableSeats()` lists the seats in the order they were noted, not in ascending token id; the hash picks
+  uniformly either way.
+- The mint records the card, `prevWork`, the target and `lastMintAt` before it delivers the card (the
+  receiver hook runs then) and emits `Minted`; `Retargeted` is emitted first.
+- Conversions are spaced: one may run `CONVERT_SPACING` blocks (5, Cocoon's `burnSpacing` default) after
+  `lastConvertBlock`, else it reverts `TooSoon`, and `dutiesDue()` reports the conversion as not due inside
+  the spacing. Outside it, a conversion is due when the pot holds twice the mint price or ETH waits in
+  `ethPot`.
+- The IMD leg of a conversion is bounded by `BUY_IMPACT_BPS` (150), the launch leg by `CONVERT_IMPACT_BPS`
+  (500) (audit M-1). Both bounds start from the spot of the moment; the ETH/IMD pool has no hook and no tax,
+  so its bound holds only while one conversion moves the pool's ETH depth by less than the pool's 1% fee.
+- `ethPot` supersedes "never keeps any" under "The vault duties": ETH the IMD pool could not absorb under
+  the bound waits in `ethPot`, and the next conversion spends it together with what its sale brings. The
+  contract may hold more ETH than `ethPot`, the one exception to the third item above: the burn reward is
+  sent to the miner with a call that cannot revert the mint, and a reward a contract miner refuses stays
+  and joins the next conversion (such ETH does not by itself make a conversion due). `DutyRun(1, paid)`
+  reports what was actually paid.
+- `stageOf` is not monotonic in one case: a seat pulled from the vault's wallet without a settle and sent
+  straight back makes the card a chrysalis again, until someone settles the seat (audit L-6). A stake is
+  reweighed on every touch, down as well as up, and only the staker's own `claim(ids)` or `unstake(ids)`
+  naming the card touches it; staking other cards does not.
+- `Card` field order is `(seat, round, edition, gilt, mintedAt, paid, miner, work)`; `epoch()` clamps to 11
+  at sell-out.
+- Constructor errors: `ZeroAddress`; `BadBits` (`minBits` 1 to 200); `BadPoolKey`, with both keys checked:
+  ETH is currency0, the launch key names PUPATE and the hook and is the hook's `launchPool`, the ETH/IMD key
+  names IMD and no hook, and both pools are initialised on the PoolManager given (audit L-5).
+- `noteSeat` refuses seat ids above 2^32 − 1 with `SeatTooLarge` (audit L-4).
+- Design trade-offs the audit recorded, kept on purpose:
+  - L-1: the difficulty retargets only on a mint, as designed. After a burst it stays high until someone
+    mints; then each mint eases it by up to ×4, the full ×4 when it comes 360 seconds or more after the one
+    before.
+  - L-2: a conversion runs both legs or neither, and a failing one is retried by every cheap mint; the
+    keeper's convert duty is the backstop.
+  - L-3: no time locks, as designed; a stake made just before a conversion takes a full share of it. A
+    stake-age rule is a possible later change, the owner's to decide.
+- For the page and the keeper: pad the mint's gas limit by the allowances of the duties `dutiesDue()`
+  reports (`DUTY_GAS`, 400,000 each; `CONVERT_GAS`, 900,000; the duty conversion used about 300,000 on a
+  mainnet fork), because `eth_estimateGas` can settle on a limit that starves the last duty, which then
+  fails silently on every mint.
+- The invariant suite seeds one seat-round near the editions cap, so the cap is crossed inside a run; the
+  3,333 supply cap is pinned by the unit test that mints the whole collection. The ETH invariant reads
+  `balance == ethPot` (every actor is an EOA), and an eighth invariant ties `totalWeight` to the staked
+  weights (audit I-9).
 
 ## The drawing
 
