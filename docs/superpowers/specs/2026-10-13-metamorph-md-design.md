@@ -216,17 +216,20 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
 | `BASE_PRICE` | 50,000 PUPATE | about $1.50 at launch-week prices |
 | price growth | ×1.25 per epoch, eleven epochs | the last about 465,661 PUPATE |
 | `TARGET_INTERVAL` | 90 s | about forty mints an hour at most |
+| `DECAY_INTERVAL` | 360 s | silence eases the target by four per interval without a mint, up to the ceiling (audit L-1) |
 | `MIN_BITS` | 20 in epoch 1, +1 per epoch (constructor, 20 on mainnet) | the difficulty floor; about a million hashes at the start |
-| retarget clamp | ÷4 to ×4 per mint | the same bound Bitcoin uses, applied per mint |
+| retarget clamp | ÷4 to ×4 per mint, from the eased target | the same bound Bitcoin uses, applied per mint; the base is `effectiveTarget()`, the stored target eased by the silence before the mint |
 | `ANCHOR_WINDOW` | 50 blocks | about ten minutes on Ethereum; `blockhash` reaches 256 |
-| gilt | `work < target >> 4` | 1 in 16, the Overclocked rule |
+| gilt | `work < effectiveTarget() >> 4` | 1 in 16, the Overclocked rule, against the target the proof was checked against |
 | fee split | 70% pot, 30% treasury | the owner's figures |
 | `CONVERT_IMPACT_BPS` | 500 bps | the launch leg's bound: the vault's burn bound, mirrored |
 | `BUY_IMPACT_BPS` | 150 bps | the IMD leg's bound: the ETH/IMD pool is untaxed, so one conversion may move its ETH depth by at most 0.76%, under the 1% fee a sandwich pays on each side; the constructor refuses an ETH/IMD key with a lower fee (audit M-1) |
 | `CONVERT_SPACING` | 5 blocks | Cocoon's `burnSpacing` default: conversions in a row cannot stack the bounds |
 | `CALLER_REWARD_BPS` | 50 bps | the vault's figure, for `convert` |
 | `DUTY_MAX_BASEFEE` | 2 gwei | duties ride along only when gas is cheap |
-| `MIN_FLUSH`, `MIN_BURN`, the conversion's threshold | 0.005 ETH, 0.01 ETH, a pot of 2 × price or any ETH in `ethPot` | the keeper's thresholds |
+| `MIN_FLUSH`, `MIN_BURN`, the conversion's threshold | 0.005 ETH, 0.01 ETH, a pot of `CONVERT_PRICES` × price or any ETH in `ethPot` | the in-mint duties' thresholds, which `dutiesDue()` reports; anyone may still call `convert()` on any pot once the spacing has passed |
+| `CONVERT_PRICES` | 100 mint prices | at a hundred the miner's 0.5% about covers the duty conversion's gas at 1 gwei, half of it at the 2 gwei ceiling; at two it was about a fiftieth (whole-branch review I5) |
+| `CONVERT_BACKOFF` | 300 blocks | after a duty conversion that ran with its whole gas allowance failed, mints leave the conversion alone this long; `convert()` ignores it (audit L-2) |
 | `DUTY_GAS`, `CONVERT_GAS` | 400,000 and 900,000 gas | each duty's allowance inside a mint |
 | butterfly ceiling | 90 days from the mint | no card waits forever for a sale |
 | staking weights | chrysalis 1, butterfly 2 | yield follows the vault's success |
@@ -237,24 +240,28 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
 `MetamorphMD`:
 
 - `mint(uint256 anchor, uint256 nonce)`, `convert()`, `stake(uint256[] ids)`, `unstake(uint256[] ids)`,
-  `claim(uint256[] ids)`, `noteSeat(uint256 seat)`, `forgetSeat(uint256 seat)`. Two entry points are not
-  for callers: `convertDuty(address miner)`, the conversion a mint runs as a duty (the contract itself
-  only, else `OnlySelf`), and `unlockCallback(bytes)` (the PoolManager only, during a conversion).
-- Views: `target()`, `bits()` (for display), `prevWork()`, `lastMintAt()`, `epoch()`, `priceAt(epoch)`,
-  `mintPrice()`, `totalMinted()`, `editionsMinted(seat, round)`, `notedSeats()`, `noted(seat)`,
+  `claim(uint256[] ids)`, `poke(uint256[] ids)` (anyone; settles the staked cards among `ids`),
+  `noteSeat(uint256 seat)`, `forgetSeat(uint256 seat)`. Two entry points are not for callers:
+  `convertDuty(address miner)`, the conversion a mint runs as a duty (the contract itself only, else
+  `OnlySelf`), and `unlockCallback(bytes)` (the PoolManager only, during a conversion).
+- Views: `target()` (the base the last retarget set), `effectiveTarget()` (the target a proof is checked
+  against right now), `bits()` (for display, from the effective target), `prevWork()`, `lastMintAt()`,
+  `epoch()`, `priceAt(epoch)`, `mintPrice()`, `totalMinted()`, `editionsMinted(seat, round)`,
+  `notedSeats()`, `noted(seat)`,
   `mineableSeats()` (the noted seats the vault holds with editions left, in pick order),
   `workHash(anchorHash, miner, nonce)`, `anchorHash(block)`, `cards(id)` (seat, round, edition, gilt,
   mintedAt, paid, miner, work), `stageOf(id)`, `pot()`, `ethPot()`, `lastConvertBlock()`,
-  `accIMDPerWeight()`, `totalWeight()`, `imdOwed()`, `pendingIMD(staker)`, `stakeOf(id)` (staker, weight,
-  debt), `dutiesDue()` (flush, burn and convert as three booleans), `tokenURI`, `royaltyInfo`,
-  `supportsInterface` (ERC-165, 721, 721Metadata, 2981), the constants of the table above (among them
-  `CONVERT_IMPACT_BPS`, `BUY_IMPACT_BPS`, `CONVERT_SPACING`) and the immutables (`COCOON`, `HOOK`, `PUPATE`,
-  `IMD`, `COLLECTION`, `POOL_MANAGER`, `ART`, `MIN_BITS`).
+  `convertBackoffUntil()`, `accIMDPerWeight()`, `totalWeight()`, `imdOwed()`, `pendingIMD(staker)`,
+  `stakeOf(id)` (staker, weight, debt), `dutiesDue()` (flush, burn and convert as three booleans),
+  `tokenURI`, `royaltyInfo`, `supportsInterface` (ERC-165, 721, 721Metadata, 2981, 4906), the constants of
+  the table above (among them `CONVERT_IMPACT_BPS`, `BUY_IMPACT_BPS`, `CONVERT_SPACING`, `DECAY_INTERVAL`,
+  `CONVERT_PRICES`, `CONVERT_BACKOFF`) and the immutables (`COCOON`, `HOOK`, `PUPATE`, `IMD`, `COLLECTION`,
+  `POOL_MANAGER`, `ART`, `MIN_BITS`).
 - Events: `Minted(id, seat, round, edition, miner, work, gilt, price, epoch)`, `Retargeted(target)`,
   `SeatNoted(seat)`, `SeatForgotten(seat)`, `Converted(pupateSold, ethBought, imdBought, caller, reward)`,
   `StakedCard(id, staker, weight)`, `Unstaked(id, staker)`, `Claimed(staker, imd)`, `Reweighed(id,
-  weight)`, `DutyRun(kind, paid)` (kind 0 flush, 1 burn, 2 convert; paid is what the miner actually
-  received, in ETH or IMD wei).
+  weight)`, `MetadataUpdate(tokenId)` (ERC-4906, when a settlement changes a card's weight), `DutyRun(kind,
+  paid)` (kind 0 flush, 1 burn, 2 convert; paid is what the miner actually received, in ETH or IMD wei).
 - Errors: `SupplyExhausted`, `NothingMineable`, `BadAnchor`, `BadBits`, `BadPoolKey`, `BadWiring`,
   `NotASolution`, `SeatNotHeld`, `SeatTooLarge`, `SeatNotNoted`, `SeatHeld`, `Staked`, `NotStaked`,
   `NotCardOwner`, `NothingToConvert`, `NothingBought`, `TooSoon`, `OnlyPoolManager`, `OnlySelf`,
@@ -309,8 +316,8 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
   receiver hook runs then) and emits `Minted`; `Retargeted` is emitted first.
 - Conversions are spaced: one may run `CONVERT_SPACING` blocks (5, Cocoon's `burnSpacing` default) after
   `lastConvertBlock`, else it reverts `TooSoon`, and `dutiesDue()` reports the conversion as not due inside
-  the spacing. Outside it, a conversion is due when the pot holds twice the mint price or ETH waits in
-  `ethPot`.
+  the spacing. Outside it, the duty conversion is due when the pot holds `CONVERT_PRICES` (100) mint prices
+  or ETH waits in `ethPot`, and no back-off holds it (the revision's items below).
 - The IMD leg of a conversion is bounded by `BUY_IMPACT_BPS` (150), the launch leg by `CONVERT_IMPACT_BPS`
   (500) (audit M-1). Both bounds start from the spot of the moment, which a caller can move first. The
   launch leg resists a sandwich because the hook taxes both sides of a trade. The ETH/IMD pool has no hook
@@ -329,8 +336,8 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
   next conversion spends it. `DutyRun(1, paid)` reports what was actually paid.
 - `stageOf` is not monotonic in one case: a seat pulled from the vault's wallet without a settle and sent
   straight back makes the card a chrysalis again, until someone settles the seat (audit L-6). A stake is
-  reweighed on every touch, down as well as up, and only the staker's own `claim(ids)` or `unstake(ids)`
-  naming the card touches it; staking other cards does not.
+  reweighed on every touch, down as well as up, and only the staker's own `claim(ids)` or `unstake(ids)`,
+  or anyone's `poke(ids)` since the revision, naming the card touches it; staking other cards does not.
 - `Card` field order is `(seat, round, edition, gilt, mintedAt, paid, miner, work)`; `epoch()` clamps to 11
   at sell-out.
 - Constructor errors: `ZeroAddress`; `BadBits` (`minBits` 1 to 200); `BadPoolKey` unless all five hold: ETH
@@ -344,20 +351,18 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
 - `script/DeployMetamorph.s.sol` deploys `MetamorphMD` only, not `MetamorphArt` as "Deployment and
   opening" writes: the art is deployed first, by the next plan's own script, and `DeployMetamorph` takes
   its address as `ART` (it refuses an address without code, and any `MIN_BITS` but 20).
-- Trade-offs recorded by the audit and its fixes; L-2 and L-3 are the owner's to settle before deploy:
-  - L-1: the difficulty retargets only on a mint, as designed. After a burst it stays high until someone
-    mints; then each mint eases it by up to ×4, the full ×4 when it comes 360 seconds or more after the one
-    before.
-  - L-2: a conversion runs both legs or neither, and a failing one is retried by every cheap mint. The
-    keeper's `convert()` reverts in the same states as the duty (`PriceLimitAlreadyExceeded` while the
-    launch price is parked; `NothingBought` when no IMD liquidity sits within the bound), so it is a
-    backstop only when there are no cheap mints, never a way out of a failing state. The worst case: if
-    the liquidity within 1.5% of the ETH/IMD spot leaves for good, the pot can never convert again, 70% of
-    every later fee stays locked as PUPATE (and any ETH waiting in `ethPot` with it), and every cheap mint
-    keeps paying about 180k gas for the failed retry. The owner accepts this knowingly or changes the
-    design before deploy. The options: a back-off after a failed duty conversion; letting a conversion
-    that sold but bought nothing keep its ETH in `ethPot`; or an ETH fallback for the stakers after N
-    blocks without a buy.
+- Trade-offs recorded by the audit and its fixes; the revision of 2026-10-14 settled L-1 and L-2, and L-3
+  is the owner's to settle before deploy:
+  - L-1: fixed by the revision. Silence eases the target by four per `DECAY_INTERVAL` without a mint (the
+    decay item below), so a burst no longer leaves the difficulty high until someone grinds through it.
+  - L-2: a conversion runs both legs or neither. The keeper's `convert()` reverts in the same states as the
+    duty (`PriceLimitAlreadyExceeded` while the launch price is parked; `NothingBought` when no IMD
+    liquidity sits within the bound), so it is never a way out of a failing state. Since the revision, a
+    duty conversion that ran with its whole gas allowance and failed backs off `CONVERT_BACKOFF` blocks
+    (the back-off item below), so a failing state no longer taxes every cheap mint. The rest stays
+    accepted by the owner: if the liquidity within 1.5% of the ETH/IMD spot leaves for good, the pot can
+    never convert again, and 70% of every later fee stays locked as PUPATE (and any ETH waiting in `ethPot`
+    with it).
   - L-3: no time locks, as designed; a stake made just before a conversion takes a full share of it. With
     no keys and no upgrade path, a stake-age rule can only come with a new collection, so it is a decision
     for the owner before deploy, not a later change.
@@ -366,12 +371,39 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
     loses about a third of what the stakers lose. Accepted; the numbers are in `docs/REVIEW.md`.
 - For the page and the keeper: pad the mint's gas limit by the allowances of the duties `dutiesDue()`
   reports (`DUTY_GAS`, 400,000 each; `CONVERT_GAS`, 900,000; the duty conversion used about 300,000 on a
-  mainnet fork), because `eth_estimateGas` can settle on a limit that starves the last duty, which then
-  fails silently on every mint. After a sale they call `forgetSeat`, so mints stop walking the sold seat.
+  mainnet fork), because `eth_estimateGas` settles on a limit that starves the duties, which then fail
+  silently on every mint (audit I-1: no gas-starvation guard, declined by the owner; only such a padded
+  mint can arm the conversion's back-off). After a sale they call `forgetSeat`, so mints stop walking the
+  sold seat.
 - The invariant suite seeds one seat-round near the editions cap, so the cap is crossed inside a run; the
   3,333 supply cap is pinned by the unit test that mints the whole collection. The ETH invariant reads
   `balance == ethPot` (every actor is an EOA), and an eighth invariant ties `totalWeight` to the staked
   weights (audit I-9). The handler forgets every seat it sells, so `forgetSeat` runs inside the campaign.
+- The revision of 2026-10-14 applied the owner's five decisions after the review (`docs/REVIEW.md`,
+  "Revision (2026-10-14)"):
+  - Difficulty eases with silence (audit L-1, the audit's fix adopted): `effectiveTarget() = min(ceiling,
+    target × 4^((now − lastMintAt) / DECAY_INTERVAL))`, `DECAY_INTERVAL = 360` s. Proofs and gilt are
+    checked against it, `bits()` reports it, and the retarget after a mint starts from it; a proof found
+    against the stored target stays valid. Accepted: from 360 s of silence the retarget jumps ×16 (eased
+    ×4, then the clamp's ×4) where it was ×4, and at an epoch boundary its base is clamped to the next
+    epoch's ceiling, one bit harder than the target the proof met.
+  - The duty conversion waits for `CONVERT_PRICES = 100` mint prices (was 2): at two the miner's reward was
+    about a fiftieth of the duty's gas (whole-branch review I5); at a hundred it about covers it at 1 gwei,
+    half of it at the 2 gwei ceiling. `dutiesDue().convertDue` describes this in-mint duty only: the
+    keeper, or anyone, may call `convert()` on any pot once the spacing has passed.
+  - After a duty conversion that ran with its whole gas allowance failed, mints leave the conversion alone
+    for `CONVERT_BACKOFF = 300` blocks (`convertBackoffUntil`); `convert()` is not held back (audit L-2,
+    partly: the dead-pool lock stays accepted). The gas before the call decides whether the duty had its
+    whole allowance, not the revert: v4-core wraps an out-of-gas inside hook callbacks and currency
+    transfers into a `WrappedError` that carries data. A duty starved by the sender's gas limit is skipped
+    without a back-off, so the page and the keeper pad the mint's gas limit by the duties' allowances.
+  - No gas-starvation guard (audit I-1, declined): a mint whose limit came from `eth_estimateGas` skips its
+    duties cheaply; the page and the keeper pad the limit so that they run.
+  - `poke(ids)`: anyone may settle staked cards; what a card earned goes to its staker, never to the
+    caller; ids that are not staked are skipped, so one unstake cannot void a keeper's batch. A settlement
+    that changes a card's weight emits ERC-4906 `MetadataUpdate(id)`, and `supportsInterface(0x49064906)`
+    is true. The event fires only when a staked card is settled: an unstaked card's emergence, computed and
+    never stored, emits nothing, and marketplaces refresh it on request.
 
 ## The drawing
 

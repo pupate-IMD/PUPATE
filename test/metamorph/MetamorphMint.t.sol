@@ -495,9 +495,11 @@ contract MetamorphMintTest is MetamorphFixture {
     /// @dev At the mainnet floor of 20 bits a proof is one hash in about a million, so the mint refuses a
     /// random nonce from anyone. A constructor that dropped the floor, or a mint that skipped the check, would
     /// let most runs through (and they would then revert `NothingMineable`, as no seat is noted here). A run
-    /// fails for nothing only when it draws a genuine proof: 2^-20 a run, about 1 in 4,000 for 256 runs.
+    /// that draws a genuine proof (2^-20 a run, about 1 in 4,000 for 256 runs) is assumed away, so no run
+    /// fails for nothing and forge's fuzz cache has no false failure to replay.
     function testFuzz_aRandomNonceIsRefusedAtTwentyBits(uint256 nonce, address who) public {
         uint256 a = _anchor();
+        vm.assume(uint256(strict.workHash(blockhash(a), who, nonce)) >= type(uint256).max >> 20);
         vm.prank(who);
         vm.expectRevert(MetamorphMD.NotASolution.selector);
         strict.mint(a, nonce);
