@@ -71,6 +71,10 @@ abstract contract MetamorphFixture is CocoonFixture {
         vm.prank(miner);
         token.approve(address(md), type(uint256).max);
         vm.deal(miner, 10 ether);
+
+        // Gas is dear by default, above the base fee under which a mint runs the vault's duties, so each suite
+        // tests its own concern; the suites about the duties make gas cheap.
+        vm.fee(3 gwei);
     }
 
     function _deploy(uint8 minBits) internal virtual returns (MetamorphMD) {

@@ -318,9 +318,6 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         _duties(msg.sender);
     }
 
-    /// @dev Runs the vault's due duties for a miner. Filled in by a later task.
-    function _duties(address) internal virtual {}
-
     // ------------------------------------------------------------------ internals (mint)
 
     function _anchor(uint256 anchor) private view returns (bytes32 h) {
@@ -596,6 +593,44 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         }
     }
 
+    // ------------------------------------------------------------------ the vault's duties
+
+    /// @notice The duties due right now: the hook's flush, the vault's burn, the pot's conversion. A mint
+    /// runs them when gas is cheap; the keeper reads the same. Like the burn, the conversion waits out its
+    /// spacing.
+    function dutiesDue() public view returns (bool flushDue, bool burnDue, bool convertDue) {
+        flushDue = POOL_MANAGER.balanceOf(address(HOOK), 0) >= MIN_FLUSH;
+        burnDue = COCOON.wired() && COCOON.burnPot() >= MIN_BURN
+            && block.number >= COCOON.lastBurnBlock() + COCOON.getParams().burnSpacing;
+        convertDue =
+            (pot >= 2 * mintPrice() || ethPot != 0) && block.number >= lastConvertBlock + CONVERT_SPACING;
+    }
+
+    /// @dev Inside a mint, when gas is cheap: each duty in a try with a gas allowance, so none of them can
+    /// fail the mint. The burn's ETH reward and the conversion's IMD reward go to the miner.
+    function _duties(address miner_) internal {
+        if (block.basefee > DUTY_MAX_BASEFEE) return;
+        (bool flushDue, bool burnDue, bool convertDue) = dutiesDue();
+        if (flushDue) {
+            try HOOK.flush{gas: DUTY_GAS}() {
+                emit DutyRun(0, 0);
+            } catch {}
+        }
+        if (burnDue) {
+            uint256 before = address(this).balance;
+            try COCOON.burn{gas: DUTY_GAS}() {
+                uint256 got = address(this).balance - before;
+                if (got != 0) _pay(miner_, got);
+                emit DutyRun(1, got);
+            } catch {}
+        }
+        if (convertDue) {
+            try this.convertDuty{gas: CONVERT_GAS}(miner_) returns (uint256 bought) {
+                emit DutyRun(2, bought * CALLER_REWARD_BPS / BPS);
+            } catch {}
+        }
+    }
+
     function _pay(address to, uint256 amount) private {
         (bool ok,) = to.call{value: amount}("");
         if (!ok) revert TransferFailed();
@@ -632,6 +667,4 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
             tstore(slot, value)
         }
     }
-
-    // The duties follow in a later task.
 }
