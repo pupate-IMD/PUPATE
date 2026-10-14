@@ -6,10 +6,17 @@ import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
+import {SeaportInterface} from "seaport-types/src/interfaces/SeaportInterface.sol";
+import {Cocoon} from "../../src/Cocoon.sol";
+import {PupateHook} from "../../src/PupateHook.sol";
+import {PupateToken} from "../../src/PupateToken.sol";
 import {IERC20Minimal} from "../../src/interfaces/IERC20Minimal.sol";
 import {IERC721Minimal} from "../../src/interfaces/IERC721Minimal.sol";
 import {IMetamorphArt} from "../../src/interfaces/IMetamorphArt.sol";
+import {MockERC20} from "../mocks/MockERC20.sol";
+import {MockERC721} from "../mocks/MockERC721.sol";
 import {MetamorphFixture} from "./MetamorphFixture.sol";
+import {ERC721Lite} from "../../src/metamorph/ERC721Lite.sol";
 import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
 
 contract MetamorphViewsTest is MetamorphFixture {
@@ -110,6 +117,96 @@ contract MetamorphViewsTest is MetamorphFixture {
         assertEq(md.mineableSeats().length, 0);
     }
 
+    function test_forgettingASoldSeatTakesItOffTheList() public {
+        _giveSeat(42);
+        md.noteSeat(42);
+        _giveSeat(7);
+        md.noteSeat(7);
+        _sell(1376);
+        vm.expectEmit(true, false, false, true, address(md));
+        emit MetamorphMD.SeatForgotten(1376);
+        md.forgetSeat(1376);
+        assertFalse(md.noted(1376));
+        uint256[] memory list = md.notedSeats();
+        assertEq(list.length, 2, "the list shrank");
+        assertEq(list[0], 7, "the last seat took the place of the forgotten one");
+        assertEq(list[1], 42);
+
+        // A mint still finds the seats that are left, and the hash indexes them by the same formula.
+        vm.roll(block.number + 1);
+        uint256[] memory open = md.mineableSeats();
+        assertEq(open.length, 2);
+        uint256 a = _anchor();
+        uint256 n = _proof(miner, a);
+        uint256 work = uint256(md.workHash(blockhash(a), miner, n));
+        vm.prank(miner);
+        uint256 id = md.mint(a, n);
+        (uint32 seat,,,,,,,) = md.cards(id);
+        assertEq(seat, open[work % open.length], "the hash indexes the seats that are left");
+
+        // The seat that moved is found at its new place, and the last one left can go too.
+        _sell(7);
+        md.forgetSeat(7);
+        list = md.notedSeats();
+        assertEq(list.length, 1);
+        assertEq(list[0], 42);
+        assertTrue(md.noted(42));
+        _sell(42);
+        md.forgetSeat(42);
+        assertEq(md.notedSeats().length, 0);
+        assertFalse(md.noted(7) || md.noted(42));
+    }
+
+    function test_forgetSeatRefusesAHeldSeatAndOneNotNoted() public {
+        vm.expectRevert(MetamorphMD.SeatHeld.selector);
+        md.forgetSeat(1376);
+        vm.expectRevert(MetamorphMD.SeatNotNoted.selector);
+        md.forgetSeat(99);
+        _sell(1376);
+        md.forgetSeat(1376);
+        vm.expectRevert(MetamorphMD.SeatNotNoted.selector);
+        md.forgetSeat(1376);
+        assertEq(md.notedSeats().length, 0);
+    }
+
+    function test_aForgottenSeatTheVaultBuysAgainIsNotedInItsNewRound() public {
+        _mintAs(miner);
+        _sell(1376);
+        md.forgetSeat(1376);
+        // The vault buys the same seat again: a new round, off the list until someone notes it.
+        vm.prank(other);
+        collection.transferFrom(other, address(cocoon), 1376);
+        cocoon.adopt(1376);
+        assertEq(md.mineableSeats().length, 0, "not noted yet");
+        md.noteSeat(1376);
+        assertTrue(md.noted(1376));
+        assertEq(md.notedSeats().length, 1);
+        vm.roll(block.number + 1);
+        uint256 id = _mintAs(miner);
+        (uint32 seat, uint16 round, uint16 edition,,,,,) = md.cards(id);
+        assertEq(seat, 1376);
+        assertEq(round, 1, "the new round");
+        assertEq(edition, 1, "the first edition of the new round");
+        assertEq(md.editionsMinted(1376, 0), 1, "the count of the old round is untouched");
+    }
+
+    /// @dev Forgetting never resets a count. A seat that left the wallet before anyone settled the sale can be
+    /// forgotten; when it comes straight back it is still in the same round, and noted again it goes on.
+    function test_aSeatForgottenBeforeItsSaleSettledGoesOnWithItsEditions() public {
+        _mintAs(miner);
+        vm.prank(address(cocoon));
+        collection.transferFrom(address(cocoon), other, 1376); // a fill, before anyone settles it
+        md.forgetSeat(1376);
+        vm.prank(other);
+        collection.transferFrom(other, address(cocoon), 1376); // and straight back
+        md.noteSeat(1376);
+        vm.roll(block.number + 1);
+        uint256 id = _mintAs(miner);
+        (, uint16 round, uint16 edition,,,,,) = md.cards(id);
+        assertEq(round, 0, "the same round");
+        assertEq(edition, 2, "the next edition, not a repeat");
+    }
+
     function test_filledButUnsettledSeatIsNotMineable() public {
         vm.prank(address(cocoon));
         collection.transferFrom(address(cocoon), other, 1376); // filled, nobody has settled
@@ -205,6 +302,116 @@ contract MetamorphViewsTest is MetamorphFixture {
         elsewhere.initialize(imdKey, IMD_SQRT_PRICE);
         vm.expectRevert(MetamorphMD.BadPoolKey.selector);
         _deployOn(elsewhere, key, imdKey);
+    }
+
+    function test_constructorRefusesEachZeroAddress() public {
+        _deployFrom(_wiring(), key, imdKey); // the addresses of the fixture deploy
+        for (uint256 i; i < 7; i++) {
+            address[7] memory a = _wiring();
+            a[i] = address(0);
+            vm.expectRevert(ERC721Lite.ZeroAddress.selector);
+            _deployFrom(a, key, imdKey);
+        }
+    }
+
+    function test_minBitsRunsFromOneTo200() public {
+        MetamorphMD hardest = _deploy(200);
+        assertEq(hardest.MIN_BITS(), 200);
+        assertEq(hardest.target(), type(uint256).max >> 200, "the ceiling of epoch one at 200 bits");
+        assertEq(hardest.bits(), 200);
+        vm.expectRevert(MetamorphMD.BadBits.selector);
+        _deploy(201);
+    }
+
+    /// @dev Every input that names a contract the vault also names must be the vault's own, and the hook must
+    /// pay this vault. Each case breaks one alone and passes every key rule, so only the wiring refuses it.
+    function test_constructorRefusesWrongWiring() public {
+        // Another token as IMD, with an initialised hookless ETH pool of its own at a 1% fee.
+        MockERC20 fakeImd = new MockERC20("Not IMD", "NIMD");
+        PoolKey memory fakeImdKey = imdKey;
+        fakeImdKey.currency1 = Currency.wrap(address(fakeImd));
+        manager.initialize(fakeImdKey, IMD_SQRT_PRICE);
+        address[7] memory a = _wiring();
+        a[3] = address(fakeImd);
+        vm.expectRevert(MetamorphMD.BadWiring.selector);
+        _deployFrom(a, key, fakeImdKey);
+
+        // Another collection.
+        a = _wiring();
+        a[4] = address(new MockERC721());
+        vm.expectRevert(MetamorphMD.BadWiring.selector);
+        _deployFrom(a, key, imdKey);
+
+        // Another PoolManager. Only the manager the hook answers to can initialise the launch pool, so the
+        // storage reads of this one are mocked to show both pools initialised.
+        IPoolManager elsewhere = IPoolManager(address(new PoolManager(address(this))));
+        vm.mockCall(
+            address(elsewhere),
+            abi.encodeWithSignature("extsload(bytes32)"),
+            abi.encode(bytes32(uint256(IMD_SQRT_PRICE)))
+        );
+        a = _wiring();
+        a[5] = address(elsewhere);
+        vm.expectRevert(MetamorphMD.BadWiring.selector);
+        _deployFrom(a, key, imdKey);
+
+        // Another vault on the same addresses, as the two abandoned before the launch were: the hook pays
+        // the live one.
+        Cocoon abandoned = new Cocoon(
+            owner,
+            developer,
+            operator,
+            IERC721Minimal(address(collection)),
+            SeaportInterface(address(seaport)),
+            manager,
+            feed,
+            IERC20Minimal(address(imd))
+        );
+        a = _wiring();
+        a[0] = address(abandoned);
+        vm.expectRevert(MetamorphMD.BadWiring.selector);
+        _deployFrom(a, key, imdKey);
+
+        // A hook that pays another sink, with a launch pool of its own.
+        PupateHook stranger = _deployHook(other, owner);
+        PoolKey memory strangerKey = _ethPool(address(token), address(stranger));
+        manager.initialize(strangerKey, SQRT_PRICE_OPEN);
+        a = _wiring();
+        a[1] = address(stranger);
+        vm.expectRevert(MetamorphMD.BadWiring.selector);
+        _deployFrom(a, strangerKey, imdKey);
+    }
+
+    /// @dev The seven addresses of the fixture, in the order of the constructor: the vault, the hook, PUPATE,
+    /// IMD, the collection, the PoolManager and the art.
+    function _wiring() private view returns (address[7] memory) {
+        return [
+            address(cocoon),
+            address(hook),
+            address(token),
+            address(imd),
+            address(collection),
+            address(manager),
+            address(art)
+        ];
+    }
+
+    function _deployFrom(address[7] memory a, PoolKey memory pupateKey_, PoolKey memory imdKey_)
+        private
+        returns (MetamorphMD)
+    {
+        return new MetamorphMD(
+            Cocoon(payable(a[0])),
+            PupateHook(payable(a[1])),
+            PupateToken(a[2]),
+            IERC20Minimal(a[3]),
+            IERC721Minimal(a[4]),
+            IPoolManager(a[5]),
+            pupateKey_,
+            imdKey_,
+            IMetamorphArt(a[6]),
+            1
+        );
     }
 
     function _deployWithKeys(PoolKey memory pupateKey_, PoolKey memory imdKey_)

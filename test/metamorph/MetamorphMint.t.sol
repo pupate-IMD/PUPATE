@@ -399,12 +399,15 @@ contract MetamorphMintTest is MetamorphFixture {
         assertEq(bytes4(pm.reentryError()), MetamorphMD.Reentrancy.selector);
     }
 
-    function testFuzz_randomNoncesNeverPassAtTwentyBits(uint256 nonce, address who) public view {
-        assertEq(strict.target(), type(uint256).max >> 20, "twenty bits is the mainnet floor");
-        // 2^-20 odds per try: a fuzz run practically never finds a proof, and one that does is genuine. Either
-        // way a proof is exactly a hash under max >> 20.
-        uint256 w = uint256(strict.workHash(blockhash(_anchor()), who, nonce));
-        assertEq(w < type(uint256).max >> 20, w < strict.target());
+    /// @dev At the mainnet floor of 20 bits a proof is one hash in about a million, so the mint refuses a
+    /// random nonce from anyone. A constructor that dropped the floor, or a mint that skipped the check, would
+    /// let most runs through (and they would then revert `NothingMineable`, as no seat is noted here). A run
+    /// fails for nothing only when it draws a genuine proof: 2^-20 a run, about 1 in 4,000 for 256 runs.
+    function testFuzz_aRandomNonceIsRefusedAtTwentyBits(uint256 nonce, address who) public {
+        uint256 a = _anchor();
+        vm.prank(who);
+        vm.expectRevert(MetamorphMD.NotASolution.selector);
+        strict.mint(a, nonce);
     }
 
     /// @dev Expects the two events of the miner's first mint: the target falls to a quarter (a mint seconds

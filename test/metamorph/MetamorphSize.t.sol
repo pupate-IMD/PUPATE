@@ -14,7 +14,7 @@ contract MetamorphSizeTest is MetamorphFixture {
         // its arguments are missing: an unguarded owner(), setArt(address), setPrice(uint256), pause(),
         // withdraw(uint256) or sweep(address) would succeed here and fail this test. A pass means that no
         // such function exists, or that it refuses even with arguments. The authoritative list is
-        // `forge inspect MetamorphMD methodIdentifiers` (at this commit: 74 functions, 13 state-changing,
+        // `forge inspect MetamorphMD methodIdentifiers` (at this commit: 75 functions, 14 state-changing,
         // none privileged).
         bytes4[6] memory selectors = [
             bytes4(keccak256("owner()")),

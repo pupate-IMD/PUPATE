@@ -73,7 +73,9 @@ abstract contract MetamorphFixture is CocoonFixture {
         vm.deal(miner, 10 ether);
 
         // Gas is dear by default, above the base fee under which a mint runs the vault's duties, so each suite
-        // tests its own concern; the suites about the duties make gas cheap.
+        // tests its own concern; the suites about the duties make gas cheap. Under `forge test --isolate`,
+        // `vm.fee` does not reach the isolated calls, so mints run their duties whatever it says and 9 of the
+        // metamorph tests fail there. The default mode is the supported one.
         vm.fee(3 gwei);
     }
 

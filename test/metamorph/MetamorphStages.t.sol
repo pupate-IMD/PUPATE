@@ -96,6 +96,15 @@ contract MetamorphStagesTest is MetamorphFixture {
         assertTrue(md.supportsInterface(0x2a55205a));
     }
 
+    function test_supportsTheFourInterfacesItImplements() public view {
+        assertTrue(md.supportsInterface(0x01ffc9a7), "ERC-165");
+        assertTrue(md.supportsInterface(0x80ac58cd), "ERC-721");
+        assertTrue(md.supportsInterface(0x5b5e139f), "ERC-721 metadata");
+        assertTrue(md.supportsInterface(0x2a55205a), "ERC-2981");
+        assertFalse(md.supportsInterface(0x780e9d63), "not ERC-721 enumerable");
+        assertFalse(md.supportsInterface(0xffffffff), "never 0xffffffff, as ERC-165 requires");
+    }
+
     function test_tokenURIHandsTheArtEveryFact() public {
         uint256 id = _mintAs(miner);
         assertEq(md.tokenURI(id), "stub:1:1376:0:1:0:plain:1:50000000000000000000000");

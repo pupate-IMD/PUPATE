@@ -35,9 +35,12 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     error BadAnchor();
     error BadBits();
     error BadPoolKey();
+    error BadWiring();
     error NotASolution();
     error SeatNotHeld();
     error SeatTooLarge();
+    error SeatNotNoted();
+    error SeatHeld();
     error Staked();
     error NotStaked();
     error NotCardOwner();
@@ -63,6 +66,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     );
     event Retargeted(uint256 target);
     event SeatNoted(uint256 indexed seat);
+    event SeatForgotten(uint256 indexed seat);
     event Converted(
         uint256 pupateSold, uint256 ethBought, uint256 imdBought, address indexed caller, uint256 reward
     );
@@ -148,16 +152,21 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
 
     uint256[] private _seats;
     mapping(uint256 seat => bool) public noted;
+    /// @dev Where a noted seat sits in `_seats`, so that `forgetSeat` can move the last seat into its place.
+    mapping(uint256 seat => uint256) private _seatIndex;
 
     /// @notice PUPATE waiting to be converted for the stakers.
     uint256 public pot;
-    /// @notice ETH a conversion bought but the IMD pool could not absorb yet; spent by the next one.
+    /// @notice ETH a conversion bought but the IMD pool could not absorb yet; spent by the next one. The
+    /// contract's balance can exceed it (a burn reward a miner refused, ETH sent to `receive()`, forced
+    /// ETH): such ETH does not make a conversion due, and the next conversion spends it with the rest.
     uint256 public ethPot;
     /// @notice The block of the last conversion; the next one waits `CONVERT_SPACING` blocks.
     uint256 public lastConvertBlock;
     uint256 public accIMDPerWeight;
     uint256 public totalWeight;
-    /// @notice IMD credited to stakers and not yet paid out.
+    /// @notice IMD credited to stakers and not yet paid out. An upper bound: it keeps each credit's
+    /// rounding dust, which no staker can claim.
     uint256 public imdOwed;
     mapping(uint256 id => Stake) public stakeOf;
     mapping(address staker => uint256) public pendingIMD;
@@ -205,6 +214,15 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         (uint160 launchPrice,,,) = poolManager_.getSlot0(launchId);
         (uint160 imdPrice,,,) = poolManager_.getSlot0(imdKey_.toId());
         if (launchPrice == 0 || imdPrice == 0) revert BadPoolKey();
+        // No key can correct an address later either: IMD, the collection and the PoolManager must be the
+        // vault's own, and the hook must pay this vault. Wired otherwise, the contract would read another
+        // vault's seats, run another vault's burns, pay the stakers in another token or trade on another
+        // manager, for good.
+        if (
+            address(imd_) != address(cocoon_.IMD()) || address(collection_) != address(cocoon_.COLLECTION())
+                || address(poolManager_) != address(cocoon_.POOL_MANAGER())
+                || hook_.sink() != address(cocoon_)
+        ) revert BadWiring();
         COCOON = cocoon_;
         HOOK = hook_;
         PUPATE = pupate_;
@@ -267,6 +285,10 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         while (n < 255 && (t >> (255 - n)) == 0) n++;
     }
 
+    // ------------------------------------------------------------------ the seat registry
+
+    /// @notice The seats noted and not forgotten. Cocoon keeps no list of the seats it holds, so anyone may
+    /// note a seat the vault holds and forget one it no longer holds; every mint walks this list.
     function notedSeats() external view returns (uint256[] memory) {
         return _seats;
     }
@@ -289,15 +311,33 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     }
 
     /// @notice Tell the contract about a seat the vault holds. Anyone may; the page and the keeper do. A card
-    /// stores its seat in 32 bits, so a seat id above 2^32 − 1 is refused (audit L-4).
+    /// stores its seat in 32 bits, so a seat id above 2^32 − 1 is refused (audit L-4). A forgotten seat
+    /// can be noted again once the vault holds it; editions are counted per seat and round, so none repeats.
     function noteSeat(uint256 seat) external {
         if (seat > type(uint32).max) revert SeatTooLarge();
         (bool held,) = _vaultHolds(seat);
         if (!held) revert SeatNotHeld();
         if (noted[seat]) return;
         noted[seat] = true;
+        _seatIndex[seat] = _seats.length;
         _seats.push(seat);
         emit SeatNoted(seat);
+    }
+
+    /// @notice Take a seat the vault no longer holds off the list, so that mints stop walking it. Anyone may;
+    /// the page and the keeper do after a sale. The last seat of the list takes its place.
+    function forgetSeat(uint256 seat) external {
+        if (!noted[seat]) revert SeatNotNoted();
+        (bool held,) = _vaultHolds(seat);
+        if (held) revert SeatHeld();
+        uint256 i = _seatIndex[seat];
+        uint256 last = _seats[_seats.length - 1];
+        _seats[i] = last;
+        _seatIndex[last] = i;
+        _seats.pop();
+        delete _seatIndex[seat];
+        delete noted[seat];
+        emit SeatForgotten(seat);
     }
 
     // ------------------------------------------------------------------ the mint
@@ -462,8 +502,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         }
     }
 
-    /// @notice Settle the given staked cards (an emerged card is reweighed to 2 here) and pay out
-    /// everything pending for the caller.
+    /// @notice Settle the given staked cards and pay out everything pending for the caller. Settling
+    /// re-reads each card's stage: an emerged card is reweighed to 2 here, and one whose stage fell back
+    /// (its seat came back to the vault before anyone settled the sale) to 1 again.
     function claim(uint256[] calldata ids) external nonReentrant returns (uint256 paid) {
         for (uint256 i; i < ids.length; i++) {
             Stake storage s = stakeOf[ids[i]];

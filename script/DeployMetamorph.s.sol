@@ -26,9 +26,12 @@ contract DeployMetamorph is Script {
         address collection = vm.envAddress("COLLECTION");
         IPoolManager manager = IPoolManager(vm.envAddress("POOL_MANAGER"));
         IMetamorphArt art = IMetamorphArt(vm.envAddress("ART"));
-        uint8 minBits = uint8(vm.envUint("MIN_BITS"));
+        // Checked whole, before it is narrowed to the constructor's uint8: 276 must not pass for 20.
+        uint256 minBits = vm.envUint("MIN_BITS");
         require(minBits == 20, "mainnet floor is 20 bits");
         require(address(art).code.length != 0, "ART has no code");
+        // The constructor also refuses a wrong wiring (`BadWiring`): IMD, the collection and the PoolManager
+        // must be the ones the vault names, and the hook must pay the vault.
         require(hook.sink() == address(cocoon), "hook sink is not the vault");
 
         PoolKey memory pupateKey = PoolKey(
@@ -48,7 +51,7 @@ contract DeployMetamorph is Script {
             pupateKey,
             imdKey,
             art,
-            minBits
+            uint8(minBits)
         );
         vm.stopBroadcast();
 

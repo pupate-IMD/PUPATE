@@ -63,6 +63,8 @@ contract MetamorphInvariantTest is MetamorphFixture {
             handler.sellSeat(i);
         }
         assertEq(md.mineableSeats().length, 0, "every seat sold");
+        assertEq(handler.seatsForgotten(), seatList.length, "and forgotten");
+        assertEq(md.notedSeats().length, 0, "the list is empty");
         assertEq(handler.lastStage(1), 1, "card 1 is a butterfly");
         handler.pass(1 days);
         handler.unstake(0);

@@ -108,6 +108,39 @@ contract MetamorphDutiesTest is MetamorphFixture {
         assertEq(address(md).balance, md.ethPot(), "nothing stays behind");
     }
 
+    /// @dev The reward is what the burn added to the balance, not the balance after it: with ETH already
+    /// waiting in the ETH pot, the miner gets exactly the reward Cocoon reports and the waiting ETH stays. The
+    /// mint comes inside the conversion spacing, so the conversion duty is not due and does not run; nothing
+    /// else in the mint can move the ETH pot or the balance.
+    function test_theBurnRewardLeavesTheWaitingEthAlone() public {
+        _mintMany(2); // 70,000 PUPATE, under twice the price
+        // Thin the IMD pool to 0.01% of its depth, so the conversion leaves ETH waiting.
+        router.addLiquidity(imdKey, _imdPosition(-int256(_imdLiquidity() * 9999 / 10_000)));
+        vm.prank(keeper);
+        md.convert();
+        uint256 waiting = md.ethPot();
+        assertGt(waiting, 0, "ETH waits");
+        assertEq(address(md).balance, waiting);
+        _deposit(1 ether);
+        vm.roll(block.number + 1);
+        assertGe(
+            block.number, cocoon.lastBurnBlock() + cocoon.getParams().burnSpacing, "past the burn spacing"
+        );
+        (, bool b, bool c) = md.dutiesDue();
+        assertTrue(b, "a burn is due");
+        assertFalse(c, "the conversion waits out its spacing");
+        uint256 before = miner.balance;
+        vm.recordLogs();
+        _mintAs(miner);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 reward = _burnReward(logs);
+        assertGt(reward, 0);
+        assertEq(miner.balance - before, reward, "the miner got the reward of the burn and nothing more");
+        assertEq(_paid(logs, 1), reward, "as the duty reports");
+        assertEq(md.ethPot(), waiting, "the ETH pot is untouched");
+        assertEq(address(md).balance, waiting, "and so is the balance");
+    }
+
     function test_burnIsNotDueInsideTheVaultsSpacing() public {
         _deposit(1 ether);
         cocoon.burn(); // anyone may burn; the vault's next burn waits out its spacing

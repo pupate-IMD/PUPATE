@@ -9,8 +9,8 @@ import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
 import {MockERC721} from "../mocks/MockERC721.sol";
 
 /// @dev Drives Metamorph MD with valid actions only (the suite fails on revert): mints with real
-/// proofs, stakes, unstakes, claims, converts, sells seats, pays the vault tax, and moves the clock and
-/// the chain.
+/// proofs, stakes, unstakes, claims, converts, sells seats and forgets them, pays the vault tax, and moves
+/// the clock and the chain.
 contract MetamorphHandler is Test {
     MetamorphMD public md;
     Cocoon public cocoon;
@@ -22,6 +22,7 @@ contract MetamorphHandler is Test {
 
     uint256 public feesPaid;
     uint256 public pupateSold;
+    uint256 public seatsForgotten;
     mapping(uint256 id => uint8) public lastStage;
     uint256[] public minted;
 
@@ -122,7 +123,9 @@ contract MetamorphHandler is Test {
     }
 
     /// @dev A settled sale, as the fixture's `_sell`: the seat leaves the vault's wallet for the sink and
-    /// the vault settles it. A sold seat never goes back to the vault, so no card's stage falls back.
+    /// the vault settles it. A sold seat never goes back to the vault, so no card's stage falls back. Then
+    /// the seat is forgotten, as the page and the keeper do after a sale: every seat of the campaign is
+    /// noted in its setup and sold once at most, so it is noted here, and no longer held.
     function sellSeat(uint256 pick) external {
         uint256 seat = seats[pick % seats.length];
         (,,,,, bool held,) = cocoon.seats(seat);
@@ -130,6 +133,8 @@ contract MetamorphHandler is Test {
         vm.prank(address(cocoon));
         collection.transferFrom(address(cocoon), sink, seat);
         cocoon.settleSeat(seat);
+        md.forgetSeat(seat);
+        seatsForgotten++;
         _refreshStages();
     }
 
