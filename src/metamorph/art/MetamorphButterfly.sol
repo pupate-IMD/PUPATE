@@ -14,9 +14,9 @@ import {ArtTraits} from "./ArtTraits.sol";
 /// times its edition's delta (thousandths of a unit) is carried unrounded. Every printed coordinate, size and
 /// length is the integer product of all its factors divided once, at the end, rounded half up on its magnitude
 /// (`_mulDiv`); a coordinate below zero is its base minus a rounded magnitude. The vein angles are tenths of a
-/// degree, their sines and cosines interpolated between the whole degrees of `_sines` (`_sinT`) and carried
-/// unrounded into the endpoint's one division. Drawn for the traits `ArtTraits` gives: a seat length below zero
-/// is outside them, and the unsigned arithmetic then reverts.
+/// degree, their sines and cosines interpolated between the whole degrees of `ArtTraits.sines`
+/// (`ArtTraits.sinT`) and carried unrounded into the endpoint's one division. Drawn for the traits
+/// `ArtTraits` gives: a seat length below zero is outside them, and the unsigned arithmetic then reverts.
 contract MetamorphButterfly is IMetamorphFigure {
     /// The prototype's MONO, the figure's font.
     string private constant MONO = "Consolas, 'Courier New', monospace";
@@ -152,7 +152,7 @@ contract MetamorphButterfly is IMetamorphFigure {
         pure
         returns (string memory s)
     {
-        uint16[91] memory sines = _sines();
+        uint16[91] memory sines = ArtTraits.sines();
         for (uint256 i; i < n; i++) {
             s = string.concat(s, _vein(_ray(sines, 60, -80, _angle(i, n), span * 92), stroke, "cu"));
         }
@@ -181,32 +181,21 @@ contract MetamorphButterfly is IMetamorphFigure {
 
     /// The prototype's ray, "Mx yLx' y'": from (x, y) in tenths at an angle a in tenths of a degree (-900..900),
     /// its length len / 10000 tenths (len the unrounded product of its factors). The end is x + cos(a) × len and
-    /// y + sin(a) × len, each offset one product of the interpolated sine (`_sinT`, hundred-thousandths) and len
-    /// divided once by 10^9, its magnitude rounded half up; cos(a) = sin(90° - |a|) is never negative, and the
-    /// sign of the angle goes on the rounded y offset.
+    /// y + sin(a) × len, each offset one product of the interpolated sine (`ArtTraits.sinT`,
+    /// hundred-thousandths) and len divided once by 10^9, its magnitude rounded half up; cos(a) =
+    /// sin(90° - |a|) is never negative, and the sign of the angle goes on the rounded y offset.
     function _ray(uint16[91] memory sines, int256 x, int256 y, int256 a, uint256 len)
         private
         pure
         returns (string memory)
     {
         uint256 m = uint256(a < 0 ? -a : a);
-        int256 dx = int256(_mulDiv(_sinT(sines, 900 - m), len, 1e9));
-        int256 dy = int256(_mulDiv(_sinT(sines, m), len, 1e9));
+        int256 dx = int256(_mulDiv(ArtTraits.sinT(sines, 900 - m), len, 1e9));
+        int256 dy = int256(_mulDiv(ArtTraits.sinT(sines, m), len, 1e9));
         return string.concat(
             string.concat("M", ArtTraits.f1(x), " ", ArtTraits.f1(y)),
             string.concat("L", ArtTraits.f1(x + dx), " ", ArtTraits.f1(a < 0 ? y - dy : y + dy))
         );
-    }
-
-    /// sin(t / 10 degrees) for t in 0..900 tenths of a degree, in hundred-thousandths (ten times the table's
-    /// ten-thousandths, so that it stays an integer): the two whole degrees around it interpolated linearly and
-    /// kept unrounded, sin(d) × (10 - f) + sin(d + 1) × f with d = t / 10 and f = t % 10. At a whole degree
-    /// (f = 0) it is sin(d) × 10 and the next entry is not read, so 90° never reads past the table.
-    function _sinT(uint16[91] memory sines, uint256 t) internal pure returns (uint256) {
-        uint256 d = t / 10;
-        uint256 f = t % 10;
-        if (f == 0) return uint256(sines[d]) * 10;
-        return uint256(sines[d]) * (10 - f) + uint256(sines[d + 1]) * f;
     }
 
     /// The angle of upper vein i of n (n >= 2, after the clamp) in tenths of a degree: -62 + 70 × i / (n - 1)
@@ -295,25 +284,5 @@ contract MetamorphButterfly is IMetamorphFigure {
     /// Tenths as the prototype's f1 prints them (`ArtTraits.f1`), for a value that is never negative.
     function _f(uint256 tenths) private pure returns (string memory) {
         return ArtTraits.f1(int256(tenths));
-    }
-
-    /// sin(d°) for d = 0..90 in ten-thousandths, round(sin(d°) × 10000): the mirror's `SINES`, the 91 numbers
-    /// `node script/art/mirror.mjs sines` prints. `_sinT` interpolates between them; for an angle a in tenths
-    /// (-900..900), sin(a) = sign(a) × _sinT(|a|) and cos(a) = _sinT(900 - |a|).
-    function _sines() internal pure returns (uint16[91] memory) {
-        // forgefmt: disable-start
-        return [
-            uint16(0), 175, 349, 523, 698, 872, 1045, 1219, 1392, 1564, // 0..9
-            1736, 1908, 2079, 2250, 2419, 2588, 2756, 2924, 3090, 3256, // 10..19
-            3420, 3584, 3746, 3907, 4067, 4226, 4384, 4540, 4695, 4848, // 20..29
-            5000, 5150, 5299, 5446, 5592, 5736, 5878, 6018, 6157, 6293, // 30..39
-            6428, 6561, 6691, 6820, 6947, 7071, 7193, 7314, 7431, 7547, // 40..49
-            7660, 7771, 7880, 7986, 8090, 8192, 8290, 8387, 8480, 8572, // 50..59
-            8660, 8746, 8829, 8910, 8988, 9063, 9135, 9205, 9272, 9336, // 60..69
-            9397, 9455, 9511, 9563, 9613, 9659, 9703, 9744, 9781, 9816, // 70..79
-            9848, 9877, 9903, 9925, 9945, 9962, 9976, 9986, 9994, 9998, // 80..89
-            10000 // 90
-        ];
-        // forgefmt: disable-end
     }
 }

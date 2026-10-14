@@ -87,6 +87,10 @@ contract ArtTraitsHarness {
     function encode(bytes memory data) external pure returns (string memory) {
         return Base64.encode(data);
     }
+
+    function sinCircle(uint256 t) external pure returns (bool neg, uint256 mag) {
+        return ArtTraits.sinCircle(ArtTraits.sines(), t);
+    }
 }
 
 /// @dev The vectors are pasted from `node script/art/mirror.mjs vectors`: the mirror is written from the spec
@@ -693,6 +697,33 @@ contract ArtTraitsTest is Test {
         );
     }
 
+    /// The sine on the whole circle, a sign and a magnitude in hundred-thousandths: the quarter turns, a
+    /// tenth on each side of them, the middle of each quadrant, a whole turn and past it, and the orbit of
+    /// (2345, 0, 5) at 328.5 degrees with its cosine's angle, 418.5. Between two whole degrees the table is
+    /// interpolated (31.5 degrees is 52245, 58.5 is 85260).
+    function test_sinTurnsTheWholeCircle() public view {
+        _sin(0, false, 0);
+        _sin(1, false, 175);
+        _sin(450, false, 70710);
+        _sin(899, false, 99998);
+        _sin(900, false, 100000);
+        _sin(901, false, 99998);
+        _sin(1350, false, 70710);
+        _sin(1799, false, 175);
+        _sin(1800, true, 0);
+        _sin(1801, true, 175);
+        _sin(2250, true, 70710);
+        _sin(2699, true, 99998);
+        _sin(2700, true, 100000);
+        _sin(2701, true, 99998);
+        _sin(3150, true, 70710);
+        _sin(3285, true, 52245);
+        _sin(3599, true, 175);
+        _sin(3600, false, 0);
+        _sin(4185, false, 85260);
+        _sin(4500, false, 100000);
+    }
+
     /// The last chunk reads up to two bytes past the data. `_blob` cuts a 320-byte buffer in place, so the
     /// bytes past the cut are still in memory and nonzero; the encoding must not see them.
     function test_base64IgnoresTheBytesAfterTheData() public view {
@@ -835,6 +866,12 @@ contract ArtTraitsTest is Test {
         assertEq(o, outer, "outer");
         assertEq(n, inner, "inner");
         assertEq(d, dots, "dots");
+    }
+
+    function _sin(uint256 t, bool neg, uint256 mag) internal view {
+        (bool n, uint256 m) = h.sinCircle(t);
+        assertEq(n, neg, "sign");
+        assertEq(m, mag, "magnitude");
     }
 
     function _weights(uint16[4] memory got, uint16[4] memory want) internal pure {

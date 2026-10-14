@@ -270,4 +270,49 @@ library ArtTraits {
         if (density == 1) return (23, 15, 26);
         return (28, 18, 42);
     }
+
+    // ------------------------------------------------------------------ the sines
+
+    /// @notice sin(d°) for d = 0..90 in ten-thousandths, round(sin(d°) × 10000): the mirror's `SINES`, the 91
+    /// numbers `node script/art/mirror.mjs sines` prints. `sinT` interpolates between them and `sinCircle`
+    /// turns them round the whole circle: the butterfly's vein rays and the orbit's gold dot read them.
+    function sines() internal pure returns (uint16[91] memory) {
+        // forgefmt: disable-start
+        return [
+            uint16(0), 175, 349, 523, 698, 872, 1045, 1219, 1392, 1564, // 0..9
+            1736, 1908, 2079, 2250, 2419, 2588, 2756, 2924, 3090, 3256, // 10..19
+            3420, 3584, 3746, 3907, 4067, 4226, 4384, 4540, 4695, 4848, // 20..29
+            5000, 5150, 5299, 5446, 5592, 5736, 5878, 6018, 6157, 6293, // 30..39
+            6428, 6561, 6691, 6820, 6947, 7071, 7193, 7314, 7431, 7547, // 40..49
+            7660, 7771, 7880, 7986, 8090, 8192, 8290, 8387, 8480, 8572, // 50..59
+            8660, 8746, 8829, 8910, 8988, 9063, 9135, 9205, 9272, 9336, // 60..69
+            9397, 9455, 9511, 9563, 9613, 9659, 9703, 9744, 9781, 9816, // 70..79
+            9848, 9877, 9903, 9925, 9945, 9962, 9976, 9986, 9994, 9998, // 80..89
+            10000 // 90
+        ];
+        // forgefmt: disable-end
+    }
+
+    /// @notice sin(t / 10 degrees) for t in 0..900 tenths of a degree, in hundred-thousandths (ten times the
+    /// table's ten-thousandths, so that it stays an integer): the two whole degrees around it interpolated
+    /// linearly and kept unrounded, sin(d) × (10 - f) + sin(d + 1) × f with d = t / 10 and f = t % 10. At a
+    /// whole degree (f = 0) it is sin(d) × 10 and the next entry is not read, so 90° never reads past the
+    /// table.
+    function sinT(uint16[91] memory table, uint256 t) internal pure returns (uint256) {
+        uint256 d = t / 10;
+        uint256 f = t % 10;
+        if (f == 0) return uint256(table[d]) * 10;
+        return uint256(table[d]) * (10 - f) + uint256(table[d + 1]) * f;
+    }
+
+    /// @notice sin(t / 10 degrees) for any t in tenths of a degree, as a sign and a magnitude in
+    /// hundred-thousandths: t is reduced to 0..3599; the second half turn is the first one's negative,
+    /// sin(t) = -sin(t - 1800); within a half turn, sin(t) = sinT(t) up to 900 and sinT(1800 - t) past it.
+    /// The cosine is sinCircle(t + 900). The user rounds the magnitude, once, and puts the sign on after.
+    function sinCircle(uint16[91] memory table, uint256 t) internal pure returns (bool neg, uint256 mag) {
+        t %= 3600;
+        neg = t >= 1800;
+        if (neg) t -= 1800;
+        mag = sinT(table, t <= 900 ? t : 1800 - t);
+    }
 }

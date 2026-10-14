@@ -3,17 +3,19 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {Colours, SeatTraits, Traits} from "../../../src/interfaces/IMetamorphFigure.sol";
+import {ArtTraits} from "../../../src/metamorph/art/ArtTraits.sol";
 import {MetamorphButterfly} from "../../../src/metamorph/art/MetamorphButterfly.sol";
 import {ArtTraitsHarness} from "./ArtTraits.t.sol";
 
-/// @dev The butterfly's table of sines, its interpolated sine and its vein angles, as the figure reads them.
+/// @dev The table of sines and the interpolated sine the figure reads from the trait library, and its vein
+/// angles.
 contract ButterflyHarness is MetamorphButterfly {
     function sines() external pure returns (uint16[91] memory) {
-        return _sines();
+        return ArtTraits.sines();
     }
 
     function sinT(uint256 t) external pure returns (uint256) {
-        return _sinT(_sines(), t);
+        return ArtTraits.sinT(ArtTraits.sines(), t);
     }
 
     function angle(uint256 i, uint256 n) external pure returns (int256) {

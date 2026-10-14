@@ -5,9 +5,9 @@
 // (docs/superpowers/specs/2026-10-14-metamorph-art-design.md) differ, the spec wins.
 //
 // It holds the traits (ArtTraits.sol): seeds, words, the fixed-point draws, the weighted picks, the digit
-// strings, the number formatter, the site's seat generator, the seat and card traits, the palette and the
-// density table; the chrysalis figure (MetamorphChrysalis.sol); and the butterfly figure with its table of
-// sines (MetamorphButterfly.sol).
+// strings, the number formatter, the site's seat generator, the seat and card traits, the palette, the density
+// table and the table of sines; the chrysalis figure (MetamorphChrysalis.sol); and the butterfly figure
+// (MetamorphButterfly.sol).
 //
 // Types follow the contract's: a value the contract keeps as uint256 or int256 (tenths, hundredths, words,
 // counts before they are narrowed) is a BigInt here; a uint8 or int8 field (an index into a table, a count,
@@ -19,7 +19,7 @@
 //
 // Usage:
 //   node script/art/mirror.mjs vectors    print the Solidity vectors of test/metamorph/art/ArtTraits.t.sol
-//   node script/art/mirror.mjs sines      print the 91 sines of MetamorphButterfly.sol, sin(0°)..sin(90°) in
+//   node script/art/mirror.mjs sines      print the 91 sines of ArtTraits.sol, sin(0°)..sin(90°) in
 //                                         ten-thousandths (test/metamorph/art/Butterfly.t.sol)
 //   node script/art/mirror.mjs figure chrysalis <seat> <round> <edition> <gilt 0|1>
 //                                         print that card's chrysalis figure (test/metamorph/art/Chrysalis.t.sol)
@@ -385,8 +385,8 @@ export function chrysalisFigure(t, c, s) {
 // ------------------------------------------------------------------ the butterfly (MetamorphButterfly.sol)
 
 /// sin(d°) for d = 0..90 in ten-thousandths, Math.round(Math.sin(d × π / 180) × 10000): 0, 175, 349, …, 10000.
-/// The contract holds the same 91 numbers as a constant table; `node script/art/mirror.mjs sines` prints them.
-/// Angles between two whole degrees are interpolated (sinT).
+/// ArtTraits holds the same 91 numbers as a constant table; `node script/art/mirror.mjs sines` prints them.
+/// Angles between two whole degrees are interpolated (sinT); sinCircle turns them round the whole circle.
 export const SINES = Array.from({ length: 91 }, (_, d) => Math.round(Math.sin((d * Math.PI) / 180) * 10000));
 
 /// sin(t / 10 degrees) for t in 0..900 tenths of a degree, in hundred-thousandths (ten times the table's
@@ -397,6 +397,17 @@ export const SINES = Array.from({ length: 91 }, (_, d) => Math.round(Math.sin((d
 export function sinT(t) {
   const d = Math.floor(t / 10), f = t % 10;
   return f === 0 ? BigInt(SINES[d]) * 10n : BigInt(SINES[d]) * BigInt(10 - f) + BigInt(SINES[d + 1]) * BigInt(f);
+}
+
+/// sin(t / 10 degrees) for any t in tenths of a degree, as a sign and a magnitude in hundred-thousandths (the
+/// contract's ArtTraits.sinCircle): t is reduced to 0..3599; the second half turn is the first one's negative,
+/// sin(t) = −sin(t − 1800); within a half turn, sin(t) = sinT(t) up to 900 and sinT(1800 − t) past it. The cosine
+/// is sinCircle(t + 900). The magnitude is rounded by its user, once, with the sign put on after.
+export function sinCircle(t) {
+  let a = Number(BigInt(t) % 3600n);
+  const neg = a >= 1800;
+  if (neg) a -= 1800;
+  return { neg, mag: sinT(a <= 900 ? a : 1800 - a) };
 }
 
 /// The prototype's clamp(v, lo, hi), on integers.
@@ -625,6 +636,15 @@ function vectors() {
     say(`assertEq(h.encode(bytes(${q(str)})), ${q(Buffer.from(str).toString("base64"))});`);
   }
   for (const n of [300, 301, 302]) say(`assertEq(h.encode(_blob(${n})), ${q(blob(n).toString("base64"))});`);
+
+  // The quarter turns, a tenth on each side of them, the middle of each quadrant, a whole turn and past it, and
+  // the orbit of (2345, 0, 5) at 328.5 degrees with its cosine's angle (418.5).
+  say("// ---- test_sinTurnsTheWholeCircle");
+  const turns = [0, 1, 450, 899, 900, 901, 1350, 1799, 1800, 1801, 2250, 2699, 2700, 2701, 3150, 3285, 3599, 3600, 4185, 4500];
+  for (const t of turns) {
+    const { neg, mag } = sinCircle(t);
+    say(`_sin(${t}, ${neg}, ${mag});`);
+  }
 
   return out.join("\n");
 }
