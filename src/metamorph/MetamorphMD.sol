@@ -100,6 +100,12 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     uint256 public constant CALLER_REWARD_BPS = 50;
     /// @notice Blocks between two conversions: Cocoon's `burnSpacing` default, mirrored.
     uint16 public constant CONVERT_SPACING = 5;
+    /// @notice The pot converts inside a mint once it holds this many mint prices: at two prices the
+    /// miner's 0.5% reward was about a fiftieth of the duty's gas; at a hundred it covers it.
+    uint256 public constant CONVERT_PRICES = 100;
+    /// @notice Blocks a mint leaves the conversion alone after a duty conversion failed, so a stuck pool
+    /// does not tax every cheap mint with a failing retry. The public `convert()` ignores it.
+    uint256 public constant CONVERT_BACKOFF = 300;
     uint256 public constant DUTY_MAX_BASEFEE = 2 gwei;
     uint256 public constant MIN_FLUSH = 0.005 ether;
     uint256 public constant MIN_BURN = 0.01 ether;
@@ -166,6 +172,8 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     uint256 public ethPot;
     /// @notice The block of the last conversion; the next one waits `CONVERT_SPACING` blocks.
     uint256 public lastConvertBlock;
+    /// @notice The block from which a duty conversion may be tried again after one failed; 0 when none.
+    uint256 public convertBackoffUntil;
     uint256 public accIMDPerWeight;
     uint256 public totalWeight;
     /// @notice IMD credited to stakers and not yet paid out. An upper bound: it keeps each credit's
@@ -677,14 +685,15 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     // ------------------------------------------------------------------ the vault's duties
 
     /// @notice The duties due right now: the hook's flush, the vault's burn, the pot's conversion. A mint
-    /// runs them when gas is cheap; the keeper reads the same. Like the burn, the conversion waits out its
-    /// spacing.
+    /// runs them when gas is cheap; the keeper reads the same. The conversion is due once the pot holds
+    /// `CONVERT_PRICES` mint prices or ETH waits; like the burn, it waits out its spacing, and after a duty
+    /// conversion failed, its back-off.
     function dutiesDue() public view returns (bool flushDue, bool burnDue, bool convertDue) {
         flushDue = POOL_MANAGER.balanceOf(address(HOOK), 0) >= MIN_FLUSH;
         burnDue = COCOON.wired() && COCOON.burnPot() >= MIN_BURN
             && block.number >= COCOON.lastBurnBlock() + COCOON.getParams().burnSpacing;
-        convertDue =
-            (pot >= 2 * mintPrice() || ethPot != 0) && block.number >= lastConvertBlock + CONVERT_SPACING;
+        convertDue = (pot >= CONVERT_PRICES * mintPrice() || ethPot != 0)
+            && block.number >= lastConvertBlock + CONVERT_SPACING && block.number >= convertBackoffUntil;
     }
 
     /// @dev Inside a mint, when gas is cheap: each duty in a try with a gas allowance, so none of them can
@@ -715,7 +724,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         if (convertDue) {
             try this.convertDuty{gas: CONVERT_GAS}(miner_) returns (uint256 bought) {
                 emit DutyRun(2, bought * CALLER_REWARD_BPS / BPS);
-            } catch {}
+            } catch {
+                convertBackoffUntil = block.number + CONVERT_BACKOFF;
+            }
         }
     }
 

@@ -26,10 +26,13 @@ contract MetamorphViewsTest is MetamorphFixture {
         assertEq(md.EPOCH(), 303);
         assertEq(md.BASE_PRICE(), 50_000 ether);
         assertEq(md.TARGET_INTERVAL(), 90);
+        assertEq(md.DECAY_INTERVAL(), 360);
         assertEq(md.ANCHOR_WINDOW(), 50);
         assertEq(md.CONVERT_IMPACT_BPS(), 500);
         assertEq(md.BUY_IMPACT_BPS(), 150);
         assertEq(md.CONVERT_SPACING(), 5);
+        assertEq(md.CONVERT_PRICES(), 100);
+        assertEq(md.CONVERT_BACKOFF(), 300);
         assertEq(md.DOMAIN(), keccak256("Metamorph MD work v1"));
         assertEq(md.MIN_BITS(), 1);
         assertEq(md.name(), "Metamorph MD");

@@ -297,7 +297,10 @@ contract MetamorphConvertTest is MetamorphFixture {
     /// @dev Audit M-1, inside a mint: a contract miner front-runs from its receiver hook, which runs before
     /// the duties, so it sandwiches the conversion its own mint runs. It netted 0.827 ETH under 500 bps.
     function test_aMinerSandwichingItsOwnDutyConversionDoesNotPay() public {
-        _mintMany(3); // gas is dear: 105,000 PUPATE wait in the pot, a conversion is due
+        // Gas is dear: 143 fees put 5,005,000 PUPATE in the pot, a hundred prices, so a conversion is due.
+        while (md.pot() < md.CONVERT_PRICES() * md.mintPrice()) {
+            _mintMany(1);
+        }
         vm.deal(address(md), 3 ether); // and ETH waits, as above
         SandwichMiner sm = new SandwichMiner(md, router, token, imd, imdKey);
         deal(address(token), address(sm), 1_000_000 ether);

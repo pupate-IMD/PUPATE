@@ -47,12 +47,15 @@ contract MetamorphDutiesTest is MetamorphFixture {
         }
     }
 
-    /// @dev Three mints put 105,000 PUPATE in the pot, over twice the price of 50,000. A mint runs its
-    /// duties once its own fee is in the pot, so cheap mints would convert it on the third; while gas is
-    /// dear they leave it whole. Gas is cheap again afterwards.
+    /// @dev Mints until the pot holds `CONVERT_PRICES` mint prices: 143 fees of 35,000 PUPATE put 5,005,000
+    /// in it, past a hundred prices of 50,000. A mint runs its duties once its own fee is in the pot, so
+    /// cheap mints would convert it on the 143rd; while gas is dear they leave it whole. Gas is cheap again
+    /// afterwards.
     function _fillThePot() private {
         vm.fee(3 gwei);
-        _mintMany(3);
+        while (md.pot() < md.CONVERT_PRICES() * md.mintPrice()) {
+            _mintMany(1);
+        }
         vm.fee(1 gwei);
     }
 
@@ -113,7 +116,7 @@ contract MetamorphDutiesTest is MetamorphFixture {
     /// mint comes inside the conversion spacing, so the conversion duty is not due and does not run; nothing
     /// else in the mint can move the ETH pot or the balance.
     function test_theBurnRewardLeavesTheWaitingEthAlone() public {
-        _mintMany(2); // 70,000 PUPATE, under twice the price
+        _mintMany(2); // 70,000 PUPATE, far under a hundred prices
         // Thin the IMD pool to 0.01% of its depth, so the conversion leaves ETH waiting.
         router.addLiquidity(imdKey, _imdPosition(-int256(_imdLiquidity() * 9999 / 10_000)));
         vm.prank(keeper);
@@ -155,10 +158,10 @@ contract MetamorphDutiesTest is MetamorphFixture {
         assertTrue(b, "due once the vault's spacing has passed");
     }
 
-    function test_mintConvertsWhenThePotIsTwoPricesDeep() public {
+    function test_mintConvertsWhenThePotIsAHundredPricesDeep() public {
         _fillThePot();
         (,, bool c) = md.dutiesDue();
-        assertTrue(c, "pot of 105k PUPATE is over twice the price");
+        assertTrue(c, "a pot of 5,005,000 PUPATE holds a hundred prices");
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 90);
         vm.recordLogs();
@@ -168,6 +171,21 @@ contract MetamorphDutiesTest is MetamorphFixture {
         assertEq(imd.balanceOf(miner), _paid(vm.getRecordedLogs(), 2), "as the duty reports");
     }
 
+    /// 99 prices in the pot is not due; the hundredth makes it due.
+    function test_theConversionDutyWaitsForAHundredPrices() public {
+        vm.fee(3 gwei); // duties off while filling
+        uint256 need = md.CONVERT_PRICES() * md.mintPrice();
+        // a block and 90 s per mint: mints in one block would quarter the target each time
+        while (md.pot() + md.mintPrice() * md.STAKER_BPS() / 10_000 < need) {
+            _mintMany(1);
+        }
+        (,, bool c) = md.dutiesDue();
+        assertFalse(c, "one mint short");
+        _mintAs(miner);
+        (,, c) = md.dutiesDue();
+        assertTrue(c, "the hundredth price makes the conversion due");
+    }
+
     /// @dev A conversion inside the spacing reverts `TooSoon`, so the view waits the spacing out too and a
     /// mint never tries one.
     function test_convertIsNotDueUntilTheSpacingHasPassed() public {
@@ -175,10 +193,15 @@ contract MetamorphDutiesTest is MetamorphFixture {
         vm.prank(keeper);
         md.convert();
         uint256 last = md.lastConvertBlock();
-        // Three mints refill the pot past twice the price inside the spacing; none of them tries to convert.
+        // 143 mints in the next block refill the pot past a hundred prices inside the spacing, 90 s apart so
+        // the target stays where it is; none of them tries to convert.
         vm.expectCall(address(md), abi.encodeCall(md.convertDuty, (miner)), 0);
-        _mintMany(3);
-        assertGe(md.pot(), 2 * md.mintPrice(), "deep enough");
+        vm.roll(block.number + 1);
+        for (uint256 i; i < 143; i++) {
+            vm.warp(block.timestamp + 90);
+            _mintAs(miner);
+        }
+        assertGe(md.pot(), md.CONVERT_PRICES() * md.mintPrice(), "deep enough");
         (,, bool c) = md.dutiesDue();
         assertFalse(c, "but the spacing has not passed");
         vm.roll(last + md.CONVERT_SPACING() - 1);
@@ -190,7 +213,7 @@ contract MetamorphDutiesTest is MetamorphFixture {
     }
 
     function test_ethWaitingFromARefusedBuyMakesTheConversionDue() public {
-        _mintMany(2); // 70,000 PUPATE, under twice the price
+        _mintMany(2); // 70,000 PUPATE, far under a hundred prices
         // Thin the IMD pool to 0.01% of its depth: a 1.5% move of its price then absorbs less ETH than the
         // sale brings, so the buy leaves ETH waiting.
         router.addLiquidity(imdKey, _imdPosition(-int256(_imdLiquidity() * 9999 / 10_000)));
@@ -221,7 +244,7 @@ contract MetamorphDutiesTest is MetamorphFixture {
         // A conversion that finds nothing to buy reverts: once the pot is due, drain the IMD pool's
         // liquidity so swap two buys nothing.
         _fillThePot();
-        router.addLiquidity(imdKey, _imdPosition(-int256(_imdLiquidity())));
+        _removeImdLiquidity();
         (,, bool c) = md.dutiesDue();
         assertTrue(c);
         uint256 potBefore = md.pot();
@@ -232,6 +255,33 @@ contract MetamorphDutiesTest is MetamorphFixture {
         uint256 id = _mintAs(miner); // must not revert
         assertEq(md.ownerOf(id), miner);
         assertEq(md.pot(), potBefore + 35_000 ether, "the failed conversion left the pot whole");
+    }
+
+    /// A duty conversion that fails is not retried by the next cheap mints: it backs off CONVERT_BACKOFF
+    /// blocks. The public convert() is not held back.
+    function test_aFailedDutyConversionBacksOff() public {
+        // fill the pot past the threshold at dear gas, then remove the IMD liquidity so a conversion
+        // finds nothing to buy (as test_failingDutyNeverRevertsTheMint does)
+        _fillThePot();
+        _removeImdLiquidity();
+        vm.roll(block.number + md.CONVERT_SPACING());
+        (,, bool c) = md.dutiesDue();
+        assertTrue(c, "due before the attempt");
+        uint256 id = _mintAs(miner); // the duty tries, fails, the mint succeeds
+        assertEq(md.ownerOf(id), miner);
+        assertEq(md.convertBackoffUntil(), block.number + md.CONVERT_BACKOFF(), "backed off");
+        (,, c) = md.dutiesDue();
+        assertFalse(c, "not due inside the back-off");
+        vm.roll(block.number + md.CONVERT_BACKOFF() - 1);
+        (,, c) = md.dutiesDue();
+        assertFalse(c, "one block short");
+        vm.roll(block.number + 1);
+        (,, c) = md.dutiesDue();
+        assertTrue(c, "due again after the back-off");
+        // the public entry is not held back: it reverts for its own reason, not TooSoon
+        vm.roll(block.number - md.CONVERT_BACKOFF() + 2);
+        vm.expectRevert(MetamorphMD.NothingBought.selector);
+        md.convert();
     }
 
     function test_aFlushOrABurnThatRevertsNeverRevertsTheMint() public {
@@ -316,6 +366,11 @@ contract MetamorphDutiesTest is MetamorphFixture {
             liquidityDelta,
             bytes32(0)
         );
+    }
+
+    /// @dev Takes the fixture's whole IMD position out, so a conversion's buy finds nothing to buy.
+    function _removeImdLiquidity() private {
+        router.addLiquidity(imdKey, _imdPosition(-int256(_imdLiquidity())));
     }
 
     /// @dev The fixture's IMD position: about 100 ETH deep at the opening price.

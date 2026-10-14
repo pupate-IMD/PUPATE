@@ -93,27 +93,35 @@ contract MetamorphForkTest is Test {
         assertEq(s, seat);
         assertEq(md.stageOf(id), 0);
 
-        // Stake, then two more mints: the third fee lifts the pot past twice the price, so that mint converts
-        // it through the real pools as its duty and pays the miner the caller's share in IMD.
+        // Stake, then two more mints: three fees are far under the hundred prices the conversion duty waits
+        // for, so the third mint's duties leave the pot alone and pay the miner no IMD.
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
         vm.prank(miner);
         md.stake(ids);
         uint256 imdBefore = IERC20Minimal(IMD).balanceOf(miner);
+        uint256 lastConvert = md.lastConvertBlock();
         for (uint256 i; i < 2; i++) {
             vm.roll(block.number + 1);
             vm.warp(block.timestamp + 90);
             _mint();
         }
-        assertEq(md.lastConvertBlock(), block.number, "the third mint converted the pot");
-        assertGt(IERC20Minimal(IMD).balanceOf(miner), imdBefore, "and paid the miner");
+        (,, bool convertDue) = md.dutiesDue();
+        assertFalse(convertDue, "three fees do not make the conversion due");
+        assertEq(md.lastConvertBlock(), lastConvert, "the third mint did not convert the pot");
+        assertEq(IERC20Minimal(IMD).balanceOf(miner), imdBefore, "nor paid the miner");
 
-        // Past the spacing a fourth fee waits in the pot, and anyone converts it through the real pools.
+        // Past the spacing a fourth fee joins the three in the pot, and anyone converts the four through the
+        // real pools: the caller is paid 0.5% of the IMD bought.
         vm.roll(block.number + md.CONVERT_SPACING());
         vm.warp(block.timestamp + 90);
         _mint();
+        uint256 callerBefore = IERC20Minimal(IMD).balanceOf(address(this));
         uint256 out = md.convert();
         assertGt(out, 0, "IMD bought on mainnet");
+        uint256 reward = IERC20Minimal(IMD).balanceOf(address(this)) - callerBefore;
+        assertEq(reward, out * md.CALLER_REWARD_BPS() / 10_000, "the caller is paid 0.5% of the IMD bought");
+        assertGt(reward, 0, "the caller earned IMD");
         vm.prank(miner);
         uint256 paid = md.claim(ids);
         assertGt(paid, 0, "the staker got IMD");
@@ -132,7 +140,7 @@ contract MetamorphForkTest is Test {
         uint256 a = block.number - 1;
         bytes32 ah = blockhash(a);
         uint256 nonce = 1;
-        while (uint256(md.workHash(ah, miner, nonce)) >= md.target()) nonce++;
+        while (uint256(md.workHash(ah, miner, nonce)) >= md.effectiveTarget()) nonce++;
         vm.prank(miner);
         return md.mint(a, nonce);
     }
