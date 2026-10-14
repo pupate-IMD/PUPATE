@@ -309,12 +309,17 @@ contract MetamorphMintTest is MetamorphFixture {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 20 minutes);
         _mintAs(miner);
-        assertApproxEqAbs(md.target(), ceiling, 8, "never above the epoch's ceiling");
+        // Three intervals of silence (1,200 s): the base eases from ceiling/4 by x64 and the ceiling caps
+        // it, so the x4 starts from the ceiling itself and lands on it exactly (ceiling − 3 before the
+        // decay, from ceiling/4 × 4).
+        assertEq(md.target(), ceiling, "never above the epoch's ceiling");
         // Exactly the interval leaves the target alone (it was at the ceiling).
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 90);
         _mintAs(miner);
-        assertApproxEqAbs(md.target(), ceiling, 8);
+        // No interval of silence (90 s): the base is the stored target, which the slow mint above left on
+        // the ceiling exactly, so this one stays on it exactly.
+        assertEq(md.target(), ceiling);
         // Twice the interval from below the ceiling doubles it.
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
@@ -328,6 +333,8 @@ contract MetamorphMintTest is MetamorphFixture {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 20 minutes);
         _mintAs(miner);
+        // Three intervals of silence (1,200 s) ease the base from ceiling/2 to the ceiling before the x4;
+        // the expectation is the ceiling as before.
         assertEq(md.target(), ceiling, "a slow mint from below lands on the ceiling");
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 180);
@@ -346,6 +353,72 @@ contract MetamorphMintTest is MetamorphFixture {
             _mintAs(miner);
             assertEq(md.target(), ceiling, "a slow mint from the ceiling stays on it");
         }
+    }
+
+    /// A burst of same-block mints divides the target by four each; silence then multiplies it by four
+    /// per DECAY_INTERVAL without a mint, up to the ceiling.
+    function test_silenceEasesTheTargetWithoutAMint() public {
+        uint256 cap = type(uint256).max >> 1; // minBits 1, epoch 1
+        _mintAs(miner);
+        uint256 t0 = md.target();
+        // three more mints in the same block: elapsed 0, ÷4 each
+        for (uint256 i; i < 3; i++) {
+            _mintAs(miner);
+        }
+        uint256 t = md.target();
+        assertEq(t, t0 / 4 / 4 / 4, "three same-block mints quarter the target three times");
+        assertEq(md.effectiveTarget(), t, "no silence yet");
+        vm.warp(block.timestamp + md.DECAY_INTERVAL() - 1);
+        assertEq(md.effectiveTarget(), t, "one second short of an interval changes nothing");
+        vm.warp(block.timestamp + 1);
+        assertEq(md.effectiveTarget(), t * 4, "one interval of silence: x4");
+        vm.warp(block.timestamp + md.DECAY_INTERVAL());
+        assertEq(md.effectiveTarget(), t * 16, "two intervals: x16");
+        vm.warp(block.timestamp + 365 days);
+        assertEq(md.effectiveTarget(), cap, "a year of silence: the ceiling, never above it");
+        assertEq(md.bits(), 1, "bits() reports the effective target");
+    }
+
+    /// A proof found against the stored target stays valid after silence: the effective target is never
+    /// below the stored one.
+    function test_aProofAgainstTheStoredTargetStaysValid() public {
+        _mintAs(miner);
+        for (uint256 i; i < 3; i++) {
+            _mintAs(miner);
+        }
+        uint256 anchor = _anchor();
+        uint256 nonce = _proofBelow(miner, anchor, md.target());
+        vm.warp(block.timestamp + 2 * md.DECAY_INTERVAL());
+        vm.roll(block.number + 1); // the anchor stays inside the window
+        vm.prank(miner);
+        uint256 id = md.mint(anchor, nonce);
+        assertEq(md.ownerOf(id), miner, "the old proof mints against the eased target");
+    }
+
+    /// A proof that only passes the eased target is a solution too, and the retarget after it starts
+    /// from the effective target: with elapsed >= 4 x TARGET_INTERVAL the next target is x4 of it, capped.
+    function test_aProofAgainstTheEasedTargetMintsAndRetargetsFromIt() public {
+        uint256 cap = type(uint256).max >> 1;
+        _mintAs(miner);
+        // ÷4 five times: the stored target falls to about 2^243, so the eased one (x64) times four stays
+        // sixteen times under the ceiling and the expectation below tells the eased base from the stored
+        // one and from the cap. Ten times would need about 2^21 hashes for the last proof alone, past
+        // forge's per-test gas cap.
+        for (uint256 i; i < 5; i++) {
+            _mintAs(miner);
+        }
+        uint256 stored = md.target();
+        vm.warp(block.timestamp + 3 * md.DECAY_INTERVAL());
+        uint256 eased = md.effectiveTarget();
+        assertEq(eased, stored * 64, "three intervals: x64");
+        uint256 anchor = _anchor();
+        // a nonce whose work lies between the stored and the eased target
+        uint256 nonce = _proofBetween(miner, anchor, stored, eased);
+        vm.roll(block.number + 1);
+        vm.prank(miner);
+        md.mint(anchor, nonce);
+        uint256 expected = eased > cap / 4 ? cap : eased * 4;
+        assertEq(md.target(), expected, "the retarget starts from the eased target");
     }
 
     function test_giltIsFourMoreBitsThanTheTarget() public {
@@ -420,6 +493,24 @@ contract MetamorphMintTest is MetamorphFixture {
         emit MetamorphMD.Retargeted(quarter);
         vm.expectEmit(true, true, true, true, address(md));
         emit MetamorphMD.Minted(1, 1376, 0, 1, miner, work, gilt, price, 1);
+    }
+
+    function _proofBelow(address who, uint256 anchor, uint256 limit) internal view returns (uint256 nonce) {
+        bytes32 h = blockhash(anchor);
+        while (uint256(md.workHash(h, who, nonce)) >= limit) nonce++;
+    }
+
+    function _proofBetween(address who, uint256 anchor, uint256 low, uint256 high)
+        internal
+        view
+        returns (uint256 nonce)
+    {
+        bytes32 h = blockhash(anchor);
+        while (true) {
+            uint256 w = uint256(md.workHash(h, who, nonce));
+            if (w >= low && w < high) return nonce;
+            nonce++;
+        }
     }
 
     /// @dev The proof by hand, with the `prevWork` of a chain state that has since moved on.

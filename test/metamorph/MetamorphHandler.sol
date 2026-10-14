@@ -44,9 +44,9 @@ contract MetamorphHandler is Test {
         sink = sink_;
     }
 
-    /// @dev A mint with the first nonce under the target, as the browser finds it. Gas is cheap, so the
-    /// mint also runs the vault's due duties; when a conversion among them runs, what its `Converted` event
-    /// reports sold is counted as sold. Nothing else excuses a drop of the pot.
+    /// @dev A mint with the first nonce under the effective target, as the browser finds it. Gas is cheap, so
+    /// the mint also runs the vault's due duties; when a conversion among them runs, what its `Converted`
+    /// event reports sold is counted as sold. Nothing else excuses a drop of the pot.
     function mint(uint256 who, uint256 dt) external {
         address a = actors[who % actors.length];
         if (md.totalMinted() >= md.MAX_SUPPLY() || md.mineableSeats().length == 0) return;
@@ -55,7 +55,7 @@ contract MetamorphHandler is Test {
         vm.warp(block.timestamp + bound(dt, 1, 600));
         uint256 anchor = block.number - 1;
         bytes32 ah = blockhash(anchor);
-        uint256 t = md.target();
+        uint256 t = md.effectiveTarget();
         uint256 nonce = 1;
         while (uint256(md.workHash(ah, a, nonce)) >= t) nonce++;
         uint256 price = md.mintPrice();

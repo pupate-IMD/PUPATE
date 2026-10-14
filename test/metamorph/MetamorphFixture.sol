@@ -98,10 +98,11 @@ abstract contract MetamorphFixture is CocoonFixture {
         return block.number - 1;
     }
 
-    /// @dev The first nonce whose proof is under the target, for `who` at `anchor`, as the browser does.
+    /// @dev The first nonce whose proof is under the effective target, for `who` at `anchor`, as the
+    /// browser does.
     function _proof(address who, uint256 anchor) internal view returns (uint256 nonce) {
         bytes32 ah = blockhash(anchor);
-        uint256 t = md.target();
+        uint256 t = md.effectiveTarget();
         for (nonce = 1;; nonce++) {
             if (uint256(md.workHash(ah, who, nonce)) < t) return nonce;
         }

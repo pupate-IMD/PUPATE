@@ -85,6 +85,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     uint16 public constant EPOCH = 303;
     uint256 public constant BASE_PRICE = 50_000 ether;
     uint256 public constant TARGET_INTERVAL = 90;
+    /// @notice Seconds of silence that ease the target by four, without a mint. A burst of fast mints
+    /// quarters the target each time; without this, only the next mint could bring it back.
+    uint256 public constant DECAY_INTERVAL = 360;
     uint256 public constant ANCHOR_WINDOW = 50;
     uint256 public constant STAKER_BPS = 7000;
     /// @notice The launch leg's bound: a sale may move the launch pool's price by at most 5%.
@@ -279,9 +282,20 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         return priceAt(epoch());
     }
 
+    /// @notice The target a proof is checked against right now: the stored target eased by four for every
+    /// `DECAY_INTERVAL` of silence since the last mint, never above the epoch's ceiling.
+    function effectiveTarget() public view returns (uint256 t) {
+        t = target;
+        uint256 cap = _ceiling(epoch());
+        if (t >= cap) return cap;
+        uint256 shift = 2 * ((block.timestamp - lastMintAt) / DECAY_INTERVAL);
+        if (shift >= 256 || t > (cap >> shift)) return cap;
+        return t << shift;
+    }
+
     /// @notice Leading zero bits a proof needs right now, for display.
     function bits() public view returns (uint8 n) {
-        uint256 t = target;
+        uint256 t = effectiveTarget();
         while (n < 255 && (t >> (255 - n)) == 0) n++;
     }
 
@@ -348,7 +362,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     function mint(uint256 anchor, uint256 nonce) external nonReentrant returns (uint256 id) {
         if (totalMinted >= MAX_SUPPLY) revert SupplyExhausted();
         bytes32 work = workHash(_anchor(anchor), msg.sender, nonce);
-        uint256 t = target;
+        uint256 t = effectiveTarget();
         if (uint256(work) >= t) revert NotASolution();
         (uint256 seat, uint16 round) = _pick(uint256(work));
         uint16 edition = ++editionsMinted[seat][round];
@@ -392,24 +406,26 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         (,,,,,, round) = COCOON.seats(seat);
     }
 
-    /// @dev Every mint moves the target toward one mint per `TARGET_INTERVAL`, by at most ×4 or ÷4, and
-    /// never above the epoch's ceiling. Reads `epoch()` after `totalMinted` moved, so the ceiling of the
-    /// epoch the next mint belongs to applies. FullMath keeps the product `target × elapsed` from
-    /// overflowing, but the quotient itself reaches 2^256 when the target sits near the top and the mint
-    /// came more than `TARGET_INTERVAL` late (the one-bit floor of the test suite; a mainnet floor of 20
-    /// bits has the room). That case saturates to the maximum first and the ceiling then caps it, so a
-    /// valid proof never reverts here.
+    /// @dev Every mint moves the target, starting from the effective (eased) target, toward one mint per
+    /// `TARGET_INTERVAL`, by at most ×4 or ÷4, and never above the epoch's ceiling. It runs before
+    /// `lastMintAt` moves, so the effective target still counts the silence before this mint. Reads
+    /// `epoch()` after `totalMinted` moved, so the ceiling of the epoch the next mint belongs to applies.
+    /// FullMath keeps the product `base × elapsed` from overflowing, but the quotient itself reaches 2^256
+    /// when the base sits near the top and the mint came more than `TARGET_INTERVAL` late (the one-bit
+    /// floor of the test suite; a mainnet floor of 20 bits has the room). That case saturates to the
+    /// maximum first and the ceiling then caps it, so a valid proof never reverts here.
     function _retarget() private {
         uint256 elapsed = block.timestamp - lastMintAt;
+        uint256 base = effectiveTarget();
         uint256 next;
         if (elapsed >= 4 * TARGET_INTERVAL) {
-            next = target > type(uint256).max / 4 ? type(uint256).max : target * 4;
+            next = base > type(uint256).max / 4 ? type(uint256).max : base * 4;
         } else if (elapsed * 4 <= TARGET_INTERVAL) {
-            next = target / 4;
+            next = base / 4;
         } else {
-            next = elapsed > TARGET_INTERVAL && target > type(uint256).max / elapsed * TARGET_INTERVAL
+            next = elapsed > TARGET_INTERVAL && base > type(uint256).max / elapsed * TARGET_INTERVAL
                 ? type(uint256).max
-                : FullMath.mulDiv(target, elapsed, TARGET_INTERVAL);
+                : FullMath.mulDiv(base, elapsed, TARGET_INTERVAL);
         }
         uint256 cap = _ceiling(epoch());
         if (next > cap) next = cap;
