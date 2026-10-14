@@ -5,8 +5,9 @@
 //   (3) keeper --once --force-report: a locally signed report lands (feed.issuedAt advances)
 //   (4) the real holder of seat 1376 lists it on Seaport at 2.8 ETH (validated on-chain, no signature);
 //       anvil #3 funds the seat pot; keeper --once buys it (seats(1376).held, SeatBought by anvil #2 with a reward)
-//   (5) anvil #4 fills Cocoon's falling order; keeper --once settles the seat (heldCount 0) and burns
-//       the proceeds (burnPot down, totalSupply down)
+//   (5) anvil #4 fills Cocoon's falling order; keeper --once settles the seat (heldCount back where it
+//       was: up gives the vault one seat of its own for Metamorph MD) and burns the proceeds (burnPot
+//       down, totalSupply down)
 // The keeper runs as a child process with ATTESTATION_SOURCE=local (anvil #9 signs), LISTING_SOURCE=file,
 // keeper key = anvil #2. Prints PASS/FAIL per assertion and the gas of every transaction the keeper sent;
 // exits non-zero on any failure. anvil's keys are derived from its public mnemonic and never printed.
@@ -307,7 +308,7 @@ async function main() {
   check('buySeat was sent', /sent buySeat #1376 at 2\.8 ETH/.test(out4));
   check('seats(1376).held is true', seat[5] === true, `cost ${fmtEth(seat[0])}, round ${seat[6]}`);
   check('Cocoon owns the seat', isAddressEqual(owner4, a.cocoon), owner4);
-  check('heldCount is 1', s4.heldCount === 1n);
+  check('heldCount grew by one', s4.heldCount === s4a.heldCount + 1n, `${s4a.heldCount} -> ${s4.heldCount}`);
   check('the holder was paid 2.8 ETH', (await pub.getBalance({ address: holder })) - holderBefore === parseEther('2.8'));
   const bought = await pub.getLogs({ address: a.cocoon, event: event('SeatBought'), fromBlock: s4a.block, toBlock: 'latest' });
   const sb = bought.find((l) => l.args.tokenId === SEAT);
@@ -349,7 +350,7 @@ async function main() {
   const s5 = await snapshot(a);
   const seat5 = await read(a.cocoon, cocoonAbi, 'seats', [SEAT]);
   check('settleSeat was sent', /sent settleSeat #1376/.test(out5));
-  check('heldCount is back to 0', s5.heldCount === 0n);
+  check('heldCount is back where it was before the purchase', s5.heldCount === s4a.heldCount, `${s5.heldCount}`);
   check('seats(1376).held is false', seat5[5] === false);
   const tail = await read(a.seaport, seaportAbi, 'getOrderStatus', [ourHashes[1]]);
   check('the flat tail order is cancelled', tail[1] === true);

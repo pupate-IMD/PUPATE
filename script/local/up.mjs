@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Pupate's local launch harness: an anvil fork of Ethereum mainnet (chain id 31337) with the whole
 // stack deployed the way the IMD launch factory deploys it, so the site's live-data layer and real
-// swaps can be tried end to end without IMD or testnet funds. See README.md in this directory.
+// swaps can be tried end to end without IMD or testnet funds; then Metamorph MD at one bit, with one
+// seat in the vault, so the mine runs live too. See README.md in this directory.
 //
 //   node script/local/up.mjs            start anvil, deploy everything, write site/public/addresses.local.json
 //   node script/local/up.mjs status     is the fork up, which block, which addresses
@@ -9,7 +10,8 @@
 //   node script/local/smoke.mjs         buy and sell through the Universal Router, flush, read the feed
 //
 // Environment: MAINNET_RPC_URL (from .env or the environment; used only as a value, never printed),
-// FORK_BLOCK (optional: pin the fork to a block), FLOOR_WEI (default 2.8 ether), ANVIL_PORT (default 8545).
+// FORK_BLOCK (optional: pin the fork to a block), FLOOR_WEI (default 2.8 ether), ANVIL_PORT (default 8545),
+// SEAT (optional: the seat the vault is given; default the first one from id 1 held by a plain EOA).
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -17,6 +19,7 @@ import {
   ACCOUNTS,
   ADDRESSES_FILE,
   CHAIN_ID,
+  ETH,
   LOG_FILE,
   MAINNET,
   PID_FILE,
@@ -32,15 +35,21 @@ import {
   fmtGwei,
   fmtPupate,
   forkUrl,
+  hasCode,
   latestBlock,
   localQuestionHash,
   redact,
   rpc,
   run,
+  send,
   stripDelegations,
 } from './common.mjs';
 
 const LAUNCH_GAS_CEILING_WEI = 5n * 10n ** 16n; // IMD pays the launch transaction up to 0.05 ETH (policy v34)
+/// Metamorph MD's difficulty floor on the fork: one bit, so a mint is found at once (mainnet takes 20).
+const METAMORPH_MIN_BITS = 1;
+/// keeper/test/fork.mjs lists, buys and sells this seat, so the vault is not given it here.
+const KEEPER_TEST_SEAT = 1376;
 
 const commands = { up, down, status };
 const cmd = process.argv[2] || 'up';
@@ -69,7 +78,7 @@ async function up() {
     throw new Error(`something already answers on ${RPC_URL} with chain id ${CHAIN_ID}; run \`down\` first`);
   }
 
-  step('1/7 anvil: forking mainnet');
+  step('1/8 anvil: forking mainnet');
   const pid = await startAnvil(url);
   const fork = await latestBlock();
   console.log(`  pid ${pid}, log ${LOG_FILE}`);
@@ -83,14 +92,14 @@ async function up() {
     );
   }
 
-  step('2/7 the mainnet contracts the launch leans on');
+  step('2/8 the mainnet contracts the launch leans on');
   for (const [name, address] of Object.entries(MAINNET)) {
     const code = await rpc('eth_getCode', [address, 'latest']);
     if (!code || code === '0x') throw new Error(`${name} has no code at ${address} on the fork`);
     console.log(`  ${name.padEnd(16)} ${address}  code ${(code.length - 2) / 2} bytes`);
   }
 
-  step('3/7 DeployPreLaunch (timelock, FloorFeed, Cocoon)');
+  step('3/8 DeployPreLaunch (timelock, FloorFeed, Cocoon)');
   const pre = forgeScript('script/DeployPreLaunch.s.sol:DeployPreLaunch', {
     DEVELOPER: ACCOUNTS.deployer.address,
     OPERATOR: ACCOUNTS.deployer.address,
@@ -106,7 +115,7 @@ async function up() {
   const preTxs = await broadcast('DeployPreLaunch.s.sol');
   const fromBlock = Math.min(...preTxs.map((t) => t.block));
 
-  step('4/7 LaunchLocal (token, hook at a 0x18CC address, pool opened and seeded in one transaction)');
+  step('4/8 LaunchLocal (token, hook at a 0x18CC address, pool opened and seeded in one transaction)');
   const launch = forgeScript('script/local/LaunchLocal.s.sol:LaunchLocal', {
     POOL_MANAGER: MAINNET.poolManager,
     COCOON: cocoon,
@@ -119,7 +128,7 @@ async function up() {
   const hook = grab(launch, 'PupateHook');
   const launchTxs = await broadcast('LaunchLocal.s.sol');
 
-  step('5/7 PostLaunch (wire Cocoon, vest the developer share, pin the question, hand over to the timelock)');
+  step('5/8 PostLaunch (wire Cocoon, vest the developer share, pin the question, hand over to the timelock)');
   const questionHash = localQuestionHash();
   console.log(`  QUESTION_HASH (keccak256 of keeper/questions/floor.question.txt) ${questionHash}`);
   const post = forgeScript('script/PostLaunch.s.sol:PostLaunch', {
@@ -136,14 +145,14 @@ async function up() {
   const vesting = grab(post, 'PupateVesting');
   const postTxs = await broadcast('PostLaunch.s.sol');
 
-  step('6/7 ReportLocal (the first floor report, signed by the local attester)');
+  step('6/8 ReportLocal (the first floor report, signed by the local attester)');
   const reportEnv = { FEED: feed, ATTESTER_KEY: ACCOUNTS.attester.key };
   if (process.env.FLOOR_WEI) reportEnv.FLOOR_WEI = process.env.FLOOR_WEI;
   forgeScript('script/local/ReportLocal.s.sol:ReportLocal', reportEnv);
   const reportTxs = await broadcast('ReportLocal.s.sol');
 
-  step('7/7 checks and the addresses file');
-  const checks = [
+  step('7/8 checks');
+  const bad = verify([
     ['hook.sink() is Cocoon', call(hook, 'sink()(address)')[0], cocoon],
     ['hook.owner() is the timelock', call(hook, 'owner()(address)')[0], timelock],
     ['cocoon.wired()', String(call(cocoon, 'wired()(bool)')[0]), 'true'],
@@ -152,13 +161,7 @@ async function up() {
     ['feed.attester() is account #9', call(feed, 'attester()(address)')[0], ACCOUNTS.attester.address],
     ['feed.questionHash()', call(feed, 'questionHash()(bytes32)')[0], questionHash],
     ['feed.latest() fresh', String(call(feed, 'latest()(uint256,bool)')[1]), 'true'],
-  ];
-  let bad = 0;
-  for (const [name, got, want] of checks) {
-    const ok = String(got).toLowerCase() === String(want).toLowerCase();
-    if (!ok) bad++;
-    console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : `: got ${got}, want ${want}`}`);
-  }
+  ]);
   const supply = callUint(token, 'totalSupply()(uint256)');
   const held = {
     'PoolManager (the pool)': callUint(token, 'balanceOf(address)(uint256)', MAINNET.poolManager),
@@ -174,7 +177,41 @@ async function up() {
   console.log(`  hook.openedAtBlock() = ${call(hook, 'openedAtBlock()(uint40)')[0]}`);
   if (bad) throw new Error(`${bad} post-deploy check(s) failed`);
 
-  gasReport({ pre: preTxs, launch: launchTxs, post: postTxs, report: reportTxs }, fork.baseFee);
+  step(`8/8 Metamorph MD (the art, the token at ${METAMORPH_MIN_BITS} bit, a seat for the vault, noted) and the addresses file`);
+  const { seat, holder } = await pickSeat();
+  console.log(`  seat #${seat}: its mainnet holder ${holder} hands it to Cocoon (impersonated on the fork)`);
+  await handOver(seat, holder, cocoon);
+  const mm = forgeScript('script/local/DeployMetamorphLocal.s.sol:DeployMetamorphLocal', {
+    COCOON: cocoon,
+    HOOK: hook,
+    PUPATE: token,
+    IMD: MAINNET.imd,
+    COLLECTION: MAINNET.collection,
+    POOL_MANAGER: MAINNET.poolManager,
+    SEAT: String(seat),
+    MIN_BITS: String(METAMORPH_MIN_BITS),
+    POOL_FEE: String(POOL_KEY.fee),
+    TICK_SPACING: String(POOL_KEY.tickSpacing),
+  });
+  const metamorph = grab(mm, 'METAMORPH');
+  const metamorphArt = grab(mm, 'METAMORPH_ART');
+  const metamorphTxs = await broadcast('DeployMetamorphLocal.s.sol');
+  const badMetamorph = verify([
+    ['collection.ownerOf(seat) is Cocoon', call(MAINNET.collection, 'ownerOf(uint256)(address)', seat)[0], cocoon],
+    ['cocoon.seats(seat).held', call(cocoon, 'seats(uint256)(uint128,uint40,uint16,uint16,uint32,bool,uint16)', seat)[5], 'true'],
+    ['metamorph.ART() is the router', call(metamorph, 'ART()(address)')[0], metamorphArt],
+    ['metamorph.COCOON() is Cocoon', call(metamorph, 'COCOON()(address)')[0], cocoon],
+    [`metamorph.bits() is ${METAMORPH_MIN_BITS}`, call(metamorph, 'bits()(uint8)')[0], String(METAMORPH_MIN_BITS)],
+    ['metamorph.notedSeats() is the seat', call(metamorph, 'notedSeats()(uint256[])')[0], `[${seat}]`],
+    ['metamorph.mineableSeats() is the seat', call(metamorph, 'mineableSeats()(uint256[])')[0], `[${seat}]`],
+  ]);
+  console.log(
+    `  metamorph.mintPrice() = ${fmtPupate(callUint(metamorph, 'mintPrice()(uint256)'))}, epoch() = ${call(metamorph, 'epoch()(uint16)')[0]},` +
+      ` totalMinted() = ${call(metamorph, 'totalMinted()(uint16)')[0]}`,
+  );
+  if (badMetamorph) throw new Error(`${badMetamorph} Metamorph check(s) failed`);
+
+  gasReport({ pre: preTxs, launch: launchTxs, post: postTxs, report: reportTxs, metamorph: metamorphTxs }, fork.baseFee);
 
   const addresses = {
     chainId: CHAIN_ID,
@@ -194,6 +231,8 @@ async function up() {
     seaport: MAINNET.seaport,
     poolKey: { fee: POOL_KEY.fee, tickSpacing: POOL_KEY.tickSpacing },
     attester: ACCOUNTS.attester.address,
+    metamorph,
+    metamorphArt,
   };
   writeFileSync(ADDRESSES_FILE, JSON.stringify(addresses, null, 2) + '\n');
   console.log(`\n  wrote ${ADDRESSES_FILE}`);
@@ -238,6 +277,12 @@ async function status() {
     console.log(`addresses: ${ADDRESSES_FILE}`);
     for (const [k, v] of Object.entries(a)) console.log(`  ${k.padEnd(16)} ${typeof v === 'object' ? JSON.stringify(v) : v}`);
     console.log(`hook.buyTaxBps() = ${call(a.hook, 'buyTaxBps()(uint256)')[0]}, feed.latest() = ${call(a.feed, 'latest()(uint256,bool)').join(', ')}`);
+    if (a.metamorph) {
+      console.log(
+        `metamorph.bits() = ${call(a.metamorph, 'bits()(uint8)')[0]}, mineableSeats() = ${call(a.metamorph, 'mineableSeats()(uint256[])')[0]},` +
+          ` totalMinted() = ${call(a.metamorph, 'totalMinted()(uint16)')[0]}`,
+      );
+    }
   } else {
     console.log('no addresses file: the fork is up but nothing is deployed on it (run `up` after `down`)');
   }
@@ -288,6 +333,46 @@ function pidOnPort(port) {
   }
   const out = run('lsof', ['-t', `-iTCP:${port}`, '-sTCP:LISTEN'], { quiet: true }).stdout;
   return Number(out.trim().split(/\s+/)[0]) || 0;
+}
+
+// ------------------------------------------------------------------ the vault's seat
+
+/**
+ * The seat the vault is given: SEAT from the environment, or else the first token id from 1 whose
+ * mainnet holder is a plain EOA, as test/fork/Metamorph.fork.t.sol picks one, passing over the keeper
+ * fork test's seat.
+ */
+async function pickSeat() {
+  const chosen = process.env.SEAT;
+  if (chosen && !/^\d+$/.test(chosen)) throw new Error(`SEAT must be a token id, got ${chosen}`);
+  const ids = chosen ? [Number(chosen)] : Array.from({ length: 399 }, (_, i) => i + 1).filter((id) => id !== KEEPER_TEST_SEAT);
+  for (const id of ids) {
+    let holder;
+    try {
+      [holder] = call(MAINNET.collection, 'ownerOf(uint256)(address)', id);
+    } catch {
+      continue; // not minted
+    }
+    if (chosen || !(await hasCode(holder))) return { seat: id, holder };
+  }
+  throw new Error(chosen ? `seat ${chosen} has no holder on the fork` : 'no seat among ids 1 to 399 is held by a plain EOA');
+}
+
+/**
+ * Hands a seat to Cocoon as the fork test does with `vm.prank`: the holder, impersonated on the fork,
+ * calls transferFrom (Cocoon takes a seat by safeTransferFrom only during a purchase), with 0.01 ETH
+ * added for the gas when it holds less. DeployMetamorphLocal then adopts it at the fresh floor.
+ */
+async function handOver(seat, holder, vault) {
+  if (holder.toLowerCase() === vault.toLowerCase()) return;
+  await rpc('anvil_impersonateAccount', [holder]);
+  try {
+    const balance = BigInt(await rpc('eth_getBalance', [holder, 'latest']));
+    if (balance < ETH / 100n) await rpc('anvil_setBalance', [holder, `0x${(balance + ETH / 100n).toString(16)}`]);
+    send(holder, MAINNET.collection, 'transferFrom(address,address,uint256)', [holder, vault, seat]);
+  } finally {
+    await rpc('anvil_stopImpersonatingAccount', [holder]);
+  }
 }
 
 // ------------------------------------------------------------------ forge
@@ -352,7 +437,7 @@ function gasReport(all, baseFee) {
   for (const [script, txs] of Object.entries(all)) {
     for (const t of txs) {
       const what = `${t.type} ${t.name}${t.fn ? ' ' + t.fn.replace(/\(.*$/, '()') : ''}`;
-      console.log(`  ${script.padEnd(7)} ${what.padEnd(44)} ${String(t.gas).padStart(10)}  block ${t.block}`);
+      console.log(`  ${script.padEnd(9)} ${what.padEnd(44)} ${String(t.gas).padStart(10)}  block ${t.block}`);
     }
   }
   const launch = all.launch;
@@ -377,6 +462,17 @@ function gasReport(all, baseFee) {
 
 function step(title) {
   console.log(`\n== ${title}`);
+}
+
+/** Prints each [name, got, want] as ok or FAIL (compared as lower-case strings); returns the failures. */
+function verify(checks) {
+  let bad = 0;
+  for (const [name, got, want] of checks) {
+    const ok = String(got).toLowerCase() === String(want).toLowerCase();
+    if (!ok) bad++;
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : `: got ${got}, want ${want}`}`);
+  }
+  return bad;
 }
 
 function tail(file, lines = 25) {

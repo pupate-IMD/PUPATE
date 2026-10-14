@@ -18,7 +18,8 @@ anvil's own log (which does echo its fork endpoint) goes to `%TEMP%\pupate-local
 the repository, next to `anvil.pid`.
 
 Optional environment: `FORK_BLOCK` pins the fork to a block, `FLOOR_WEI` sets the first report
-(default 2.8 ether), `ANVIL_PORT` moves the RPC off 8545. `up` refuses to start when something already
+(default 2.8 ether), `ANVIL_PORT` moves the RPC off 8545, `SEAT` picks the seat the vault is given for
+Metamorph MD (step 8). `up` refuses to start when something already
 answers on the port with chain id 31337; run `down` first. Each `up` takes about a minute.
 
 ## What `up` does
@@ -59,13 +60,27 @@ answers on the port with chain id 31337; run `down` first. Each `up` takes about
    panel 5 / quorum 4 / agreed 4, `chainId` = the feed's evidence chain, issued now, valid 24 hours) and
    calls `FloorFeed.report`. `FLOOR_WEI` and `ISSUED_AT` are overridable; each report must be newer than
    the last.
-7. Reads back the wiring, prints the token distribution and the gas of every transaction, and writes
-   `site/public/addresses.local.json` (git-ignored):
+7. Reads back the wiring and prints the token distribution.
+8. Metamorph MD at one bit, with one seat in the vault, so the mine page and the keeper run live. The
+   seat reaches the vault as in `test/fork/Metamorph.fork.t.sol`: the first token id from 1 whose mainnet
+   holder is a plain EOA (or `SEAT`; never 1376, which `keeper/test/fork.mjs` lists and buys) is sent to
+   Cocoon with `transferFrom` by that holder, impersonated on the fork (`anvil_impersonateAccount`, with
+   0.01 ETH added for gas when it holds less), since a broadcast script cannot prank. Then
+   `script/local/DeployMetamorphLocal.s.sol`: the two figures and the `MetamorphArt` router as
+   `DeployMetamorphArt` deploys them; the seat's first card read through the router in both stages; and
+   `MetamorphMD` with the pool keys and the vault's own IMD, collection and PoolManager as `DeployMetamorph`
+   deploys it, but at `MIN_BITS` 1 (the mainnet script insists on 20); then `Cocoon.adopt(seat)` at the
+   fresh floor and `noteSeat(seat)`. `up` checks that `bits()` is 1 and that `notedSeats()` and
+   `mineableSeats()` are the seat, prints the gas of every transaction, and writes
+   `site/public/addresses.local.json` (git-ignored). On the 2026-10-15 runs the seat was #1, and the
+   deploys took 1,708,159 and 1,823,863 gas (the figures), 4,114,131 (the router) and 4,683,498 (the
+   token); `adopt` 197,934 and `noteSeat` 103,773.
 
         { "chainId": 31337, "fromBlock": <block of the pre-launch deploy>,
           "token", "hook", "cocoon", "feed", "timelock", "vesting",
           "poolManager", "universalRouter", "quoter", "permit2", "collection", "imd", "seaport",
-          "poolKey": { "fee": 12500, "tickSpacing": 60 }, "attester": <account #9> }
+          "poolKey": { "fee": 12500, "tickSpacing": 60 }, "attester": <account #9>,
+          "metamorph", "metamorphArt" }
 
 The deployed addresses are a function of account #0's mainnet nonce at the fork head (it changes as
 the sweeper bots use the account), so always read them from the file. On the 2026-10-08 runs they were
@@ -142,6 +157,8 @@ deployed a MerkleDistributor for the swarm share), so take 2.1M as the floor and
   oracle signer; attestations carry the fork's block numbers as their evidence window.
 - The deployer, developer and operator are all account #0.
 - anvil's default accounts are stripped of the EIP-7702 delegation they have on mainnet (above).
+- Metamorph MD runs at a floor of one bit instead of 20, and its first seat comes from a holder
+  impersonated on the fork instead of a purchase through Seaport (`keeper/test/fork.mjs` buys one too).
 - anvil's clock starts at the fork head's timestamp and advances with the wall clock; the smoke test
   moves it 6000 s with `evm_increaseTime`, so after a smoke run the launch window is over and the floor
   report ages accordingly. `down` then `up` gives a fresh launch.
@@ -152,6 +169,9 @@ deployed a MerkleDistributor for the swarm share), so take 2.1M as the floor and
 - `LaunchLocal.s.sol`: token, mined hook, factory, 85% transfer, `open`, swarm share. Env: `POOL_MANAGER`,
   `COCOON`, `TIMELOCK`, `POOL_FEE`, `TICK_SPACING`, `SWARM_SHARE_TO`.
 - `ReportLocal.s.sol`: a signed floor report. Env: `FEED`, `ATTESTER_KEY`, `FLOOR_WEI`, `ISSUED_AT`.
+- `DeployMetamorphLocal.s.sol`: the art, the token at `MIN_BITS`, `adopt` and `noteSeat` of a seat already
+  in the vault's wallet. Env: `COCOON`, `HOOK`, `PUPATE`, `IMD`, `COLLECTION`, `POOL_MANAGER`, `SEAT`,
+  `MIN_BITS` (default 1), `POOL_FEE`, `TICK_SPACING`.
 - `up.mjs`: `up` / `status` / `down`. `smoke.mjs`: the checks above. `common.mjs`: accounts, mainnet
   addresses, RPC and `cast` helpers (plain-text `cast call` output is parsed, not `--json`, because cast
   emits uint256 values as bare JSON numbers that JavaScript rounds past 2^53).

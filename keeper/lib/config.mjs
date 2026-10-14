@@ -113,8 +113,9 @@ export function loadConfig(argv = []) {
     if (!v) throw new Error(`address ${key} is missing (set ${ADDRESS_ENV[key]} or provide it in ${addressesPath})`);
     addresses[key] = getAddress(v);
   }
-  // Optional extras from the file, used by the status line and the tests.
-  for (const key of ['timelock', 'vesting', 'universalRouter', 'quoter', 'permit2', 'attester']) {
+  // Optional extras from the file, used by the status line and the tests. `metamorph` and `metamorphArt`
+  // are absent until Metamorph MD is deployed on the chain.
+  for (const key of ['timelock', 'vesting', 'universalRouter', 'quoter', 'permit2', 'attester', 'metamorph', 'metamorphArt']) {
     if (file?.[key]) addresses[key] = getAddress(file[key]);
   }
   const chainId = num(env('CHAIN_ID'), file?.chainId);
@@ -197,7 +198,8 @@ export function describeConfig(cfg) {
   const a = cfg.addresses;
   return [
     `chain ${cfg.chainId}${cfg.addressesPath ? ` (addresses from ${cfg.addressesPath})` : ''}`,
-    `cocoon ${a.cocoon} hook ${a.hook} feed ${a.feed} token ${a.token}`,
+    `cocoon ${a.cocoon} hook ${a.hook} feed ${a.feed} token ${a.token}` +
+      (a.metamorph ? ` metamorph ${a.metamorph}` : ''),
     `attestation source ${cfg.attestationSource}, listing source ${cfg.listingSource}` +
       (cfg.listingSource === 'file' ? ` (${cfg.listingsFile})` : '') +
       `, harvest tokens ${cfg.harvestTokens.length ? cfg.harvestTokens.join(',') : 'none'}`,

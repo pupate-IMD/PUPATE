@@ -22,6 +22,10 @@ export interface Addresses {
   imd: Address;
   seaport: Address;
   poolKey: { fee: number; tickSpacing: number };
+  /// Metamorph MD and its art router, unset on a chain until they are deployed there; without them the
+  /// mine page stays in preview mode.
+  metamorph?: Address;
+  metamorphArt?: Address;
 }
 
 export const PERMIT2: Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
@@ -94,7 +98,8 @@ export const TARGET: Target =
 export const TARGET_CHAIN_ID = TARGET === "sepolia" ? 11155111 : TARGET === "local" ? 31337 : 1;
 
 /// The addresses for the configured target, or null for preview mode. The local fork's file is
-/// fetched at runtime so a fresh deploy needs no rebuild.
+/// fetched at runtime so a fresh deploy needs no rebuild; it carries `metamorph` and `metamorphArt` once
+/// up.mjs has deployed them, and they pass through as they are.
 export async function loadAddresses(): Promise<Addresses | null> {
   if (TARGET === "mainnet") return MAINNET;
   if (TARGET === "sepolia") return SEPOLIA;
