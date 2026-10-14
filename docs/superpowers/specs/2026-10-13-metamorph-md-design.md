@@ -416,6 +416,29 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
     that changes a card's weight emits ERC-4906 `MetadataUpdate(id)`, and `supportsInterface(0x49064906)`
     is true. The event fires only when a staked card is settled: an unstaked card's emergence, computed and
     never stored, emits nothing, and marketplaces refresh it on request.
+- The art, built by its own plan (2026-10-15; `docs/superpowers/specs/2026-10-14-metamorph-art-design.md`
+  and its errata hold for the drawing):
+  - It is three keyless contracts, not one `MetamorphArt` with `render(View) pure` as "Interfaces" and
+    "What is built" write. The router `MetamorphArt` is the `ART` the token holds: `tokenURI(View)`, and
+    `svg(View)` and `json(View)` besides, all views. It draws the frame, the labels and the JSON, and calls
+    the figure of the card's stage, `MetamorphChrysalis` or `MetamorphButterfly`. The figures are the
+    router's immutables `CHRYSALIS` and `BUTTERFLY`, not the token's. None of the three has an owner or a
+    setter. `script/DeployMetamorphArt.s.sol` deploys them, the figures first, and prints a sample token
+    URI's length; `DeployMetamorph` takes the router as `ART`.
+  - The address-book keys in `keeper/addresses.mainnet.json` and `site/lib/addresses.ts` are `metamorph`
+    (the token) and `metamorphArt` (the router), not `cards` and `art` as "Deployment and opening" writes.
+  - The palette table drops the prototype's gilt entry: `metamorph-gen.mjs` draws classic 55, inverted 20,
+    ember 12, mono 10 and gilt 3 from the seed; the contract draws classic 58 and the other three as
+    before, the weights under "The drawing". Gilt comes from the proof only (1 in 16) and paints the
+    prototype's gilt colours.
+  - The seat traits are integers in tenths. The contract runs the site's generator in 32-bit integers, so
+    the counts and the tone (veins, spots, dots, rings, the jade) equal `site/lib/seat.ts`'s `traits(seat)`
+    for every seat id up to 3,393,263, where the site's float product is still exact. The wing geometry
+    (span, rise, reach, drop) and the tilt are the site's values rounded to a tenth, which the site adopts
+    with the page plan; until it does, "the chain and the site draw the same butterfly" holds for the counts
+    and the tone only.
+  - Egg and larva are client-side: the token has two stages, chrysalis and butterfly, and the site's
+    incubator draws the prototype's egg and larva on the page while the search runs.
 
 ## The drawing
 
