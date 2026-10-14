@@ -184,10 +184,18 @@ contract MetamorphViewsTest is MetamorphFixture {
         vm.expectRevert(MetamorphMD.BadPoolKey.selector);
         _deployWithKeys(launch, imdKey);
 
-        // An ETH/IMD key whose pool was never initialised.
+        // An ETH/IMD key whose pool was never initialised (its 1% fee passes; only its spacing differs).
+        imdPool = imdKey;
+        imdPool.tickSpacing = 60;
+        vm.expectRevert(MetamorphMD.BadPoolKey.selector);
+        _deployWithKeys(key, imdPool);
+
+        // An ETH/IMD pool that exists but charges 0.3%: the buy bound resists a sandwich only against a fee
+        // of at least 1% a side (audit M-1).
         imdPool = imdKey;
         imdPool.fee = 3000;
         imdPool.tickSpacing = 60;
+        manager.initialize(imdPool, IMD_SQRT_PRICE);
         vm.expectRevert(MetamorphMD.BadPoolKey.selector);
         _deployWithKeys(key, imdPool);
 

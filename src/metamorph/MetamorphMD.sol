@@ -189,16 +189,20 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
                 || address(poolManager_) == address(0) || address(art_) == address(0)
         ) revert ZeroAddress();
         if (minBits_ == 0 || minBits_ > 200) revert BadBits();
-        // The conversion trades in two pools: ETH/PUPATE on the launch hook, and ETH/IMD, which has no hook.
+        // The conversion trades in two pools: ETH/PUPATE on the launch hook, and ETH/IMD, which has no hook and
+        // must charge at least 1%: the 150 bps buy bound resists a sandwich only against a fee of at least 1% a
+        // side, which a front-run pays going in and coming out (audit M-1).
         if (
             !pupateKey_.currency0.isAddressZero() || Currency.unwrap(pupateKey_.currency1) != address(pupate_)
                 || address(pupateKey_.hooks) != address(hook_) || !imdKey_.currency0.isAddressZero()
                 || Currency.unwrap(imdKey_.currency1) != address(imd_) || address(imdKey_.hooks) != address(0)
+                || imdKey_.fee < 10_000
         ) revert BadPoolKey();
         // Nobody can correct a key later, and a wrong one would lock the pot for good: the launch key must be
         // the hook's own launch pool, and both pools must exist on the PoolManager given (audit L-5).
-        if (PoolId.unwrap(pupateKey_.toId()) != PoolId.unwrap(hook_.launchPool())) revert BadPoolKey();
-        (uint160 launchPrice,,,) = poolManager_.getSlot0(pupateKey_.toId());
+        PoolId launchId = pupateKey_.toId();
+        if (PoolId.unwrap(launchId) != PoolId.unwrap(hook_.launchPool())) revert BadPoolKey();
+        (uint160 launchPrice,,,) = poolManager_.getSlot0(launchId);
         (uint160 imdPrice,,,) = poolManager_.getSlot0(imdKey_.toId());
         if (launchPrice == 0 || imdPrice == 0) revert BadPoolKey();
         COCOON = cocoon_;
