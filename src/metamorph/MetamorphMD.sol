@@ -409,6 +409,93 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         return held && r == round;
     }
 
+    // ------------------------------------------------------------------ staking
+
+    /// @notice Lock cards you own in your wallet and earn the stakers' IMD by weight: 1 for a chrysalis,
+    /// 2 for a butterfly. No lock period, no custody change.
+    function stake(uint256[] calldata ids) external nonReentrant {
+        for (uint256 i; i < ids.length; i++) {
+            uint256 id = ids[i];
+            if (ownerOf(id) != msg.sender) revert NotCardOwner();
+            Stake storage s = stakeOf[id];
+            if (s.staker != address(0)) revert Staked();
+            uint8 w = _weight(id);
+            s.staker = msg.sender;
+            s.weight = w;
+            s.debt = uint256(w) * accIMDPerWeight;
+            totalWeight += w;
+            emit StakedCard(id, msg.sender, w);
+        }
+    }
+
+    /// @notice Settle and unlock cards you staked.
+    function unstake(uint256[] calldata ids) external nonReentrant {
+        for (uint256 i; i < ids.length; i++) {
+            uint256 id = ids[i];
+            Stake storage s = stakeOf[id];
+            if (s.staker != msg.sender) revert NotStaked();
+            _settle(id, s);
+            totalWeight -= s.weight;
+            delete stakeOf[id];
+            emit Unstaked(id, msg.sender);
+        }
+    }
+
+    /// @notice Settle the given staked cards (an emerged card is reweighed to 2 here) and pay out
+    /// everything pending for the caller.
+    function claim(uint256[] calldata ids) external nonReentrant returns (uint256 paid) {
+        for (uint256 i; i < ids.length; i++) {
+            Stake storage s = stakeOf[ids[i]];
+            if (s.staker != msg.sender) revert NotStaked();
+            _settle(ids[i], s);
+        }
+        paid = pendingIMD[msg.sender];
+        if (paid != 0) {
+            pendingIMD[msg.sender] = 0;
+            imdOwed -= paid;
+            _payIMD(msg.sender, paid);
+        }
+        emit Claimed(msg.sender, paid);
+    }
+
+    /// @dev Books what a staked card earned since its last settlement, then re-reads its stage.
+    function _settle(uint256 id, Stake storage s) private {
+        uint256 acc = accIMDPerWeight;
+        uint256 earned = (uint256(s.weight) * acc - s.debt) / ACC;
+        if (earned != 0) pendingIMD[s.staker] += earned;
+        uint8 w = _weight(id);
+        if (w != s.weight) {
+            totalWeight = totalWeight - s.weight + w;
+            s.weight = w;
+            emit Reweighed(id, w);
+        }
+        s.debt = uint256(w) * acc;
+    }
+
+    /// @dev IMD for the stakers: spread over the current weight, or to the developer when nobody stakes.
+    function _credit(uint256 imdAmount) internal {
+        if (imdAmount == 0) return;
+        if (totalWeight == 0) {
+            _payIMD(COCOON.developer(), imdAmount);
+            return;
+        }
+        accIMDPerWeight += imdAmount * ACC / totalWeight;
+        imdOwed += imdAmount;
+    }
+
+    function _weight(uint256 id) private view returns (uint8) {
+        return stageOf(id) == 1 ? 2 : 1;
+    }
+
+    function _payIMD(address to, uint256 amount) private {
+        if (!IMD.transfer(to, amount)) revert TransferFailed();
+    }
+
+    /// @dev A staked card does not move.
+    function _beforeTransfer(uint256 id) internal view override {
+        if (stakeOf[id].staker != address(0)) revert Staked();
+    }
+
     // ------------------------------------------------------------------ internals (reads)
 
     /// @dev Held by the vault right now: on its books and in its wallet. Returns the current round.
@@ -441,7 +528,7 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         }
     }
 
-    // The staking, the conversion and the duties follow in later tasks.
+    // The conversion and the duties follow in later tasks.
 
     function unlockCallback(bytes calldata) external pure returns (bytes memory) {
         revert UnexpectedCallback();
