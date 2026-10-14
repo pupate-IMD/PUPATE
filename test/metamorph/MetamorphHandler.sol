@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {Cocoon} from "../../src/Cocoon.sol";
 import {PupateToken} from "../../src/PupateToken.sol";
 import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
@@ -43,8 +44,8 @@ contract MetamorphHandler is Test {
     }
 
     /// @dev A mint with the first nonce under the target, as the browser finds it. Gas is cheap, so the
-    /// mint also runs the vault's due duties; a conversion among them sells from the pot after the fee's
-    /// 70% went in, and that drop is counted as sold.
+    /// mint also runs the vault's due duties; when a conversion among them runs, what its `Converted` event
+    /// reports sold is counted as sold. Nothing else excuses a drop of the pot.
     function mint(uint256 who, uint256 dt) external {
         address a = actors[who % actors.length];
         if (md.totalMinted() >= md.MAX_SUPPLY() || md.mineableSeats().length == 0) return;
@@ -57,12 +58,11 @@ contract MetamorphHandler is Test {
         uint256 nonce = 1;
         while (uint256(md.workHash(ah, a, nonce)) >= t) nonce++;
         uint256 price = md.mintPrice();
-        uint256 potBefore = md.pot();
+        vm.recordLogs();
         vm.prank(a);
         uint256 id = md.mint(anchor, nonce);
         feesPaid += price;
-        uint256 expected = potBefore + price * 7000 / 10_000;
-        if (md.pot() < expected) pupateSold += expected - md.pot();
+        pupateSold += _sold(vm.getRecordedLogs());
         minted.push(id);
         lastStage[id] = md.stageOf(id);
     }
@@ -106,10 +106,10 @@ contract MetamorphHandler is Test {
     function convert(uint256 who) external {
         if (md.pot() == 0 && md.ethPot() == 0) return;
         vm.roll(block.number + md.CONVERT_SPACING());
-        uint256 potBefore = md.pot();
+        vm.recordLogs();
         vm.prank(actors[who % actors.length]);
         try md.convert() {
-            pupateSold += potBefore - md.pot();
+            pupateSold += _sold(vm.getRecordedLogs());
         } catch (bytes memory reason) {
             // Nothing to convert, or nothing bought under an exhausted bound, is a legitimate outcome;
             // anything else is a bug.
@@ -157,6 +157,17 @@ contract MetamorphHandler is Test {
         for (uint256 i; i < minted.length; i++) {
             uint8 s = md.stageOf(minted[i]);
             if (s > lastStage[minted[i]]) lastStage[minted[i]] = s;
+        }
+    }
+
+    /// @dev The PUPATE the conversions among `logs` sold, as the contract's own `Converted` events report.
+    function _sold(Vm.Log[] memory logs) private view returns (uint256 sold) {
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].emitter != address(md) || logs[i].topics[0] != MetamorphMD.Converted.selector) {
+                continue;
+            }
+            (uint256 s,,,) = abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
+            sold += s;
         }
     }
 }

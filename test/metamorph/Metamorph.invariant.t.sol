@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {MetamorphFixture} from "./MetamorphFixture.sol";
 import {MetamorphHandler} from "./MetamorphHandler.sol";
 
 contract MetamorphInvariantTest is MetamorphFixture {
+    using stdStorage for StdStorage;
+
+    /// @dev Seat 1376 starts its round one edition short of the cap of 303, so a campaign mints it out and
+    /// keeps minting the other seats after that.
+    uint256 internal constant SEEDED_EDITIONS = 302;
+
     MetamorphHandler handler;
     uint256[] seatList;
 
@@ -18,6 +25,8 @@ contract MetamorphInvariantTest is MetamorphFixture {
         actors[1] = makeAddr("actor1");
         actors[2] = makeAddr("actor2");
         seatList.push(1376);
+        stdstore.target(address(md)).sig(md.editionsMinted.selector).with_key(uint256(1376))
+            .with_key(uint256(0)).checked_write(SEEDED_EDITIONS);
         for (uint256 s = 2; s <= 4; s++) {
             _giveSeat(s);
             md.noteSeat(s);
@@ -40,8 +49,10 @@ contract MetamorphInvariantTest is MetamorphFixture {
         (address staker,,) = md.stakeOf(1);
         assertEq(staker, miner, "the miner minted card 1 and staked it");
         handler.mint(1, 90);
+        assertEq(md.pot(), 70_000 ether, "two fees put 70% each in the pot");
         handler.convert(2);
-        assertEq(handler.pupateSold(), 70_000 ether, "the pot of two fees was converted");
+        assertEq(md.pot(), 0, "the conversion sold the whole pot");
+        assertEq(handler.pupateSold(), 70_000 ether, "as its Converted event reports");
         handler.claim(0);
         assertGt(imd.balanceOf(miner), 0, "the staker claimed IMD");
         handler.tax(1 ether);
@@ -69,8 +80,10 @@ contract MetamorphInvariantTest is MetamorphFixture {
         assertEq(md.prevWork(), work);
     }
 
-    function invariant_editionsAndSupplyHold() public view {
-        assertLe(md.totalMinted(), 3333);
+    /// @dev Seat 1376 starts at `SEEDED_EDITIONS`, so the cap and the mineable filter are crossed inside a run.
+    /// The supply cap of 3,333 is out of a campaign's reach; `test_editionsRunOutAt303AndTheSupplyAt3333`
+    /// (MetamorphMint.t.sol) mints the whole collection.
+    function invariant_editionsNeverExceedTheCap() public view {
         for (uint256 i; i < seatList.length; i++) {
             for (uint16 r; r < 3; r++) {
                 assertLe(md.editionsMinted(seatList[i], r), 303);
