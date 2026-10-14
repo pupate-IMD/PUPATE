@@ -71,9 +71,11 @@ The stage sentence: `in the cocoon` or `emerged`; a gilt card adds `, a gilt pro
 ## Limits
 
 - Each of the three contracts under 24,576 bytes of runtime code; a size test pins each.
-- `tokenURI` for either stage under 20,000,000 gas (an `eth_call` cap of 50M is common; the fork test and the site use `eth_call`); a gas test pins both stages at the worst case the tests can construct (bold density, double halo, rain signal, a butterfly with six veins and four spots).
+- `tokenURI` for either stage under 20,000,000 gas (an `eth_call` cap of 50M is common; the fork test and the site use `eth_call`); a gas test pins both stages at the worst case the tests can construct (bold density, double halo, rain signal, a butterfly with six veins and four spots), and the heaviest chrysalis besides (see the errata). A transaction has less than an `eth_call`: EIP-7825 caps one at 16,777,216 gas (2^24), so a contract that reads a token URI inside a transaction is held to that, and the 4.0M worst case leaves about 4 times under it; the gas test pins that cap as well.
 - The SVG under 24 KB; the JSON under 40 KB.
 - No external resources, no scripts, no fonts embedded: `textPath` with `href`, `filter` with `feGaussianBlur`, `clipPath`, standard attributes only.
+- **`textPath` is not drawn everywhere.** The digit contours of the figure (the chrysalis's shell, wing, vein and band; the butterfly's wings and body) and the halo rings are strings set on a path. Browsers draw them. Rasterisers built on librsvg, such as sharp, draw no `<textPath>`: there the contours and the halos vanish, a chrysalis loses its whole shell, and what is left is the frame, the labels and the plain strokes (reproduced on 2026-10-15 with sharp 0.35.5, libvips 8.18.7, librsvg 2.63.2). Marketplaces and wallets that render the image in a browser draw the card whole (Uniswap v3's position NFTs are `textPath` pictures and show on them); one that rasterises on a server does not, and nothing in the contracts can change that. The deployment is final, so the runbook (`script/mainnet/README.md`) recommends a look at a testnet marketplace's item page and in a wallet before the mainnet broadcast, and leaves the cost of a testnet deployment to the owner.
+- **The site draws a card only through `<img src="data:image/svg+xml;base64,…">` in the visitor's browser**: never rasterised on a server, never inlined as SVG in the page. Every card carries the same element ids (`glow` and `soft` in the frame; `shell`, `shell2`, `wing`, `wing2`, `band` and `vein` on a chrysalis; `up`, `lo`, `up2`, `cu`, `cl` and `body` on a butterfly; `h292`, `h306` and `h330` on the halos), so two cards inlined in one page would resolve each other's `href="#shell"` and `url(#glow)`. An `<img>` gives each card a document of its own.
 
 ## Testing
 
@@ -83,7 +85,7 @@ The stage sentence: `in the cocoon` or `emerged`; a gilt card adds `, a gilt pro
 - **Through the token.** A suite deploys the real art behind `MetamorphMD` on the fixture, mints, reads `tokenURI`, decodes the base64 JSON, checks the name, the attributes and that the image is a base64 SVG starting with `<svg`.
 - **Size and gas** as in Limits.
 - **Parity on anvil** (`script/art/parity.mjs`, run by hand and before deployment): for a sample of 24 cards (both stages, gilt and plain, the three tiers, every form, halo, signal, density and palette at least once), the contract's SVG and JSON equal the mirror's byte for byte; every SVG parses as XML; the gas per call is printed; the SVGs land in `out/art/` and the thumbnail script of the prototype can rasterise them for the owner's eye.
-- **Before broadcast.** The deploy script's dry run calls `tokenURI` on a sample `View` and prints its length; the owner looks at the rendered sample.
+- **Before broadcast.** The deploy script's dry run calls `tokenURI` on a sample `View` of each stage and prints their lengths; the owner looks at the rendered sample and, recommended, at a card on a testnet marketplace and in a wallet (see Limits).
 
 ## Deployment
 
@@ -139,10 +141,10 @@ implementation ledger.
 - **The heaviest cards, measured.** The worst case under "Limits" (bold density, a double halo, the rain,
   six veins and four spots) is the heaviest butterfly, (8296, 2, 1) gilt, which the gas test pins. It is not
   the heaviest chrysalis: a chrysalis with no halo draws the nine notes instead, and the Task 4 review found
-  (1095, 4, 1) gilt, a holotype pear with the notes, the rain, bold density and five segment rings. Each is
-  measured as token 3,333 of epoch 11, with a billion PUPATE paid; the gas is `eth_estimateGas` on anvil
-  (`script/art/parity.mjs`), and the gas test measures 3,989,694 and 3,960,310 inside the call for the first
-  two rows:
+  (1095, 4, 1) gilt, a holotype pear with the notes, the rain, bold density and five segment rings, which
+  the gas test pins as a third view. Each is measured as token 3,333 of epoch 11, with a billion PUPATE
+  paid; the gas is `eth_estimateGas` on anvil (`script/art/parity.mjs`), and the gas test measures 3,989,720,
+  3,960,310 and 3,992,519 inside the call for the three rows:
 
   | Card | Gas | SVG | JSON |
   |---|---|---|---|
@@ -151,11 +153,16 @@ implementation ledger.
   | (1095, 4, 1) chrysalis, the heaviest chrysalis | 3,999,602 | 12,622 B | 17,624 B |
 
   The maxima against the limits: an SVG of 13,865 bytes against 24,576 (1.8 times under), a JSON of 19,280
-  against 40,960 (2.1 times), and 4.0M gas against 20M (5 times). The runtime sizes: `MetamorphArt` 18,766
-  bytes against 24,576 (1.3 times), `MetamorphButterfly` 8,191, `MetamorphChrysalis` 7,655.
-- **The deploy script's sample** is token 1, seat 1376's holotype chrysalis of epoch 1, 50,000 PUPATE paid,
-  mined by the sender. Its token URI is 21,045 bytes for any sender on any chain (the miner prints as forty
-  hex digits), so a dry run that prints another number is running other code.
+  against 40,960 (2.1 times), and 4.0M gas against 20M (5 times) and against the 16,777,216 gas that
+  EIP-7825 lets one transaction spend (4.2 times). The runtime sizes: `MetamorphArt` 18,766 bytes against
+  24,576 (1.3 times), `MetamorphButterfly` 8,191, `MetamorphChrysalis` 7,655.
+- **The deploy scripts' samples** are token 1, seat 1376's holotype of epoch 1, 50,000 PUPATE paid, mined by
+  the sender, in both stages. `DeployMetamorphArt` logs the length of each token URI: 21,045 bytes for the
+  chrysalis and 20,285 for the butterfly, for any sender on any chain (the miner prints as forty hex
+  digits), so a dry run that prints other numbers is running other code. `DeployMetamorph` reads the same
+  two cards through `ART` before it deploys the token and refuses an `ART` whose token URI is shorter than
+  100 bytes or does not begin `data:application/json;base64,`. The runbook also checks the router after the
+  art's broadcast: the figures' code sizes (7,655 and 8,191) and one token URI per stage.
 - **The parity sample** comes from the mirror (`node script/art/mirror.mjs sample`). Six cards are fixed:
   the deploy script's sample in both stages, the worst card in both stages, (93, 0, 9) as a gilt
   butterfly, the heavy figure the Task 3 review measured, and (1095, 4, 1) as a gilt chrysalis, the

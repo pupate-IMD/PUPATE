@@ -67,29 +67,76 @@ three art contracts have no owner and no setter, and the token keeps the art's a
    script on a local anvil (port 8546, anvil's public test key), reads 24 cards through `tokenURI`, checks
    each against the JavaScript mirror byte for byte and as XML, prints the gas and the sizes, and writes the
    SVGs to `out/art/`. Then `node script/art/thumbs.mjs` draws them as PNGs in `out/art/png/` with headless
-   Edge. Both must end without an error, and the owner looks at the PNGs. Simulate first, without
-   `--broadcast`:
+   Edge (`EDGE_PATH`, or the path as the argument, names an `msedge.exe` other than the Windows default).
+   Both must end without an error, and the owner looks at the PNGs.
+
+   Recommended, not required, before the mainnet broadcast: look at a card where collectors will see it.
+   Deploy the art on a testnet beside a throwaway ERC-721 whose `tokenURI(id)` returns `art.tokenURI(view)`
+   for a fixed `View` per id (cards from `node script/art/mirror.mjs sample`, both stages), mint a few, and
+   open them on a testnet marketplace's item page and in a wallet. The reason is `<textPath>`, which draws
+   the figure's digit contours and the halo rings: browsers draw it, and so do marketplaces that render in a
+   browser (as they do Uniswap v3's textPath NFTs), but rasterisers built on librsvg (sharp) draw no
+   `<textPath>`. Wherever a marketplace or a wallet turns the image into a PNG on a server, the contours and
+   the halos vanish (a chrysalis loses its whole shell) and what is left is the frame, the labels and the
+   plain strokes. The art cannot be changed once the token has it, so this is the last look before that;
+   whether it is worth a testnet deployment is the owner's call.
+
+   Stop the keeper loop (`node keeper/bin/keeper.mjs --loop`, or the pm2 or systemd unit that runs it)
+   before the broadcast, wait until its last transaction is mined, and start it again when step 2 is done.
+   The deploy key is the keeper's key, and the three transactions depend on one another: the router takes the
+   two figures' addresses, which follow from the deployer's nonce when the script is simulated, so a keeper
+   transaction that takes one of those nonces in between leaves a router that points at an address with no
+   code, and nothing can correct that. Simulate first, without `--broadcast`:
 
        forge script script/DeployMetamorphArt.s.sol --rpc-url "$MAINNET_RPC_URL" --private-key "$KEEPER_PRIVATE_KEY"
 
-   The dry run prints the three addresses the broadcast will create, then reads one card through the router
-   and prints the length of its token URI: `sample tokenURI bytes 21045` (token 1, seat 1376's holotype
-   chrysalis; the code alone fixes the number). Then broadcast:
+   The dry run prints the three addresses the broadcast will create, then reads token 1 (seat 1376's holotype)
+   through the router in each stage and prints the length of its token URI: `sample chrysalis tokenURI bytes
+   21045` and `sample butterfly tokenURI bytes 20285` (the code alone fixes the numbers). Then broadcast:
 
        forge script script/DeployMetamorphArt.s.sol --rpc-url "$MAINNET_RPC_URL" --broadcast --private-key "$KEEPER_PRIVATE_KEY"
 
-   Record `metamorphArt`, the router (`MetamorphArt`), and pass it as `ART` to `DeployMetamorph`.
+   With `ETHERSCAN_API_KEY` set, add `--verify` to the broadcast and forge verifies the three contracts as it
+   sends them, as `docs/deployment.md` does for the earlier scripts. Without it, verify them afterwards, with
+   the addresses the script printed:
+
+       forge verify-contract <chrysalis> src/metamorph/art/MetamorphChrysalis.sol:MetamorphChrysalis \
+         --chain mainnet --watch
+       forge verify-contract <butterfly> src/metamorph/art/MetamorphButterfly.sol:MetamorphButterfly \
+         --chain mainnet --watch
+       forge verify-contract <router> src/metamorph/art/MetamorphArt.sol:MetamorphArt --chain mainnet --watch \
+         --constructor-args "$(cast abi-encode 'constructor(address,address)' <chrysalis> <butterfly>)"
+
+   Record `metamorphArt`, the router (`MetamorphArt`). Before the token takes it as `ART`, check it:
+
+       ART=<metamorphArt>
+       cast codesize $(cast call "$ART" "CHRYSALIS()(address)" --rpc-url "$MAINNET_RPC_URL") \
+         --rpc-url "$MAINNET_RPC_URL"
+       cast codesize $(cast call "$ART" "BUTTERFLY()(address)" --rpc-url "$MAINNET_RPC_URL") \
+         --rpc-url "$MAINNET_RPC_URL"
+       cast call "$ART" \
+         "tokenURI((uint256,uint256,uint16,uint16,uint8,bool,uint16,address,uint40,uint256))(string)" \
+         "(1,1376,0,1,0,false,1,<your address>,0,50000000000000000000000)" --rpc-url "$MAINNET_RPC_URL"
+
+   The first prints `7655` and the second `8191`. The third returns a URI, `"data:application/json;base64,…"`;
+   piped through `tr -d '"\n' | wc -c` it counts 21045, the dry run's number. Repeat it with `1` in place of the
+   fifth field, the stage, for the butterfly: 20285. If any of the four differs, do not run step 2. Nothing has
+   taken this art yet, so a wrong deployment is only abandoned, at the gas of three contracts: deploy again
+   and check again.
 
 2. Deploy the token, `ART` being the router:
 
        COCOON=… HOOK=… PUPATE=… IMD=… COLLECTION=… POOL_MANAGER=… ART=<metamorphArt> MIN_BITS=20 \
        forge script script/DeployMetamorph.s.sol --rpc-url "$MAINNET_RPC_URL" --broadcast --private-key "$KEEPER_PRIVATE_KEY" -vv
 
-   The script refuses any `MIN_BITS` but 20, and an `ART` without code. The constructor refuses pool keys
-   that are not the hook's launch pool and an initialised hookless ETH/IMD pool charging at least 1%
-   (`BadPoolKey`), and addresses that are not the vault's own: IMD, the collection and the PoolManager must
-   be the ones Cocoon names, and the hook must pay Cocoon (`BadWiring`). Nothing can be corrected after the
-   deployment.
+   The script refuses any `MIN_BITS` but 20, an `ART` without code, and an `ART` that does not draw: its
+   simulation reads token 1 through `ART` as a chrysalis and as a butterfly and stops, before anything is
+   sent, unless each token URI is at least 100 bytes and begins `data:application/json;base64,`. The
+   constructor refuses pool keys that are not the hook's launch pool and an initialised hookless ETH/IMD
+   pool charging at least 1% (`BadPoolKey`), and addresses that are not the vault's own: IMD, the
+   collection and the PoolManager must be the ones Cocoon names, and the hook must pay Cocoon
+   (`BadWiring`). Nothing can be corrected after the deployment. With `ETHERSCAN_API_KEY` set, add
+   `--verify` here as well, and start the keeper loop again.
 
 Then record `metamorph` and `metamorphArt` in `keeper/addresses.mainnet.json` and `site/lib/addresses.ts`,
 and note the seats. `noteSeat(seat)` is permissionless, so anyone can call it. The keeper does not call

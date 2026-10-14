@@ -14,8 +14,8 @@
 //   - checks the spec's limits: gas under 20,000,000, the SVG under 24,576 bytes, the JSON under 40,960;
 //   - writes the SVG to out/art/<seat>-<round>-<edition>-<chrysalis|butterfly>[-gilt].svg (git-ignored, emptied
 //     first) for the eye; script/art/thumbs.mjs rasterises them.
-// It prints a table (card, stage, gas, bytes, ok), stops anvil, also on an error, and exits 1 on any
-// difference.
+// It prints a table (card, stage, gas, bytes, ok), stops anvil, also on an error or on SIGINT, SIGTERM and
+// SIGHUP (exit codes 130, 143 and 129), and exits 1 on any difference.
 //
 // Usage: node script/art/parity.mjs
 // Needs forge and anvil (on the PATH, or in ~/.foundry/bin where foundryup puts them) and site/node_modules
@@ -343,7 +343,8 @@ async function startAnvil() {
 
 /// Deploys the art with its own script, as the runbook does, signed with anvil's public test key. Returns the
 /// three addresses from the script's logs (lowercase) once forge's broadcast record names the same ones, each
-/// has code, and the router's CHRYSALIS and BUTTERFLY are the two figures; and the dry run's sample length.
+/// has code, and the router's CHRYSALIS and BUTTERFLY are the two figures; and the lengths of the two sample
+/// token URIs the script logs, as text.
 async function deploy(client) {
   const args = ["script", "script/DeployMetamorphArt.s.sol", "--rpc-url", RPC, "--broadcast"];
   const forge = spawnSync(tool("forge"), [...args, "--private-key", ANVIL_KEY, "--color", "never"], {
@@ -375,8 +376,11 @@ async function deploy(client) {
     const figure = await client.readContract({ address: at.MetamorphArt, abi: ABI, functionName: fn });
     if (figure.toLowerCase() !== at[name]) throw new Error(`the router's ${fn} is not the ${name} just deployed`);
   }
-  const sample = /sample tokenURI bytes ([0-9]+)/.exec(log);
-  return { ...at, sample: sample === null ? "not logged" : `${Number(sample[1]).toLocaleString("en-US")} B` };
+  const sample = (stage) => {
+    const m = new RegExp(`sample ${stage} tokenURI bytes ([0-9]+)`).exec(log);
+    return m === null ? "not logged" : `${Number(m[1]).toLocaleString("en-US")} B`;
+  };
+  return { ...at, sample: `${sample("chrysalis")} chrysalis, ${sample("butterfly")} butterfly` };
 }
 
 // ------------------------------------------------------------------ the run
@@ -395,7 +399,7 @@ async function main() {
   console.log(`deployed on anvil (chain ${CHAIN_ID}, port ${PORT}) by script/DeployMetamorphArt.s.sol:`);
   console.log(`  MetamorphChrysalis ${at.MetamorphChrysalis}`);
   console.log(`  MetamorphButterfly ${at.MetamorphButterfly}`);
-  console.log(`  MetamorphArt       ${at.MetamorphArt} (the router; its sample tokenURI: ${at.sample})`);
+  console.log(`  MetamorphArt       ${at.MetamorphArt} (the router; its sample tokenURIs: ${at.sample})`);
 
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
@@ -435,10 +439,14 @@ const isMain = (() => {
 
 if (isMain) {
   process.on("exit", stopAnvil);
-  process.on("SIGINT", () => {
-    stopAnvil();
-    process.exit(130);
-  });
+  // Ctrl-C, a plain `kill` and a closing terminal end the run as an error does: anvil stopped, a non-zero exit
+  // (128 plus the signal's number, as a shell reports it).
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) {
+    process.on(signal, () => {
+      stopAnvil();
+      process.exit(code);
+    });
+  }
   main().then(
     (code) => {
       stopAnvil();
