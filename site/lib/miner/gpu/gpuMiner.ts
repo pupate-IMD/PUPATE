@@ -6,9 +6,13 @@
 // digest with the GPU's sample, so a GPU that hashes wrongly is caught even when it reports no hits. A hit
 // or a sample that fails its check is a strike against the device; the third strike stops the engine.
 //
-// The batch adapts to the GPU: it starts at 2^18 threads, doubles while a dispatch takes under 60 ms,
-// halves past 120 ms, and stays within 2^14..2^22. Power is a duty cycle, as on the CPU: after a dispatch
-// that took t ms the loop rests t × (100 − power) / power ms, and it always yields between dispatches.
+// The batch adapts to the GPU: it starts at 2^18 threads, stays within 2^14..2^22, and doubles or halves
+// to keep each dispatch within a band of times. At full power two dispatches are in flight: one runs while
+// the host reads the other back, so the GPU never waits on the round trip; on a visible page the band is
+// then 8..24 ms, so a dispatch fits in a frame and the page's own drawing, which queues on the same GPU,
+// never waits long behind one. Otherwise (a hidden page, or less than full power) the band is 60..120 ms.
+// Power is a duty cycle, as on the CPU: after a dispatch that took t ms the loop rests
+// t × (100 − power) / power ms, and it always yields between dispatches.
 //
 // The probe asks only for an adapter, which names the GPU; the device is requested at the first self-test,
 // so a visitor who never picks the GPU never holds one.
@@ -29,8 +33,16 @@ const START_THREADS = 1 << 18;
 /// needs more than 120 ms for 2^18 threads keeps halving its dispatches, so the page's frames still get through.
 const MIN_THREADS = 1 << 14;
 const MAX_THREADS = 1 << 22;
-const GROW_BELOW_MS = 60;
-const SHRINK_ABOVE_MS = 120;
+/// Dispatch times the batch keeps to: it doubles below the first and halves above the second.
+type Band = readonly [growBelow: number, shrinkAbove: number];
+const FRAME_MS: Band = [8, 24];
+const LONG_MS: Band = [60, 120];
+/// Frame-sized dispatches on a visible page at full power. Below full power each dispatch runs alone
+/// between rests, and a frame-sized one would spend a large share of its time on the round trip (a fifth
+/// of an integrated GPU's rate at 75% power, measured), so there the band stays LONG_MS. Off, it always is.
+const FRAME_SIZED = true;
+/// Dispatches in flight at full power; below it, one at a time, since the rests are the point.
+const IN_FLIGHT = 2;
 /// Hit records a mining dispatch keeps; more hits than this in one dispatch are counted, not recorded.
 const HIT_SLOTS = 16;
 /// Strikes (a hit or a sample that failed the CPU check) a device takes before the engine stops itself.
@@ -101,6 +113,14 @@ interface Dispatch {
   sample: Uint8Array;
 }
 
+/// A mining dispatch on its way: the nonce head, batch and size its hits are checked against.
+interface Flight {
+  high: Uint8Array;
+  batch: number;
+  threads: number;
+  result: Promise<Dispatch>;
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const randomBytes = (n: number) => crypto.getRandomValues(new Uint8Array(n));
@@ -152,10 +172,16 @@ function rest(ms: number): Promise<void> {
   });
 }
 
-function adapt(threads: number, ms: number): number {
-  if (ms < GROW_BELOW_MS && threads < MAX_THREADS) return threads * 2;
-  if (ms > SHRINK_ABOVE_MS && threads > MIN_THREADS) return threads / 2;
+function adapt(threads: number, ms: number, [grow, shrink]: Band): number {
+  if (ms < grow && threads < MAX_THREADS) return threads * 2;
+  if (ms > shrink && threads > MIN_THREADS) return threads / 2;
   return threads;
+}
+
+/// The band for the next mining dispatch: frame-sized while the page is seen and the GPU runs at full power.
+function band(power: Power): Band {
+  const seen = typeof document === "undefined" || document.visibilityState === "visible";
+  return FRAME_SIZED && seen && power >= 100 ? FRAME_MS : LONG_MS;
 }
 
 function api(): GpuApi | undefined {
@@ -226,15 +252,19 @@ function pipelineOf(g: Gpu): Promise<GpuComputePipeline> {
   return p;
 }
 
-/// The pipeline with its buffers: the uniform, the output the shader writes, and a buffer to read it back.
+/// The pipeline with its buffers: the uniform, the output the shader writes, and two buffers to read it
+/// back, so one dispatch can run while the one before it is read.
 class Kernel {
   private readonly g: Gpu;
   private readonly pipeline: GpuComputePipeline;
   private readonly params: GpuBuffer;
   private readonly out: GpuBuffer;
-  private readonly readback: GpuBuffer;
+  private readonly readbacks: GpuBuffer[];
   private readonly bind: GpuBindGroup;
   private readonly size: number;
+  private turn = 0;
+  /// When the last dispatch finished: one that queued behind it is timed from then.
+  private lastDone = 0;
   readonly slots: number;
 
   private constructor(g: Gpu, pipeline: GpuComputePipeline, slots: number) {
@@ -245,7 +275,7 @@ class Kernel {
     this.size = OUT_HEAD + 16 * slots;
     this.params = device.createBuffer({ label: "miner params", size: PARAM_WORDS * 4, usage: BufferUsage.UNIFORM | BufferUsage.COPY_DST });
     this.out = device.createBuffer({ label: "miner out", size: this.size, usage: BufferUsage.STORAGE | BufferUsage.COPY_SRC | BufferUsage.COPY_DST });
-    this.readback = device.createBuffer({ label: "miner readback", size: this.size, usage: BufferUsage.MAP_READ | BufferUsage.COPY_DST });
+    this.readbacks = [0, 1].map((i) => device.createBuffer({ label: `miner readback ${i}`, size: this.size, usage: BufferUsage.MAP_READ | BufferUsage.COPY_DST }));
     this.bind = device.createBindGroup({
       label: "miner",
       layout: pipeline.getBindGroupLayout(0),
@@ -268,9 +298,13 @@ class Kernel {
     return k;
   }
 
-  /// One dispatch of `threads` threads (a multiple of the workgroup size), timed to the queue's completion.
+  /// One dispatch of `threads` threads (a multiple of the workgroup size), timed by the GPU's work. Two can
+  /// be in flight: the queue runs them in order (the uniform and the output are written in queue order
+  /// too), and each reads back into a buffer of its own. A third must wait until the first was read.
   async run(words: Uint32Array, threads: number): Promise<Dispatch> {
     const { device } = this.g;
+    const readback = this.readbacks[this.turn];
+    this.turn ^= 1;
     device.queue.writeBuffer(this.params, 0, words);
     const enc = device.createCommandEncoder({ label: "miner" });
     enc.clearBuffer(this.out, 0, 16);
@@ -279,19 +313,22 @@ class Kernel {
     pass.setBindGroup(0, this.bind);
     pass.dispatchWorkgroups(threads / WORKGROUP_SIZE);
     pass.end();
-    enc.copyBufferToBuffer(this.out, 0, this.readback, 0, this.size);
+    enc.copyBufferToBuffer(this.out, 0, readback, 0, this.size);
     const t0 = performance.now();
     device.queue.submit([enc.finish()]);
     // Ask for the map at once: it resolves right after the work does, which saves a round trip (about
     // 5% of the rate on a GPU whose dispatches take 10 ms). A failed map surfaces at `await mapped`; the
     // empty catch only keeps it from counting as unhandled if the wait for the work throws first.
-    const mapped = this.readback.mapAsync(MapMode.READ);
+    const mapped = readback.mapAsync(MapMode.READ);
     mapped.catch(() => {});
     await device.queue.onSubmittedWorkDone();
-    const ms = performance.now() - t0;
+    const done = performance.now();
+    // From the submit, or from the end of the dispatch this one queued behind.
+    const ms = done - Math.max(t0, this.lastDone);
+    this.lastDone = done;
     await mapped;
-    const u = new Uint32Array(this.readback.getMappedRange().slice(0));
-    this.readback.unmap();
+    const u = new Uint32Array(readback.getMappedRange().slice(0));
+    readback.unmap();
     const hits = u[0];
     const records: HitRecord[] = [];
     for (let i = 0; i < Math.min(hits, this.slots); i++) {
@@ -304,7 +341,7 @@ class Kernel {
   destroy(): void {
     this.params.destroy();
     this.out.destroy();
-    this.readback.destroy();
+    for (const b of this.readbacks) b.destroy();
   }
 }
 
@@ -457,38 +494,48 @@ export class GpuMiner {
       opts.onLog(`${what} failed CPU verification (${g.strikes} of ${MAX_STRIKES})`);
       if (g.strikes >= MAX_STRIKES) this.fail(gen, opts, `GPU failed CPU verification ${MAX_STRIKES} times`, "verify");
     };
+    // Dispatches in flight, oldest first.
+    const flights: Flight[] = [];
     try {
       const mid = midstate(job);
       let high = randomBytes(NONCE_HIGH_BYTES);
       let batch = 0;
       let threads = START_THREADS;
       let checkedAt = -Infinity;
+      const launch = () => {
+        const result = k.run(paramWords(mid, blockTwo(job, high, batch), job, batch), threads);
+        result.catch(() => {}); // awaited in its turn, or let land in the finally
+        flights.push({ high, batch, threads, result });
+        if (++batch >= BATCH_LIMIT) {
+          high = randomBytes(NONCE_HIGH_BYTES);
+          batch = 0;
+        }
+      };
       while (gen === this.gen) {
         if (g.lost) throw new Error("the device was lost");
-        const r = await k.run(paramWords(mid, blockTwo(job, high, batch), job, batch), threads);
+        // At full power a second dispatch waits on the GPU while the host reads the first back.
+        while (flights.length < (this.power >= 100 ? IN_FLIGHT : 1)) launch();
+        const f = flights.shift()!;
+        const r = await f.result;
         if (gen !== this.gen) break;
         const sample = bytesHex(r.sample);
-        opts.onProgress({ jobId: job.id, hashes: threads, sample });
+        opts.onProgress({ jobId: job.id, hashes: f.threads, sample });
         // The first dispatch of a job, then every few seconds: thread 0's nonce re-hashed on the CPU.
         const now = performance.now();
         if (now - checkedAt >= SAMPLE_CHECK_MS) {
           checkedAt = now;
-          if (bytesHex(keccak_256(preimage(job, gpuNonce(high, batch, 0)))) !== sample) strike("GPU sample");
+          if (bytesHex(keccak_256(preimage(job, gpuNonce(f.high, f.batch, 0)))) !== sample) strike("GPU sample");
         }
         for (const rec of r.records) {
           if (gen !== this.gen) break;
-          const v = verify(job, high, batch, threads, rec);
+          const v = verify(job, f.high, f.batch, f.threads, rec);
           if (v.ok) {
             opts.onFound({ jobId: job.id, nonce: bytesHex(v.nonce), digest: bytesHex(v.digest) });
             continue;
           }
           strike("GPU hit");
         }
-        threads = adapt(threads, r.ms);
-        if (++batch >= BATCH_LIMIT) {
-          high = randomBytes(NONCE_HIGH_BYTES);
-          batch = 0;
-        }
+        threads = adapt(threads, r.ms, band(this.power));
         // Rest for the duty cycle, and always yield so stop, power and new jobs get through.
         const pause = this.power >= 100 ? 0 : (r.ms * (100 - this.power)) / this.power;
         await (pause > 0 ? rest(pause) : nextTask());
@@ -496,6 +543,8 @@ export class GpuMiner {
     } catch (e) {
       this.fail(gen, opts, g.lost ? `GPU lost: ${message(e)}` : `GPU stopped: ${message(e)}`, g.lost ? "lost" : "error");
     } finally {
+      // A dispatch still in flight reads back into the kernel's buffers: let it land before they go.
+      await Promise.allSettled(flights.map((f) => f.result));
       k.destroy();
     }
   }
@@ -513,7 +562,8 @@ async function benchmark(k: Kernel, ms: number): Promise<Pick<GpuSelfTest, "rate
     const r = await k.run(paramWords(mid, blockTwo(job, high, batch), job, batch), used);
     if (r.hits) throw new Error(`benchmark: ${r.hits} hits where none is possible`);
     batch++;
-    threads = adapt(threads, r.ms);
+    // The benchmark keeps the first version's policy: one dispatch at a time, within 60..120 ms.
+    threads = adapt(threads, r.ms, LONG_MS);
     await nextTask();
     return { used, ms: r.ms };
   };

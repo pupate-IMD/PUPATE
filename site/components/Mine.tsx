@@ -15,13 +15,19 @@ const EPOCHS = 11;
 const SUPPLY = 3333;
 const PREVIEW_CARDS = [1, 12, 57, 133, 240];
 const METER = 48;
+/// Places in the drawer. Find n always takes place (n - 1) mod 8: a new card fills the next place, or
+/// replaces the oldest card in its own place, and no other card moves. A card that moves is painted again,
+/// and while the GPU mines, every paint waits behind its work.
+const DRAWER = 8;
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-/// Which preview card a practice hash "mints": the hash picks, as it will live.
+/// Which preview card a practice hash "mints": the hash picks, as it will live. The reveal and the drawer
+/// show the card's 540 px WebP (scripts/card-bitmaps.mjs renders it from the SVG): a bitmap draws at once,
+/// while the SVG's blur filters would be rasterized on every find, behind the GPU's work.
 function cardFor(f: Found): { id: number; src: string; title: string; gilt: boolean } {
   const id = PREVIEW_CARDS[parseInt(f.digest.slice(-2), 16) % PREVIEW_CARDS.length];
-  return { id, src: `/cards/metamorph/c-${id}.svg`, title: `Metamorph.md #${id} · seat identity.md #1376${f.gilt ? " · gilt" : ""}`, gilt: f.gilt };
+  return { id, src: `/cards/metamorph/c-${id}.webp`, title: `Metamorph.md #${id} · seat identity.md #1376${f.gilt ? " · gilt" : ""}`, gilt: f.gilt };
 }
 
 /// A row of digits that fills as the search approaches the hashes a hit takes on average.
@@ -97,7 +103,10 @@ export function Mine() {
     return { label: "Start mining (practice)", onClick: () => start({ miner: wallet as `0x${string}` }) };
   }
   const cta = primary();
-  const cards = m.found.map((f) => ({ f, c: cardFor(f) }));
+  const drawer = m.found
+    .slice(0, DRAWER)
+    .map((f) => ({ f, c: cardFor(f), place: (f.n - 1) % DRAWER }))
+    .sort((a, b) => a.place - b.place);
   const gpuOption = gpuSwitch(m.gpu);
 
   return (
@@ -234,17 +243,18 @@ export function Mine() {
         </section>
         <section className="drawer" aria-label="Cards mined this session">
           <h2 className="serif">This session&apos;s cards</h2>
-          {cards.length === 0 ? (
+          {drawer.length === 0 ? (
             <p className="dim">The cards you mine appear here, chrysalis first. Which seat they come from is the hash&apos;s choice.</p>
           ) : (
             <ul>
-              {cards.slice(0, 8).map(({ f, c }) => (
-                <li key={f.n}>
-                  <img src={c.src} alt={c.title} width={180} height={180} loading="lazy" />
+              {drawer.map(({ f, c, place }) => (
+                <li key={place}>
+                  <img src={c.src} alt={c.title} width={180} height={180} decoding="async" />
                   <span className={c.gilt ? "gold" : undefined}>
                     #{c.id}
                     {c.gilt ? " · gilt" : ""}
                     {!f.minted ? " · waiting" : ""}
+                    {f.n === newest?.n ? " · new" : ""}
                   </span>
                 </li>
               ))}
