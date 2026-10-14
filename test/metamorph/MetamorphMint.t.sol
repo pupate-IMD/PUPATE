@@ -452,6 +452,26 @@ contract MetamorphMintTest is MetamorphFixture {
         assertFalse(plainFlag, "just over target/16 is plain");
     }
 
+    /// Gilt is four more bits than the target the proof is checked against, which after a burst and silence
+    /// is the eased one: a proof under the eased target's gilt line but over the stored target's is gilt.
+    function test_giltIsJudgedAgainstTheEasedTarget() public {
+        _mintAs(miner);
+        for (uint256 i; i < 2; i++) {
+            _mintAs(miner); // same block: ÷4 each
+        }
+        vm.warp(block.timestamp + 2 * md.DECAY_INTERVAL());
+        uint256 stored = md.target();
+        uint256 eased = md.effectiveTarget();
+        assertEq(eased, stored * 16, "two intervals of silence: x16");
+        uint256 anchor = _anchor();
+        uint256 nonce = _proofBetween(miner, anchor, stored >> 4, eased >> 4);
+        vm.roll(block.number + 1);
+        vm.prank(miner);
+        uint256 id = md.mint(anchor, nonce);
+        (,,, bool gilt,,,,) = md.cards(id);
+        assertTrue(gilt, "gilt against the eased target, though not against the stored one");
+    }
+
     function test_aContractMinerSeesTheMintRecordedAndCannotReenter() public {
         ProbingMiner pm = new ProbingMiner(md, token);
         token.transfer(address(pm), 1_000_000 ether);

@@ -181,12 +181,24 @@ contract MetamorphStakingTest is MetamorphFixture {
         assertEq(md.totalWeight(), 2);
     }
 
-    function test_pokeRefusesAnUnstakedCardAndIgnoresAnEmptyList() public {
-        uint256 id = _mintAs(miner);
-        uint256[] memory ids = new uint256[](1);
-        ids[0] = id;
-        vm.expectRevert(MetamorphMD.NotStaked.selector);
+    /// An unstaked id in a batch is skipped, so one unstake cannot void a keeper's batch: the staked card
+    /// beside it is settled, and the unstaked one gains no weight. An empty batch does nothing.
+    function test_pokeSkipsUnstakedCardsAndAnEmptyList() public {
+        uint256 loose = _mintAs(miner);
+        vm.roll(block.number + 1);
+        uint256 held = _mintAs(miner);
+        vm.prank(miner);
+        md.stake(_ids(held));
+        _credit(30 ether);
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = loose;
+        ids[1] = held;
         md.poke(ids);
+        assertEq(md.pendingIMD(miner), 30 ether, "the staked card in the batch was settled");
+        (address staker, uint8 w,) = md.stakeOf(loose);
+        assertEq(staker, address(0), "the unstaked card stays unstaked");
+        assertEq(w, 0, "and weighs nothing");
+        assertEq(md.totalWeight(), 1, "only the staked card weighs");
         md.poke(new uint256[](0)); // no-op
     }
 

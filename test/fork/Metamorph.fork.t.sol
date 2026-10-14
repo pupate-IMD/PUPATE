@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
@@ -20,7 +21,8 @@ import {StubArt} from "../mocks/StubArt.sol";
 /// @dev The whole flow on a fork of mainnet: the real vault, hook, token, IMD, collection and both
 /// pools. Skipped without MAINNET_RPC_URL. The vault is given a seat (a holder hands it over and the
 /// vault adopts it after a fresh floor from a test attester), a card is mined and minted with duties,
-/// the pot is converted through the real pools, a staker claims IMD, the seat is sold, the card emerges.
+/// the pot is converted through the real pools by anyone and, once it holds a hundred prices, by a mint's
+/// duty, a staker claims IMD, the seat is sold, the card emerges.
 contract MetamorphForkTest is Test {
     Cocoon constant COCOON = Cocoon(payable(0x54993066369e57a49215f6fc2D9911a8e5a57a79));
     PupateHook constant HOOK = PupateHook(payable(0xb5e544166144A590E171bF0350e8F227858318CC));
@@ -128,6 +130,9 @@ contract MetamorphForkTest is Test {
         assertEq(address(md).balance, md.ethPot());
         assertLe(md.imdOwed(), IERC20Minimal(IMD).balanceOf(address(md)), "what is owed is held");
 
+        // A hundred prices in the pot convert inside a mint, as its duty, through the real pools.
+        _dutyConvertsAHundredPrices();
+
         // The vault sells the seat: the card emerges.
         vm.prank(address(COCOON));
         IERC721Minimal(COLLECTION).transferFrom(address(COCOON), holder, seat);
@@ -135,14 +140,66 @@ contract MetamorphForkTest is Test {
         assertEq(md.stageOf(id), 1);
     }
 
+    /// @dev Mints at dear gas leave their duties alone while the pot fills to a hundred prices; then one
+    /// cheap mint converts it as its duty through the real pools and pays the miner, and a second cheap mint
+    /// right after leaves the conversion alone. The cheap mint's gas is measured here, where the earlier
+    /// calls left much of the state warm, so the bound is loose: the conversion's allowance plus 400,000.
+    function _dutyConvertsAHundredPrices() private {
+        vm.fee(3 gwei);
+        while (md.pot() < md.CONVERT_PRICES() * md.mintPrice()) {
+            vm.roll(block.number + 1);
+            vm.warp(block.timestamp + 90);
+            _mint();
+        }
+        vm.fee(1 gwei);
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 90);
+        uint256 a = block.number - 1;
+        uint256 nonce = _nonce(a);
+        uint256 imdBefore = IERC20Minimal(IMD).balanceOf(miner);
+        vm.recordLogs();
+        vm.prank(miner);
+        uint256 gasUsed = gasleft();
+        md.mint(a, nonce);
+        gasUsed -= gasleft();
+        uint256 paid = _dutyPaid(vm.getRecordedLogs(), 2);
+        assertEq(md.lastConvertBlock(), block.number, "the cheap mint converted the hundred prices");
+        uint256 reward = IERC20Minimal(IMD).balanceOf(miner) - imdBefore;
+        assertGt(reward, 0, "and paid the miner IMD");
+        assertEq(reward, paid, "as its DutyRun reports");
+        assertLt(gasUsed, md.CONVERT_GAS() + 400_000, "the mint, its conversion with it, fits the allowance");
+        uint256 converted = block.number;
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 90);
+        _mint();
+        assertEq(md.lastConvertBlock(), converted, "the next cheap mint leaves the conversion alone");
+    }
+
     /// @dev Mines a proof on the previous block as the miner, the way the browser does, and mints it.
     function _mint() private returns (uint256) {
         uint256 a = block.number - 1;
-        bytes32 ah = blockhash(a);
-        uint256 nonce = 1;
-        while (uint256(md.workHash(ah, miner, nonce)) >= md.effectiveTarget()) nonce++;
+        uint256 nonce = _nonce(a);
         vm.prank(miner);
         return md.mint(a, nonce);
+    }
+
+    /// @dev The first nonce whose proof is under the effective target, for the miner at anchor `a`.
+    function _nonce(uint256 a) private view returns (uint256 nonce) {
+        bytes32 ah = blockhash(a);
+        nonce = 1;
+        while (uint256(md.workHash(ah, miner, nonce)) >= md.effectiveTarget()) nonce++;
+    }
+
+    /// @dev What the DutyRun of `kind` among `logs` reports paid; fails when there is none.
+    function _dutyPaid(Vm.Log[] memory logs, uint8 kind) private view returns (uint256) {
+        for (uint256 i; i < logs.length; i++) {
+            if (logs[i].emitter != address(md) || logs[i].topics[0] != MetamorphMD.DutyRun.selector) {
+                continue;
+            }
+            (uint8 k, uint256 paid) = abi.decode(logs[i].data, (uint8, uint256));
+            if (k == kind) return paid;
+        }
+        revert("no DutyRun of that kind");
     }
 
     /// @dev CocoonFixture's `_setFloor`, against the real feed: its question, its evidence chain, its

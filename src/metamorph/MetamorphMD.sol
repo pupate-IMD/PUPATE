@@ -103,13 +103,19 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     /// @notice Blocks between two conversions: Cocoon's `burnSpacing` default, mirrored.
     uint16 public constant CONVERT_SPACING = 5;
     /// @notice The pot converts inside a mint once it holds this many mint prices: at two prices the
-    /// miner's 0.5% reward was about a fiftieth of the duty's gas; at a hundred it covers it.
+    /// miner's 0.5% reward was about a fiftieth of the duty's gas; at a hundred it about covers the duty's
+    /// gas at 1 gwei, half of it at the 2 gwei ceiling.
     uint256 public constant CONVERT_PRICES = 100;
     /// @notice Blocks a mint leaves the conversion alone after a duty conversion that ran with its whole gas
     /// allowance failed, so a stuck pool does not tax every cheap mint with a failing retry. The 1/64 rule
     /// decides before the call whether the duty has its whole allowance: a duty starved of gas by the
     /// sender's limit says nothing about the pool and is simply skipped, while a conversion that exhausts its
-    /// whole allowance is a real failure and backs off. The public `convert()` ignores the back-off.
+    /// whole allowance is a real failure and backs off. A mint whose gas limit came from `eth_estimateGas`
+    /// gives the duties almost nothing (the bare mint is what the estimator finds) and skips them cheaply;
+    /// the mine page and the keeper pad the limit by the duties' allowances so that they run, and only such
+    /// a mint can arm the back-off. A sender with a limit in between pays for a failing conversion on every
+    /// cheap mint while a pool is stuck, which is its own choice. The public `convert()` ignores the
+    /// back-off.
     uint256 public constant CONVERT_BACKOFF = 300;
     uint256 public constant DUTY_MAX_BASEFEE = 2 gwei;
     uint256 public constant MIN_FLUSH = 0.005 ether;
@@ -423,7 +429,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     /// @dev Every mint moves the target, starting from the effective (eased) target, toward one mint per
     /// `TARGET_INTERVAL`, by at most ×4 or ÷4, and never above the epoch's ceiling. It runs before
     /// `lastMintAt` moves, so the effective target still counts the silence before this mint. Reads
-    /// `epoch()` after `totalMinted` moved, so the ceiling of the epoch the next mint belongs to applies.
+    /// `epoch()` after `totalMinted` moved, so the ceiling of the epoch the next mint belongs to applies; the
+    /// base too is `effectiveTarget()` read after `++totalMinted`, so at an epoch boundary it is clamped to
+    /// the next epoch's ceiling, one bit harder than the target the proof was checked against (negligible).
     /// FullMath keeps the product `base × elapsed` from overflowing, but the quotient itself reaches 2^256
     /// when the base sits near the top and the mint came more than `TARGET_INTERVAL` late (the one-bit
     /// floor of the test suite; a mainnet floor of 20 bits has the room). That case saturates to the
@@ -552,12 +560,12 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
 
     /// @notice Settle any staked cards: anyone may call it. What each card earned goes to its staker, never
     /// to the caller; the card's stage is re-read, so an emerged card weighs 2 from here on, and one whose
-    /// stage fell back weighs 1 again. A changed stage emits `MetadataUpdate`.
+    /// stage fell back weighs 1 again. A changed stage emits `MetadataUpdate`. An id that is not staked is
+    /// skipped, so that one unstake cannot void a keeper's batch.
     function poke(uint256[] calldata ids) external nonReentrant {
         for (uint256 i; i < ids.length; i++) {
             Stake storage s = stakeOf[ids[i]];
-            if (s.staker == address(0)) revert NotStaked();
-            _settle(ids[i], s);
+            if (s.staker != address(0)) _settle(ids[i], s);
         }
     }
 
@@ -741,11 +749,16 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         }
         if (convertDue) {
             // The duty backs off only when it ran with its whole allowance, which the 1/64 rule (EIP-150)
-            // decides before the call: under CONVERT_GAS × 64/63, plus the call's own cost, it gets less. A
-            // duty starved of gas by the sender's limit says nothing about the pool and is simply skipped,
-            // whatever its revert carries; a conversion that exhausts its whole allowance is a real failure
-            // and backs off.
-            bool whole = gasleft() > CONVERT_GAS * 64 / 63 + 5000;
+            // decides before the call: under CONVERT_GAS × 64/63 it gets less. The revert data cannot tell a
+            // starved duty from a reasoned failure: v4-core wraps an out-of-gas inside hook callbacks and
+            // currency transfers into a `WrappedError` that carries data. A duty starved by the sender's gas
+            // limit says nothing about the pool and is simply skipped; a mint whose limit came from
+            // `eth_estimateGas` gives it almost nothing, and only a mint padded by the duties' allowances, as
+            // the mine page and the keeper send, can arm the back-off. A conversion that exhausts its whole
+            // allowance is a real failure and backs off. The 10,000 is a safety margin for the catch's first
+            // write of the back-off (20,000 gas, zero to non-zero), which the 64th kept back alone may not
+            // pay after a whole allowance was spent; it is not the call's cost.
+            bool whole = gasleft() > CONVERT_GAS * 64 / 63 + 10_000;
             try this.convertDuty{gas: CONVERT_GAS}(miner_) returns (uint256 bought) {
                 emit DutyRun(2, bought * CALLER_REWARD_BPS / BPS);
             } catch {
