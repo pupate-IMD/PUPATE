@@ -222,7 +222,7 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
 | gilt | `work < target >> 4` | 1 in 16, the Overclocked rule |
 | fee split | 70% pot, 30% treasury | the owner's figures |
 | `CONVERT_IMPACT_BPS` | 500 bps | the launch leg's bound: the vault's burn bound, mirrored |
-| `BUY_IMPACT_BPS` | 150 bps | the IMD leg's bound: the ETH/IMD pool is untaxed, so one conversion may move its ETH depth by at most 0.76%, under the pool's 1% fee (audit M-1) |
+| `BUY_IMPACT_BPS` | 150 bps | the IMD leg's bound: the ETH/IMD pool is untaxed, so one conversion may move its ETH depth by at most 0.76%, under the 1% fee a sandwich pays on each side; the constructor refuses an ETH/IMD key with a lower fee (audit M-1) |
 | `CONVERT_SPACING` | 5 blocks | Cocoon's `burnSpacing` default: conversions in a row cannot stack the bounds |
 | `CALLER_REWARD_BPS` | 50 bps | the vault's figure, for `convert` |
 | `DUTY_MAX_BASEFEE` | 2 gwei | duties ride along only when gas is cheap |
@@ -260,9 +260,11 @@ Nothing is sent to emerge; `stageOf` and `tokenURI` apply the rule, so no card c
   ERC721Lite's `ZeroAddress`, `NotOwner`, `NotAuthorized`, `AlreadyMinted`, `NotMinted`, `UnsafeRecipient`.
 - Constructor: `(Cocoon cocoon, PupateHook hook, PupateToken pupate, IERC20Minimal imd, IERC721Minimal
   collection, IPoolManager poolManager, PoolKey pupateKey, PoolKey imdKey, IMetamorphArt art, uint8
-  minBits)`, all immutable. `minBits` is epoch 1's difficulty floor: 20 on mainnet, 1 in the test suite so
-  that proofs can be found inside a test (about every other nonce passes). The developer address is never
-  stored; it is read from Cocoon at each payment and each royalty query.
+  minBits)`, all immutable. `pupateKey` must be the hook's launch pool and `imdKey` a hookless ETH/IMD pool
+  with a fee of at least 1% (10,000), both initialised, or the constructor reverts `BadPoolKey`. `minBits`
+  is epoch 1's difficulty floor: 20 on mainnet, 1 in the test suite so that proofs can be found inside a
+  test (about every other nonce passes). The developer address is never stored; it is read from Cocoon at
+  each payment and each royalty query.
 
 `MetamorphArt`: `render(View calldata v) pure returns (string memory svg)` with `View = {seat, round,
 edition, stage, gilt, miner, mintedAt}`; `tokenURI` wraps it as `data:application/json;base64,…` with the
@@ -294,25 +296,29 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
   the spacing. Outside it, a conversion is due when the pot holds twice the mint price or ETH waits in
   `ethPot`.
 - The IMD leg of a conversion is bounded by `BUY_IMPACT_BPS` (150), the launch leg by `CONVERT_IMPACT_BPS`
-  (500) (audit M-1). Both bounds start from the spot of the moment; the ETH/IMD pool has no hook and no tax,
-  so its bound holds only while one conversion moves the pool's ETH depth by less than the pool's 1% fee.
+  (500) (audit M-1). Both bounds start from the spot of the moment, which a caller can move first. The
+  launch leg resists a sandwich because the hook taxes both sides of a trade. The ETH/IMD pool has no hook
+  and no tax; its leg resists a sandwich because one conversion moves the pool's ETH depth by at most
+  0.76%, under the 1% fee a sandwich pays on each side, so the constructor refuses an ETH/IMD key with a
+  lower fee.
 - `ethPot` supersedes "never keeps any" under "The vault duties": ETH the IMD pool could not absorb under
   the bound waits in `ethPot`, and the next conversion spends it together with what its sale brings. The
-  contract may hold more ETH than `ethPot`, the one exception to the third item above: the burn reward is
-  sent to the miner with a call that cannot revert the mint, and a reward a contract miner refuses stays
-  and joins the next conversion (such ETH does not by itself make a conversion due). `DutyRun(1, paid)`
-  reports what was actually paid.
+  contract may hold more ETH than `ethPot` until the next conversion, an exception to the third item above:
+  a burn reward a contract miner refuses (the reward is sent with a call that cannot revert the mint), or
+  ETH anyone sends to `receive()` or forces in; such ETH does not by itself make a conversion due, and the
+  next conversion spends it. `DutyRun(1, paid)` reports what was actually paid.
 - `stageOf` is not monotonic in one case: a seat pulled from the vault's wallet without a settle and sent
   straight back makes the card a chrysalis again, until someone settles the seat (audit L-6). A stake is
   reweighed on every touch, down as well as up, and only the staker's own `claim(ids)` or `unstake(ids)`
   naming the card touches it; staking other cards does not.
 - `Card` field order is `(seat, round, edition, gilt, mintedAt, paid, miner, work)`; `epoch()` clamps to 11
   at sell-out.
-- Constructor errors: `ZeroAddress`; `BadBits` (`minBits` 1 to 200); `BadPoolKey`, with both keys checked:
-  ETH is currency0, the launch key names PUPATE and the hook and is the hook's `launchPool`, the ETH/IMD key
-  names IMD and no hook, and both pools are initialised on the PoolManager given (audit L-5).
+- Constructor errors: `ZeroAddress`; `BadBits` (`minBits` 1 to 200); `BadPoolKey` unless all five hold: ETH
+  is currency0 of both keys; the launch key names PUPATE and the hook and is the hook's `launchPool` (audit
+  L-5); the ETH/IMD key names IMD and no hook; the ETH/IMD key's fee is at least 1% (10,000), which the buy
+  bound assumes (audit M-1); and both pools are initialised on the PoolManager given (audit L-5).
 - `noteSeat` refuses seat ids above 2^32 − 1 with `SeatTooLarge` (audit L-4).
-- Design trade-offs the audit recorded, kept on purpose:
+- Trade-offs kept on purpose, recorded by the audit and its fixes:
   - L-1: the difficulty retargets only on a mint, as designed. After a burst it stays high until someone
     mints; then each mint eases it by up to ×4, the full ×4 when it comes 360 seconds or more after the one
     before.
@@ -320,6 +326,9 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
     keeper's convert duty is the backstop.
   - L-3: no time locks, as designed; a stake made just before a conversion takes a full share of it. A
     stake-age rule is a possible later change, the owner's to decide.
+  - M-1 residual: an attacker holding about a quarter or more of the ETH/IMD pool's in-range liquidity
+    recovers its fees and can still profit a little from a sandwich, and griefing stays cheap: the griefer
+    loses about a third of what the stakers lose. Accepted; the numbers are in `docs/REVIEW.md`.
 - For the page and the keeper: pad the mint's gas limit by the allowances of the duties `dutiesDue()`
   reports (`DUTY_GAS`, 400,000 each; `CONVERT_GAS`, 900,000; the duty conversion used about 300,000 on a
   mainnet fork), because `eth_estimateGas` can settle on a limit that starves the last duty, which then
