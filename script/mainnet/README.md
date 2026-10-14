@@ -59,15 +59,37 @@ never pays twice.
 
 ## Metamorph MD
 
-After the art contract is deployed (its own script, next plan) and the review is clean:
+Two scripts, the art first, each run once the review is clean. Neither deployment can be corrected: the
+three art contracts have no owner and no setter, and the token keeps the art's address as an immutable.
 
-    COCOON=… HOOK=… PUPATE=… IMD=… COLLECTION=… POOL_MANAGER=… ART=<art> MIN_BITS=20 \
-    forge script script/DeployMetamorph.s.sol --rpc-url "$MAINNET_RPC_URL" --broadcast --private-key "$KEEPER_PRIVATE_KEY" -vv
+1. Deploy the art: `MetamorphChrysalis`, `MetamorphButterfly`, then the router `MetamorphArt` with their
+   addresses. Look at a rendered sample before broadcasting. `node script/art/parity.mjs` runs the same
+   script on a local anvil (port 8546, anvil's public test key), reads 24 cards through `tokenURI`, checks
+   each against the JavaScript mirror byte for byte and as XML, prints the gas and the sizes, and writes the
+   SVGs to `out/art/`. Then `node script/art/thumbs.mjs` draws them as PNGs in `out/art/png/` with headless
+   Edge. Both must end without an error, and the owner looks at the PNGs. Simulate first, without
+   `--broadcast`:
 
-The script refuses any `MIN_BITS` but 20. The constructor refuses pool keys that are not the hook's launch
-pool and an initialised hookless ETH/IMD pool charging at least 1% (`BadPoolKey`), and addresses that are
-not the vault's own: IMD, the collection and the PoolManager must be the ones Cocoon names, and the hook
-must pay Cocoon (`BadWiring`). Nothing can be corrected after the deployment.
+       forge script script/DeployMetamorphArt.s.sol --rpc-url "$MAINNET_RPC_URL" --private-key "$KEEPER_PRIVATE_KEY"
+
+   The dry run prints the three addresses the broadcast will create, then reads one card through the router
+   and prints the length of its token URI: `sample tokenURI bytes 21045` (token 1, seat 1376's holotype
+   chrysalis; the code alone fixes the number). Then broadcast:
+
+       forge script script/DeployMetamorphArt.s.sol --rpc-url "$MAINNET_RPC_URL" --broadcast --private-key "$KEEPER_PRIVATE_KEY"
+
+   Record `metamorphArt`, the router (`MetamorphArt`), and pass it as `ART` to `DeployMetamorph`.
+
+2. Deploy the token, `ART` being the router:
+
+       COCOON=… HOOK=… PUPATE=… IMD=… COLLECTION=… POOL_MANAGER=… ART=<metamorphArt> MIN_BITS=20 \
+       forge script script/DeployMetamorph.s.sol --rpc-url "$MAINNET_RPC_URL" --broadcast --private-key "$KEEPER_PRIVATE_KEY" -vv
+
+   The script refuses any `MIN_BITS` but 20, and an `ART` without code. The constructor refuses pool keys
+   that are not the hook's launch pool and an initialised hookless ETH/IMD pool charging at least 1%
+   (`BadPoolKey`), and addresses that are not the vault's own: IMD, the collection and the PoolManager must
+   be the ones Cocoon names, and the hook must pay Cocoon (`BadWiring`). Nothing can be corrected after the
+   deployment.
 
 Then record `metamorph` and `metamorphArt` in `keeper/addresses.mainnet.json` and `site/lib/addresses.ts`,
 and note the seats. `noteSeat(seat)` is permissionless, so anyone can call it. The keeper does not call

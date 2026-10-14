@@ -35,6 +35,8 @@
 //                                         print the byte length and keccak256 of that card's SVG and JSON
 //   node script/art/mirror.mjs worst      find the heaviest card (worstCard) and print its two stages' sizes and
 //                                         digests (test/metamorph/art/MetamorphArt.t.sol)
+//   node script/art/mirror.mjs sample     print the parity sample (sampleViews, script/art/parity.mjs): 24 views,
+//                                         each as render's arguments and the features it shows, then the coverage
 
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
@@ -780,6 +782,160 @@ export function worstView(seat, round, stage) {
   };
 }
 
+// ------------------------------------------------------------------ the parity sample
+
+/// The features a view shows, for the parity sample: its form, halo, signal, density, tier, stage and gilt; its
+/// palette on a plain card only (a gilt card is painted with the gilt row whatever its palette); with the orbit,
+/// the quadrant of its gold dot (the signs of the cosine and the sine, "orbit:+-" for a positive cosine and a
+/// negative sine); on a chrysalis its segment rings and the notes (drawn when there is no halo); on a butterfly
+/// its veins and spots after the deltas. t and st are the card's and the seat's traits.
+function featuresFrom(t, st, stage, gilt) {
+  const b = Number(stage) !== 0;
+  const f = [
+    `form:${FORMS[t.form]}`, `halo:${HALOS[t.halo]}`, `signal:${SIGNALS[t.signal]}`,
+    `density:${DENSITIES[t.density]}`, `tier:${TIERS[t.tier]}`, `stage:${b ? "butterfly" : "chrysalis"}`,
+    `gilt:${gilt ? "yes" : "no"}`,
+  ];
+  if (!gilt) f.push(`palette:${PALETTES[t.palette]}`);
+  if (t.halo === 3) {
+    const cos = sinCircle(BigInt(t.orbitDeg) + 900n).neg, sin = sinCircle(t.orbitDeg).neg;
+    f.push(`orbit:${cos ? "-" : "+"}${sin ? "-" : "+"}`);
+  }
+  if (b) f.push(`veins:${clamp(st.veins + t.dVeins, 2, 6)}`, `spots:${clamp(st.spots + t.dSpots, 0, 4)}`);
+  else f.push(`rings:${t.rings}`, ...(t.halo === 0 ? ["notes"] : []));
+  return f;
+}
+
+/// The features of a view, its traits drawn afresh.
+export function featuresOf(v) {
+  const seat = BigInt(v.seat);
+  return featuresFrom(cardTraits(seat, Number(v.round), Number(v.edition)), seatTraits(seat), v.stage, v.gilt);
+}
+
+/// Every feature the parity sample must show at least once (45): each form, halo, signal, density, tier and
+/// palette (the palette on a plain card), both stages, gilt and plain, the notes, the orbit dot in each quadrant,
+/// and every count of segment rings (2..5), veins (2..6) and spots (0..4) a card can draw.
+export const SAMPLE_FEATURES = [
+  ...FORMS.map((x) => `form:${x}`), ...HALOS.map((x) => `halo:${x}`), ...SIGNALS.map((x) => `signal:${x}`),
+  ...DENSITIES.map((x) => `density:${x}`), ...TIERS.map((x) => `tier:${x}`),
+  ...PALETTES.map((x) => `palette:${x}`), "stage:chrysalis", "stage:butterfly", "gilt:yes", "gilt:no", "notes",
+  ...["++", "-+", "--", "+-"].map((x) => `orbit:${x}`), ...[2, 3, 4, 5].map((x) => `rings:${x}`),
+  ...[2, 3, 4, 5, 6].map((x) => `veins:${x}`), ...[0, 1, 2, 3, 4].map((x) => `spots:${x}`),
+];
+
+/// The stage pairs among a view's features: its stage with each of its form, halo, signal, density, tier,
+/// palette and gilt (48 possible).
+const PAIRED = ["form:", "halo:", "signal:", "density:", "tier:", "palette:", "gilt:"];
+function pairsOf(f) {
+  const stage = f.find((x) => x.startsWith("stage:"));
+  return f.filter((x) => PAIRED.some((p) => x.startsWith(p))).map((x) => `${stage}+${x}`);
+}
+const PAIRS_TOTAL =
+  2 * (FORMS.length + HALOS.length + SIGNALS.length + DENSITIES.length + TIERS.length + PALETTES.length + 2);
+
+/// What a set of views shows: the SAMPLE_FEATURES missing (none, for a good sample) and how many of the 48
+/// stage pairs are there.
+export function coverageOf(views) {
+  const shown = new Set();
+  for (const v of views) {
+    const f = featuresOf(v);
+    for (const x of [...f, ...pairsOf(f)]) shown.add(x);
+  }
+  const pairs = [...shown].filter((x) => x.includes("+") && x.startsWith("stage:")).length;
+  return { missing: SAMPLE_FEATURES.filter((x) => !shown.has(x)), pairs, pairsTotal: PAIRS_TOTAL };
+}
+
+/// Anvil's first default account (a public test key's address): the deploy script's sender, and so the miner
+/// of its sample card, when the parity script deploys on anvil.
+const ANVIL_0 = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
+
+/// What the picture never reads, varied from view to view: the k-th view's id, epoch, miner, time and price (a
+/// fraction of a PUPATE over the whole tokens, which the JSON rounds down).
+function factsOf(k) {
+  const kk = BigInt(k);
+  return {
+    id: 1n + ((kk * 389n) % 3333n), epoch: 1 + (k % 11),
+    miner: `0x${keccak256(encodeAbiParameters([{ type: "uint256" }], [kk])).slice(-40)}`,
+    mintedAt: 1760000000 + 3600 * k, paid: (40000n + 1234n * kk) * 10n ** 18n + 987654321n * kk,
+  };
+}
+
+/// The parity sample (script/art/parity.mjs; `node script/art/mirror.mjs sample` prints it): n views, 24 by
+/// default, that between them show every SAMPLE_FEATURE. Six are fixed: the deploy script's sample card
+/// (1376, 0, 1) as a plain chrysalis and a plain butterfly (token 1, epoch 1, 50,000 PUPATE, mined by anvil's
+/// first account); the worst card (worstCard, measured as worstView) in both stages, the heaviest butterfly;
+/// (93, 0, 9) as a gilt butterfly, the heavy butterfly figure the Task 3 review measured; and (1095, 4, 1) as
+/// a chrysalis measured as worstView, the heaviest chrysalis the Task 4 review found (no halo, so the nine
+/// notes, with the rain, bold digits and five segment rings). The others are searched from seats 1..300,
+/// rounds 0 and 1, one edition of each tier (1, 2 + seat % 32, 34 + 7 × seat % 270), each card as a chrysalis
+/// and a butterfly, plain and gilt, in that order: each pick is the first candidate with the most features not
+/// yet shown, a missing SAMPLE_FEATURE counting ten and a missing stage pair one; once nothing is new, the next
+/// card not yet in the sample, in the stage and proof (chrysalis or butterfly, plain or gilt) the sample has
+/// fewest of. Their other facts vary (factsOf). Throws if a SAMPLE_FEATURE is missing: the coverage is
+/// asserted, not hoped for.
+export function sampleViews(n = 24) {
+  const views = [], viewKeys = new Set(), cardKeys = new Set(), shown = new Set();
+  const viewKey = (v) => `${v.seat}-${v.round}-${v.edition}-${Number(v.stage)}-${v.gilt}`;
+  const cardKey = (v) => `${v.seat}-${v.round}-${v.edition}`;
+  const add = (v) => {
+    const f = featuresOf(v);
+    views.push(v);
+    viewKeys.add(viewKey(v));
+    cardKeys.add(cardKey(v));
+    for (const x of [...f, ...pairsOf(f)]) shown.add(x);
+  };
+  const first = {
+    id: 1n, seat: 1376n, round: 0, edition: 1, stage: 0, gilt: false, epoch: 1, miner: ANVIL_0,
+    mintedAt: 1760000000, paid: 50000n * 10n ** 18n,
+  };
+  add(first);
+  add({ ...first, stage: 1 });
+  const worst = worstCard();
+  if (worst === null) throw new Error("sample: the worst card was not found");
+  add(worstView(worst.seat, worst.round, 0));
+  add(worstView(worst.seat, worst.round, 1));
+  add({ seat: 93n, round: 0, edition: 9, stage: 1, gilt: true, ...factsOf(4) });
+  add(worstView(1095n, 4, 0));
+
+  const pool = [];
+  for (let seat = 1n; seat <= 300n; seat++) {
+    const st = seatTraits(seat);
+    for (const round of [0, 1]) {
+      for (const edition of [1, 2 + Number(seat % 32n), 34 + Number((7n * seat) % 270n)]) {
+        const t = cardTraits(seat, round, edition);
+        for (const stage of [0, 1]) {
+          for (const gilt of [false, true]) {
+            const f = featuresFrom(t, st, stage, gilt);
+            pool.push({ seat, round, edition, stage, gilt, f, pairs: pairsOf(f) });
+          }
+        }
+      }
+    }
+  }
+  const tally = (stage, gilt) => views.filter((v) => Number(v.stage) === stage && v.gilt === gilt).length;
+  while (views.length < n) {
+    let best = null, most = 0;
+    for (const c of pool) {
+      if (viewKeys.has(viewKey(c))) continue;
+      let score = 0;
+      for (const x of c.f) if (!shown.has(x)) score += 10;
+      for (const x of c.pairs) if (!shown.has(x)) score += 1;
+      if (score > most) [best, most] = [c, score];
+    }
+    if (best === null) {
+      const [stage, gilt] = [[0, false], [1, false], [0, true], [1, true]].reduce((a, b) =>
+        tally(...b) < tally(...a) ? b : a,
+      );
+      best = pool.find((c) => c.stage === stage && c.gilt === gilt && !cardKeys.has(cardKey(c)));
+    }
+    const { seat, round, edition, stage, gilt } = best;
+    add({ seat, round, edition, stage, gilt, ...factsOf(views.length) });
+  }
+  const { missing } = coverageOf(views);
+  if (missing.length > 0) throw new Error(`sample: ${missing.join(", ")} never shown`);
+  return views;
+}
+
 // ------------------------------------------------------------------ the vectors
 
 const q = (str) => JSON.stringify(str);
@@ -930,7 +1086,7 @@ const isMain = (() => {
 const USAGE =
   "usage: node script/art/mirror.mjs vectors | sines" +
   " | figure <chrysalis|butterfly> <seat> <round> <edition> <gilt 0|1>" +
-  " | <render|uri|digest> <seat> <round> <edition> <stage> <gilt 0|1> <id> [paid] [miner] [epoch] | worst";
+  " | <render|uri|digest> <seat> <round> <edition> <stage> <gilt 0|1> <id> [paid] [miner] [epoch] | worst | sample";
 
 /// A view from the command line: seat round edition stage gilt id [paid in wei, 0] [miner, the zero address]
 /// [epoch, 1]; mintedAt is 0 (neither the drawing nor the JSON reads it).
@@ -979,6 +1135,16 @@ if (isMain) {
           `${Buffer.byteLength(json, "utf8")} bytes ${digest(json)}; uri ${tokenURI(v).length} bytes`,
       );
     }
+  } else if (cmd === "sample" && args.length === 0) {
+    const views = sampleViews();
+    for (const v of views) {
+      const line = [v.seat, v.round, v.edition, v.stage, v.gilt ? 1 : 0, v.id, v.paid, v.miner, v.epoch].join(" ");
+      console.log(`${line}  ${featuresOf(v).join(" ")}`);
+    }
+    const { pairs, pairsTotal } = coverageOf(views);
+    console.log(
+      `${views.length} views; all ${SAMPLE_FEATURES.length} features shown; ${pairs} of ${pairsTotal} stage pairs`,
+    );
   } else if (cmd === "vectors") {
     console.log(vectors());
   } else if (cmd === "sines" && args.length === 0) {
