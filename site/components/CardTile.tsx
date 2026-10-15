@@ -17,6 +17,10 @@ export interface TileCard {
   staked?: boolean;
 }
 
+/// A tokenURI read that failed in transit (the node did not answer, not a card without an image) is tried
+/// again after these pauses; after the last one the tile waits blank until its stage changes or it mounts again.
+const RETRY_AFTER = [2_000, 6_000, 18_000, 54_000];
+
 /// True once the element has come near the viewport (and from then on): the tile reads its image then.
 function useSeen(ref: RefObject<Element | null>): boolean {
   const [seen, setSeen] = useState(false);
@@ -43,24 +47,31 @@ function useSeen(ref: RefObject<Element | null>): boolean {
 }
 
 /// A minted card's image from its tokenURI: the cached one at once, else read when the tile is seen. Undefined
-/// while it is not read yet, null when the read failed.
+/// while it is not read yet (or a failed read waits to be tried again), null when the card's JSON carries no
+/// image. A failure in transit is never kept as "no image".
 function useCardImage(contracts: LiveAddresses | null, card: TileCard, seen: boolean): string | null | undefined {
   const client = usePublicClient({ chainId: TARGET_CHAIN_ID });
   const { id, stage, gilt } = card;
   const key = contracts && stage !== null ? `${contracts.chainId}:${contracts.metamorph}:${id}:${stage}:${gilt}` : "";
   const cached = contracts && stage !== null ? cachedImage(contracts, id, stage, gilt) : null;
   const [read, setRead] = useState<{ key: string; src: string | null } | null>(null);
+  const [retry, setRetry] = useState({ key: "", n: 0 });
+  const n = retry.key === key ? retry.n : 0;
   useEffect(() => {
     if (!seen || !contracts || !client || stage === null || cached) return;
     let on = true;
+    let timer: number | undefined;
     tokenImage(client, contracts, id, stage, gilt).then(
       (src) => on && setRead({ key, src }),
-      () => on && setRead({ key, src: null }),
+      () => {
+        if (on && n < RETRY_AFTER.length) timer = window.setTimeout(() => setRetry({ key, n: n + 1 }), RETRY_AFTER[n]);
+      },
     );
     return () => {
       on = false;
+      if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [seen, contracts, client, id, stage, gilt, cached, key]);
+  }, [seen, contracts, client, id, stage, gilt, cached, key, n]);
   if (cached) return cached;
   return read?.key === key ? read.src : undefined;
 }

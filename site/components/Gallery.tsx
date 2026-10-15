@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
 import { TARGET_CHAIN_ID } from "@/lib/addresses";
 import { mintedCards, stagesOf } from "@/lib/metamorph/cards";
@@ -43,6 +43,8 @@ export function Gallery() {
   const slice = rows.slice(at * PAGE, at * PAGE + PAGE);
   const ids = slice.map((r) => r.id);
   // The stage is read live for the cards on the page: it picks the image, so an emerged card shows emerged.
+  // A new mint shifts the page's ids, and with them the query's key: the stages read before stay meanwhile,
+  // so the page does not flash on every mint.
   const stages = useQuery({
     queryKey: ["metamorph-stages", contracts?.chainId, contracts?.metamorph, ids.join()],
     queryFn: () => stagesOf(client!, contracts!, ids),
@@ -50,7 +52,16 @@ export function Gallery() {
     refetchInterval: 15_000,
     staleTime: 5_000,
     retry: 1,
+    placeholderData: keepPreviousData,
   });
+  // A card the chain does not have (its Minted log came from a reorganised block) leaves the page at once,
+  // and the mints are read again without it.
+  const gone = stages.data?.gone;
+  const refetchMinted = minted.refetch;
+  useEffect(() => {
+    if (gone?.length) void refetchMinted();
+  }, [gone, refetchMinted]);
+  const shown = gone?.length ? slice.filter((r) => !gone.includes(r.id)) : slice;
 
   // Nothing until it is known whether the contracts are live: the preview never flashes before the live cards.
   if (contracts === undefined) return null;
@@ -86,10 +97,10 @@ export function Gallery() {
         <p className="ws-empty alarm">The mints could not be read. The page tries again in a moment.</p>
       ) : (
         <ul className="tiles">
-          {slice.map((r) => (
+          {shown.map((r) => (
             <CardTile
               key={r.id}
-              card={{ id: r.id, seat: r.seat, gilt: r.gilt, stage: stages.data?.get(r.id) ?? null }}
+              card={{ id: r.id, seat: r.seat, gilt: r.gilt, stage: stages.data?.stages.get(r.id) ?? null }}
               contracts={contracts}
               href={`/cards/view/?id=${r.id}`}
             />

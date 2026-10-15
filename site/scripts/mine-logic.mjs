@@ -36,8 +36,11 @@ import {
   UserRejectedRequestError,
   createPublicClient,
   createWalletClient,
+  custom,
+  decodeFunctionData,
   encodeAbiParameters,
   encodeEventTopics,
+  encodeFunctionResult,
   erc20Abi,
   getAddress,
   http,
@@ -45,6 +48,7 @@ import {
   isAddressEqual,
   keccak256,
   maxUint256,
+  multicall3Abi,
   toBytes,
   toEventSelector,
   toFunctionSelector,
@@ -637,13 +641,30 @@ console.log("\n== the workspace (lib/metamorph/cards.ts)");
   ];
   const mine = C.heldIds(C.foldTransfers(logs, ME));
   const theirs = C.heldIds(C.foldTransfers(logs, THEM));
-  const shuffled = [...logs, ...logs.slice(0, 5)].sort(() => Math.random() - 0.5);
-  const anyOrder = C.heldIds(C.foldTransfers(shuffled, ME));
+  // Any order, as a seeded Fisher-Yates (mulberry32) gives it: the same orders on every run, sixteen of them.
+  const shuffle = (list, seed) => {
+    let s = seed >>> 0;
+    const next = () => {
+      s = (s + 0x6d2b79f5) >>> 0;
+      let x = s;
+      x = Math.imul(x ^ (x >>> 15), x | 1);
+      x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+    const out = [...list];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(next() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+  const orders = Array.from({ length: 16 }, (_, k) => shuffle([...logs, ...logs.slice(0, 5)], 1376 + k));
+  const anyOrder = orders.every((o) => C.heldIds(C.foldTransfers(o, ME)).join() === "1,3,5") && new Set(orders.map((o) => o.map((l) => `${l.id}:${l.blockNumber}:${l.logIndex}`).join())).size > 1 ? "1,3,5" : "differs";
   // Two reads that overlap, as the poll re-reads its last blocks: the second folds onto the first.
   const inTwo = C.heldIds(C.foldTransfers(logs.slice(4), ME, C.foldTransfers(logs.slice(0, 6), ME)));
   check(
     "foldTransfers: minted, sent away and sent back is the wallet's once; two wallets; any order, logs twice, in two overlapping reads",
-    mine.join() === "1,3,5" && theirs.join() === "2,4" && anyOrder.join() === "1,3,5" && inTwo.join() === "1,3,5",
+    mine.join() === "1,3,5" && theirs.join() === "2,4" && anyOrder === "1,3,5" && inTwo.join() === "1,3,5",
     `ME ${mine.join(",")} · THEM ${theirs.join(",")}`,
   );
 }
@@ -883,6 +904,196 @@ const useStorage = (value) => Object.defineProperty(globalThis, "localStorage", 
   );
   const paid = C.claimedIn({ logs: [logOf(metamorphAbi, COCOON, "Claimed", { staker: ME, imd: 1n }), logOf(metamorphAbi, MD, "Claimed", { staker: ME, imd: 42n })] }, { metamorph: MD }, ME);
   check("claimedIn reads the token's Claimed for this wallet only", paid === 42n && C.claimedIn({ logs: [] }, { metamorph: MD }, ME) === null);
+}
+
+// The workspace's reads against a node in a few lines, behind viem's own client, so viem's multicall chunks
+// as it would on the page: eth_chainId, eth_blockNumber, eth_getLogs of Transfer and Minted by the topics
+// asked, and eth_call of Multicall3's aggregate3 into the token's views. Every eth_call and eth_getLogs is
+// counted; a Transfer log can be held back from the first reads (a node that answered without it); a read can
+// fail; an id the world does not hold reverts NotMinted.
+const NOT_MINTED = Symbol("NotMinted");
+function fakeNode(world) {
+  const counts = { calls: 0, logs: 0 };
+  const eventOf = (name) => metamorphAbi.find((x) => x.type === "event" && x.name === name);
+  const rpcLog = (eventName, args, block, index) => {
+    const item = eventOf(eventName);
+    const plain = item.inputs.filter((p) => !p.indexed);
+    return {
+      address: world.token,
+      topics: encodeEventTopics({ abi: [item], eventName, args }),
+      data: plain.length ? encodeAbiParameters(plain, plain.map((p) => args[p.name])) : "0x",
+      blockNumber: toHex(block),
+      logIndex: toHex(index),
+      transactionIndex: "0x0",
+      transactionHash: toHex(block * 1000n + BigInt(index), { size: 32 }),
+      blockHash: toHex(block, { size: 32 }),
+      removed: false,
+    };
+  };
+  const word = (a) => `0x${a.slice(2).toLowerCase().padStart(64, "0")}`;
+  const logsFor = ({ topics, fromBlock, toBlock }) => {
+    const from = BigInt(fromBlock);
+    const to = BigInt(toBlock);
+    const inRange = (b) => b >= from && b <= to;
+    if (topics[0] === encodeEventTopics({ abi: [eventOf("Minted")], eventName: "Minted" })[0]) {
+      return world.mints.filter((m) => inRange(m.block)).map((m, i) => rpcLog("Minted", { id: BigInt(m.id), seat: 1n, round: 0, edition: m.id, miner: m.miner, work: toHex(m.id, { size: 32 }), gilt: false, price: PRICE1, epoch: 1 }, m.block, i));
+    }
+    const hide = world.hideReads > 0 && topics[2] ? (world.hideReads--, world.hidden) : new Set();
+    return world.transfers
+      .filter((t) => inRange(t.block) && (!topics[1] || word(t.from) === topics[1].toLowerCase()) && (!topics[2] || word(t.to) === topics[2].toLowerCase()) && !hide.has(t.id))
+      .map((t) => rpcLog("Transfer", { from: t.from, to: t.to, id: BigInt(t.id) }, t.block, t.index));
+  };
+  const view = (fn, args) => {
+    const id = args?.[0] === undefined || typeof args[0] !== "bigint" ? null : Number(args[0]);
+    switch (fn) {
+      case "pendingIMD":
+        return world.pending;
+      case "accIMDPerWeight":
+        return world.acc;
+      case "balanceOf":
+        return BigInt([...world.owner.values()].filter((o) => isAddressEqual(o, args[0])).length);
+      case "ownerOf":
+        return world.owner.get(id) ?? NOT_MINTED;
+      case "stageOf":
+        return world.owner.has(id) ? 0 : NOT_MINTED;
+      case "cards":
+        return world.owner.has(id) ? [1, 0, id, false, 1_700_000_000 + id, PRICE1, getAddress(ME), toHex(id, { size: 32 })] : [0, 0, 0, false, 0, 0n, "0x0000000000000000000000000000000000000000", toHex(0, { size: 32 })];
+      case "stakeOf":
+        return world.stakes.get(id) ?? ["0x0000000000000000000000000000000000000000", 0, 0n];
+      default:
+        throw new Error(`the fake node has no view ${fn}`);
+    }
+  };
+  const transport = custom({
+    async request({ method, params }) {
+      if (method === "eth_chainId") return toHex(31337);
+      if (method === "eth_blockNumber") return toHex(world.head);
+      if (method === "eth_getLogs") {
+        counts.logs++;
+        return logsFor(params[0]);
+      }
+      if (method === "eth_call") {
+        counts.calls++;
+        if (world.down || counts.calls > world.callsAnswered) throw new Error("the node is not answering");
+        const [calls] = decodeFunctionData({ abi: multicall3Abi, data: params[0].data ?? params[0].input }).args;
+        const out = calls.map(({ callData }) => {
+          const { functionName, args } = decodeFunctionData({ abi: metamorphAbi, data: callData });
+          const v = view(functionName, args);
+          return v === NOT_MINTED ? { success: false, returnData: toFunctionSelector("NotMinted()") } : { success: true, returnData: encodeFunctionResult({ abi: metamorphAbi, functionName, result: v }) };
+        });
+        return encodeFunctionResult({ abi: multicall3Abi, functionName: "aggregate3", result: out });
+      }
+      throw new Error(`the fake node has no ${method}`);
+    },
+  }, { retryCount: 0 });
+  return { client: createPublicClient({ chain: foundry, transport }), counts };
+}
+/// A world where the wallet minted cards 1..n (Transfer from 0x0 at blocks 100, 110, ...), and staked the odd ones.
+function walletWorld(n, token) {
+  const world = { token, head: 2_000n, transfers: [], mints: [], owner: new Map(), stakes: new Map(), pending: 3n, acc: 2n * E18, hidden: new Set(), hideReads: 0, down: false, callsAnswered: Infinity };
+  for (let id = 1; id <= n; id++) {
+    world.transfers.push({ from: "0x0000000000000000000000000000000000000000", to: getAddress(ME), id, block: 100n + 10n * BigInt(id), index: 0 });
+    world.mints.push({ id, miner: getAddress(ME), block: 100n + 10n * BigInt(id) });
+    world.owner.set(id, getAddress(ME));
+    if (id % 2) world.stakes.set(id, [getAddress(ME), 1, E18]);
+  }
+  return world;
+}
+/// A token address of its own per check: the ledgers and the minted cards are kept per token.
+const fakeToken = (n) => getAddress(`0x${(0xc0de000 + n).toString(16).padStart(40, "0")}`);
+const addressesOf = (token) => ({ chainId: 31337, metamorph: token, token: getAddress("0x00000000000000000000000000000000000000d6"), cocoon: COCOON, fromBlock: 1 });
+{
+  const reads = [];
+  for (const n of [7, 20]) {
+    const token = fakeToken(n);
+    const world = walletWorld(n, token);
+    const { client, counts } = fakeNode(world);
+    const read = await C.walletCards(client, addressesOf(token), getAddress(ME));
+    reads.push({ n, calls: counts.calls, cards: read.cards.length, earned: read.earned, staked: read.cards.filter((c) => c.staked).length });
+  }
+  check(
+    "walletCards reads the wallet in one eth_call, 7 cards or 20 (viem split it into 2 and 3 before), and the figure is pendingIMD plus each staked card's share",
+    reads.every((x) => x.calls === 1 && x.cards === x.n && x.earned === 3n + BigInt(x.staked) * ((2n * E18 - E18) / E18)),
+    reads.map((x) => `${x.n} cards: ${x.calls} eth_call, ${x.cards} cards, ${x.earned} wei`).join("; "),
+  );
+  // A node that answers the first eth_call of a read and fails the next: the read has no next one, so no card
+  // goes missing for a poll (with chunks, the cards of the failed chunk did); a node that fails it all fails
+  // the read as a whole, and the page keeps its last good one.
+  const later = walletWorld(20, fakeToken(254));
+  later.callsAnswered = 1;
+  const partial = await C.walletCards(fakeNode(later).client, addressesOf(fakeToken(254)), getAddress(ME)).then(
+    (r) => `${r.cards.length} cards`,
+    (e) => `threw: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`,
+  );
+  const token = fakeToken(255);
+  const world = walletWorld(20, token);
+  world.down = true;
+  const { client } = fakeNode(world);
+  let failed = "";
+  const got = await C.walletCards(client, addressesOf(token), getAddress(ME)).then(
+    (r) => `${r.cards.length} cards`,
+    (e) => ((failed = e instanceof Error ? e.message.split("\n")[0] : String(e)), null),
+  );
+  check(
+    "a node that fails a read's second eth_call drops no card (there is none); one that fails it all fails the read, never a list with cards missing",
+    partial === "20 cards" && got === null && failed !== "",
+    `second call refused: ${partial}; all refused: ${failed || got}`,
+  );
+  check(
+    "earnedNotClaimed never counts a share below zero (a debt above weight × accIMDPerWeight comes only from reads of two blocks)",
+    C.earnedNotClaimed(5n, E18, [
+      { staked: true, weight: 1, debt: 3n * E18 },
+      { staked: true, weight: 2, debt: E18 },
+    ]) === 6n && C.imd4(C.earnedNotClaimed(0n, E18, [{ staked: true, weight: 1, debt: 2n * E18 }])) === "0.0000",
+  );
+}
+// The ledger heals: a node answered the first read without one Transfer, older than the blocks every read takes
+// again. balanceOf counts one card more than the logs and ownerOf confirm, so the ledger is read again from
+// fromBlock in the same call (and not again within the minute).
+{
+  const token = fakeToken(256);
+  const world = walletWorld(3, token);
+  world.hidden = new Set([2]);
+  world.hideReads = 1;
+  const { client, counts } = fakeNode(world);
+  const a = addressesOf(token);
+  const healed = await C.walletCards(client, a, getAddress(ME));
+  const logsFirst = counts.logs;
+  world.head += 5n;
+  const later = await C.walletCards(client, a, getAddress(ME));
+  check(
+    "the ledger heals in-session: balanceOf 3 against 2 confirmed cards reads the Transfer logs again from fromBlock, and the missing card is there",
+    healed.cards.map((c) => c.id).join() === "1,2,3" && logsFirst === 4 && later.cards.map((c) => c.id).join() === "1,2,3" && counts.logs === 6,
+    `cards ${healed.cards.map((c) => `#${c.id}`).join(", ")}; ${logsFirst} log reads (two, then two from fromBlock), ${counts.logs - logsFirst} on the next poll`,
+  );
+}
+// A reorganised mint: the gallery's stage read says NotMinted for an id the Minted logs gave; the id leaves the
+// minted cards (and the page) instead of waiting for a stage forever, and a real mint of it brings it back.
+{
+  const token = fakeToken(257);
+  const world = walletWorld(3, token);
+  const { client } = fakeNode(world);
+  const a = addressesOf(token);
+  const before = (await C.mintedCards(client, a)).map((r) => r.id).join();
+  world.owner.delete(3);
+  world.mints = world.mints.filter((m) => m.id !== 3);
+  const page = await C.stagesOf(client, a, [3, 2, 1]);
+  const after = (await C.mintedCards(client, a)).map((r) => r.id).join();
+  world.owner.set(3, getAddress(ME));
+  world.mints.push({ id: 3, miner: getAddress(ME), block: world.head + 3n });
+  world.head += 5n;
+  const back = (await C.mintedCards(client, a)).map((r) => r.id).join();
+  check(
+    "a phantom mint (stageOf reverts NotMinted) is dropped from the minted cards and the page; a real mint of the id brings it back",
+    before === "3,2,1" && page.gone.join() === "3" && page.stages.get(1) === 0 && page.stages.get(2) === 0 && !page.stages.has(3) && after === "2,1" && back === "3,2,1",
+    `minted ${before} -> stages of 3,2,1 gone [${page.gone.join()}] -> minted ${after} -> after a real mint of #3: ${back}`,
+  );
+  world.down = true;
+  const failed = await C.stagesOf(client, a, [2, 1]).then(
+    () => false,
+    () => true,
+  );
+  check("a stage read the node fails throws (the gallery keeps the stages it had), and drops nothing", failed && (await C.mintedCards(client, a)).length === 3);
 }
 
 // ------------------------------------------------------------------ the miner on the page (lib/miner/useMiner.ts)
@@ -1855,7 +2066,7 @@ async function cardsOnTheStack() {
   const stages = await C.stagesOf(pub, a, [A, B]);
   check(
     "cardFacts: the card, its stage, its stake and its owner; an id not minted is null; stagesOf reads a gallery page's stages",
-    !!facts && facts.id === A && facts.staked && isAddressEqual(facts.owner, WALLET) && (await C.cardFacts(pub, a, total + 1)) === null && stages.get(A) === 0 && stages.get(B) === 0,
+    !!facts && facts.id === A && facts.staked && isAddressEqual(facts.owner, WALLET) && (await C.cardFacts(pub, a, total + 1)) === null && stages.stages.get(A) === 0 && stages.stages.get(B) === 0 && stages.gone.length === 0,
   );
 
   // A credit to the stakers: the pot holds 70% of each mint price; convert() (anyone, every CONVERT_SPACING

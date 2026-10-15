@@ -16,6 +16,8 @@
 //
 // Relative imports only, no "@/" alias: scripts/mine-logic.mjs runs this file in Node.
 import {
+  BaseError,
+  ContractFunctionRevertedError,
   getAbiItem,
   isAddressEqual,
   parseEventLogs,
@@ -28,7 +30,7 @@ import {
 } from "viem";
 import { metamorphAbi } from "./abi";
 import { MULTICALL3, type LiveAddresses } from "./job";
-import { type WriteContract, tokenJSON } from "./mint";
+import { type WriteContract, revertName, tokenJSON } from "./mint";
 
 /// accIMDPerWeight's unit, the contract's ACC.
 const ACC = 10n ** 18n;
@@ -40,6 +42,8 @@ const OVERLAP = 12n;
 const IMAGE_READS = 4;
 /// Images kept in memory, the least recently shown dropped first.
 const MEMORY_IMAGES = 600;
+/// A wallet's Transfer ledger is read again from fromBlock at most this often (see walletCards).
+const HEAL_MS = 60_000;
 export const IMAGE_PREFIX = "metamorph:img:";
 
 const TRANSFER = getAbiItem({ abi: metamorphAbi, name: "Transfer" });
@@ -137,10 +141,13 @@ export function heldIds(fold: ReadonlyMap<number, LastTransfer>): number[] {
 
 /// Per wallet: the fold of its Transfer logs through the last block read.
 const ledgers = new Map<string, { through: bigint; fold: Map<number, LastTransfer> }>();
+/// Per wallet: when its ledger was last read again from fromBlock.
+const healedAt = new Map<string, number>();
+const ledgerKey = (a: LiveAddresses, wallet: Address) => `${scope(a)}:${wallet.toLowerCase()}`;
 
 /// The ids the wallet holds by its Transfer logs, reading only the blocks after the last one seen.
 async function heldBy(client: PublicClient, a: LiveAddresses, wallet: Address): Promise<number[]> {
-  const key = `${scope(a)}:${wallet.toLowerCase()}`;
+  const key = ledgerKey(a, wallet);
   const start = BigInt(a.fromBlock);
   const head = await client.getBlockNumber({ cacheTime: 0 });
   const seen = ledgers.get(key) ?? { through: start - 1n, fold: new Map<number, LastTransfer>() };
@@ -198,14 +205,32 @@ export interface WalletRead {
 }
 
 /// The wallet's cards, oldest first, with their facts, live stages and stakes, and the IMD it earned and
-/// has not claimed, read in one batch. A card the logs give but ownerOf denies (a node behind the logs, a
-/// reorganised block) is left out until a later read agrees.
+/// has not claimed. A card the logs give but ownerOf denies (a node behind the logs, a reorganised block) is
+/// left out until a later read agrees. When balanceOf counts more cards than the logs and ownerOf confirm, a
+/// log went missing for good (a node answered without it, older than the blocks every read takes again): the
+/// ledger is read again from fromBlock, at most once a minute per wallet.
 export async function walletCards(client: PublicClient, a: LiveAddresses, wallet: Address): Promise<WalletRead> {
+  const first = await readWallet(client, a, wallet);
+  if (first.balance === first.read.cards.length) return first.read;
+  const key = ledgerKey(a, wallet);
+  const last = healedAt.get(key);
+  if (last !== undefined && Date.now() - last < HEAL_MS) return first.read;
+  healedAt.set(key, Date.now());
+  ledgers.delete(key);
+  return (await readWallet(client, a, wallet)).read;
+}
+
+/// One read of the wallet: the ledger, then every view in one eth_call. batchSize 0 keeps viem from splitting
+/// it into chunks (it does past 1,024 bytes of calls, from 7 cards on) that a node may answer at different
+/// blocks, where a settle between two of them counts a share twice or not at all; and one call fails as a
+/// whole, so the page keeps its last good read rather than one with cards missing.
+async function readWallet(client: PublicClient, a: LiveAddresses, wallet: Address): Promise<{ read: WalletRead; balance: number }> {
   const ids = await heldBy(client, a, wallet);
   const t = token(a);
   const calls = [
     { ...t, functionName: "pendingIMD", args: [wallet] },
     { ...t, functionName: "accIMDPerWeight" },
+    { ...t, functionName: "balanceOf", args: [wallet] },
     ...ids.flatMap((id) => {
       const n = BigInt(id);
       return [
@@ -216,33 +241,40 @@ export async function walletCards(client: PublicClient, a: LiveAddresses, wallet
       ];
     }),
   ] as ContractFunctionParameters[];
-  const r = await client.multicall({ allowFailure: true, multicallAddress: MULTICALL3, contracts: calls });
-  const [p, acc] = r;
+  const r = await client.multicall({ allowFailure: true, batchSize: 0, multicallAddress: MULTICALL3, contracts: calls });
+  const [p, acc, held] = r;
   if (p.status !== "success") throw p.error;
   if (acc.status !== "success") throw acc.error;
+  if (held.status !== "success") throw held.error;
   const cards: WalletCard[] = [];
   ids.forEach((id, i) => {
-    const [owner, card, stage, stake] = r.slice(2 + 4 * i, 6 + 4 * i);
+    const [owner, card, stage, stake] = r.slice(3 + 4 * i, 7 + 4 * i);
     if (owner.status !== "success" || card.status !== "success" || stage.status !== "success" || stake.status !== "success") return;
     if (!isAddressEqual(owner.result as Address, wallet)) return;
     cards.push(cardOf(id, card.result as CardRow, Number(stage.result), stake.result as StakeRow));
   });
   const pending = p.result as bigint;
   const accIMDPerWeight = acc.result as bigint;
-  return { cards, pending, accIMDPerWeight, earned: earnedNotClaimed(pending, accIMDPerWeight, cards) };
+  return { read: { cards, pending, accIMDPerWeight, earned: earnedNotClaimed(pending, accIMDPerWeight, cards) }, balance: Number(held.result as bigint) };
 }
 
 /// IMD earned and not claimed: what is booked to the wallet (`pendingIMD(wallet)`), plus what each staked
 /// card earned since its last settlement, (weight × accIMDPerWeight − debt) / 1e18, rounded down per card as
-/// the contract's _settle books it, so it is exactly what unstaking or claiming those cards adds.
+/// the contract's _settle books it, so it is exactly what unstaking or claiming those cards adds. A share is
+/// never below zero: the debt is the weight × accIMDPerWeight of the last settlement and the accumulator only
+/// grows, so a negative one can only come from reads of two different blocks, and counts as nothing.
 export function earnedNotClaimed(pending: bigint, accIMDPerWeight: bigint, stakes: readonly Pick<WalletCard, "staked" | "weight" | "debt">[]): bigint {
   let sum = pending;
-  for (const s of stakes) if (s.staked) sum += (BigInt(s.weight) * accIMDPerWeight - s.debt) / ACC;
+  for (const s of stakes) {
+    if (!s.staked) continue;
+    const share = BigInt(s.weight) * accIMDPerWeight - s.debt;
+    if (share > 0n) sum += share / ACC;
+  }
   return sum;
 }
 
 /// The same figure read on its own: pendingIMD(wallet) plus the unsettled share of those of `ids` the wallet
-/// has staked (any other id adds nothing), in one batch.
+/// has staked (any other id adds nothing), in one eth_call.
 export async function pendingIMD(client: PublicClient, a: LiveAddresses, wallet: Address, ids: readonly (number | bigint)[]): Promise<bigint> {
   const t = token(a);
   const calls = [
@@ -250,7 +282,7 @@ export async function pendingIMD(client: PublicClient, a: LiveAddresses, wallet:
     { ...t, functionName: "accIMDPerWeight" },
     ...ids.map((id) => ({ ...t, functionName: "stakeOf", args: [BigInt(id)] })),
   ] as ContractFunctionParameters[];
-  const [p, acc, ...stakes] = await client.multicall({ allowFailure: false, multicallAddress: MULTICALL3, contracts: calls });
+  const [p, acc, ...stakes] = await client.multicall({ allowFailure: false, batchSize: 0, multicallAddress: MULTICALL3, contracts: calls });
   const own = (stakes as StakeRow[]).filter(([staker]) => isAddressEqual(staker, wallet)).map(([, weight, debt]) => ({ staked: true, weight, debt }));
   return earnedNotClaimed(p as bigint, acc as bigint, own);
 }
@@ -516,20 +548,38 @@ export async function mintedCards(client: PublicClient, a: LiveAddresses): Promi
   return [...(mintLogs.get(key) ?? seen).rows.values()].sort((x, y) => y.id - x.id);
 }
 
-/// The live stages of some cards (a gallery page), by id; a card whose read failed is left out.
-export async function stagesOf(client: PublicClient, a: LiveAddresses, ids: readonly number[]): Promise<Map<number, number>> {
-  const out = new Map<number, number>();
-  if (!ids.length) return out;
+/// Drops ids from the minted cards read so far: the chain does not have them. A Minted log for one of them
+/// later (the id minted for real) brings it back.
+function forgetMinted(a: LiveAddresses, ids: readonly number[]): void {
+  const seen = mintLogs.get(scope(a));
+  if (!seen) return;
+  const rows = new Map(seen.rows);
+  for (const id of ids) rows.delete(id);
+  mintLogs.set(scope(a), { through: seen.through, rows });
+}
+
+/// The live stages of some cards (a gallery page), by id, in one eth_call. An id whose stageOf reverts with
+/// NotMinted is a card the chain does not have (its Minted log came from a block since reorganised away): it
+/// is listed in `gone` and dropped from mintedCards, rather than left waiting for a stage forever. Another
+/// refusal leaves the id out; a read that fails as a whole throws, so the page keeps the stages it had.
+export async function stagesOf(client: PublicClient, a: LiveAddresses, ids: readonly number[]): Promise<{ stages: Map<number, number>; gone: number[] }> {
+  const stages = new Map<number, number>();
+  const gone: number[] = [];
+  if (!ids.length) return { stages, gone };
   const r = await client.multicall({
     allowFailure: true,
+    batchSize: 0,
     multicallAddress: MULTICALL3,
     contracts: ids.map((id) => ({ ...token(a), functionName: "stageOf" as const, args: [BigInt(id)] as const })),
   });
   ids.forEach((id, i) => {
     const x = r[i];
-    if (x.status === "success") out.set(id, x.result);
+    if (x.status === "success") stages.set(id, x.result);
+    else if (revertName(x.error) === "NotMinted") gone.push(id);
+    else if (!(x.error instanceof BaseError && x.error.walk((e) => e instanceof ContractFunctionRevertedError))) throw x.error;
   });
-  return out;
+  if (gone.length) forgetMinted(a, gone);
+  return { stages, gone };
 }
 
 /// A miner on the leaderboard: the cards they minted, how many came out gilt, and their newest card's id.
