@@ -9,7 +9,10 @@
 // the wallet's once), the pending-IMD formula against a model of the contract's staking (two stakers, one
 // credit), the image cache (its key, one read per (id, stage, gilt), storage missing, refused or full), the
 // leaderboard, the buttons' ids; and on the stack, anvil's account #5 mints two cards, sends one away and
-// back, stakes the other, and after a credit to the stakers unstakes and claims exactly the figure.
+// back, stakes the other, and after a credit to the stakers Claim IMD (every staked card) pays exactly the
+// figure. Then useMiner itself, without React (a stand-in for its hooks, its Workers and the chain): the page
+// left while a start's reads, a poll, a mint or the GPU's self-test are on their way; a mint whose answer went
+// missing; Stop with a hash waiting; reverted receipts; the readings after a stop; a wallet that disconnects.
 //
 //   cd site && npm run mine-check        (or: node scripts/mine-logic.mjs)
 //
@@ -861,10 +864,22 @@ const useStorage = (value) => Object.defineProperty(globalThis, "localStorage", 
   ];
   const some = C.actionIds(cards, new Set([1, 2]));
   const none = C.actionIds(cards, new Set());
+  const unstakedOnly = C.actionIds(cards, new Set([2]));
   const read = { cards, pending: 7n, accIMDPerWeight: E18 };
   check(
-    "the buttons: Stake sends the selected unstaked cards, Unstake and Claim IMD the selected staked ones; nothing selected, claim([]) pays what is booked",
-    some.stake.join() === "2" && some.unstake.join() === "1" && some.claim.join() === "1" && none.claim.length === 0 && C.claimable(read, []) === 7n && C.claimable(read, [1, 3]) === 7n + 1n + 1n,
+    "the buttons: Stake sends the selected unstaked cards, Unstake and Claim IMD the selected staked ones; with no staked card selected, Claim IMD sends every staked card and pays the whole figure",
+    some.stake.join() === "2" &&
+      some.unstake.join() === "1" &&
+      some.claim.join() === "1" &&
+      none.claim.join() === "1,3" &&
+      none.stake.length === 0 &&
+      none.unstake.length === 0 &&
+      unstakedOnly.claim.join() === "1,3" &&
+      unstakedOnly.stake.join() === "2" &&
+      C.claimable(read, none.claim) === 7n + 1n + 1n &&
+      C.claimable(read, none.claim) === C.earnedNotClaimed(read.pending, read.accIMDPerWeight, cards) &&
+      C.claimable(read, some.claim) === 7n + 1n,
+    `nothing selected: claim([${none.claim.join(", ")}]) pays ${C.claimable(read, none.claim)} of the figure ${C.earnedNotClaimed(read.pending, read.accIMDPerWeight, cards)}`,
   );
   const paid = C.claimedIn({ logs: [logOf(metamorphAbi, COCOON, "Claimed", { staker: ME, imd: 1n }), logOf(metamorphAbi, MD, "Claimed", { staker: ME, imd: 42n })] }, { metamorph: MD }, ME);
   check("claimedIn reads the token's Claimed for this wallet only", paid === 42n && C.claimedIn({ logs: [] }, { metamorph: MD }, ME) === null);
@@ -1654,11 +1669,23 @@ async function onTheStack() {
   }
 
   // A race in one block: two wallets with valid hashes for the same prevWork. One mint lands; the other
-  // reverts in the same block and must read as the lost race, never as a card.
+  // reverts in the same block and must read as the lost race, never as a card. The contract hashes a nonce
+  // again against whatever prevWork it meets, and at a few bits a stale nonce solves the new job by chance
+  // (one in 2^bits): the second mint of the block would land too, and a resend would read as a fresh
+  // solution. So the two hashes are drawn until each one's proof, folded again with either winner's proof as
+  // prevWork, has its top bit set, which no target takes (the easiest, one bit, is below 2^255): the race,
+  // the refusal of the losing hash and the landed read of the winning one never turn on luck.
   const jobM = await J.liveJob(pub, a, MINER, 4);
   const jobR = await J.liveJob(pub, a, RIVAL, 5);
-  const hitM = workerSearch(jobM);
-  const hitR = workerSearch(jobR);
+  const takenNowhere = (job, nonce, prev) => BigInt(J.workOf({ ...job, folded: J.fold(job.anchorHash, prev) }, BigInt(nonce))) > MAX >> 1n;
+  let hitM;
+  let hitR;
+  let draws = 0;
+  do {
+    draws++;
+    hitM = workerSearch(jobM);
+    hitR = workerSearch(jobR);
+  } while (![hitM.digest, hitR.digest].every((p) => takenNowhere(jobM, hitM.nonce, p) && takenNowhere(jobR, hitR.nonce, p)));
   const prepR = await M.prepareMint(pub, a, { wallet: RIVAL, job: jobR, nonce: BigInt(hitR.nonce), work: hitR.digest, write: writer(RIVAL) });
   const prepM = await M.prepareMint(pub, a, { wallet: MINER, job: jobM, nonce: BigInt(hitM.nonce), work: hitM.digest, write: writer(MINER) });
   let hM;
@@ -1680,7 +1707,7 @@ async function onTheStack() {
   check(
     "a race in one block: one mint lands, the other reverts and reads as the lost race with the spec's line",
     prepM.ok && prepR.ok && rM.blockNumber === rR.blockNumber && !!won.out.minted && lost.out.lost && !lost.out.minted && lost.r.status === "reverted" && M.outcomeLines(lost.out).join() === M.LINES.lost,
-    `block ${rM.blockNumber}: ${won.who === MINER ? "the miner" : "the rival"} won #${won.out.minted?.id}`,
+    `block ${rM.blockNumber}: ${won.who === MINER ? "the miner" : "the rival"} won #${won.out.minted?.id} at ${jobM.bits} bit(s); ${draws} draw(s) for two hashes no new prevWork takes`,
   );
   const retry = await M.prepareMint(pub, a, { wallet: lost.who, job: lost.job, nonce: BigInt(lost.hit.nonce), work: lost.hit.digest, write: writer(lost.who) });
   const resent = await M.prepareMint(pub, a, { wallet: won.who, job: won.job, nonce: BigInt(won.hit.nonce), work: won.hit.digest, write: writer(won.who) });
@@ -1721,8 +1748,9 @@ async function onTheStack() {
 }
 
 // The workspace on the stack: anvil's account #5 mints two cards the way the page does, sends one to #6 and
-// back, stakes the other; a conversion called by #7 credits the stakers; then unstake and claim([]) pay
-// exactly the figure the page shows. A run starts by unstaking and claiming whatever an earlier run left.
+// back, stakes the other; a conversion called by #7 credits the stakers; then Claim IMD with nothing selected
+// (claim of every staked card) pays exactly the figure the page shows, and an unstake after it books nothing
+// more. A run starts by unstaking and claiming whatever an earlier run left.
 async function cardsOnTheStack() {
   console.log(`\n== the workspace against the local stack (${RPC})`);
   const a = JSON.parse(readFileSync(LOCAL, "utf8"));
@@ -1854,25 +1882,28 @@ async function cardsOnTheStack() {
       figure > 0n && figure === direct && read2.earned === figure,
       `${C.imd4(figure)} IMD`,
     );
-    await mined(C.sendCards(writer(WALLET), a, "unstake", [A]));
-    const booked = await view("pendingIMD", [WALLET]);
-    const read3 = await C.walletCards(pub, a, WALLET);
+    // Claim IMD with nothing selected, as the page sends it: every staked card, settled, so the figure is paid.
+    const ids = C.actionIds(read2.cards, new Set()).claim;
     const imdBefore = await imdOf(WALLET);
-    const receipt = await mined(C.sendCards(writer(WALLET), a, "claim", []));
+    const receipt = await mined(C.sendCards(writer(WALLET), a, "claim", ids));
     const paid = C.claimedIn(receipt, a, WALLET);
     const imdAfter = await imdOf(WALLET);
-    const read4 = await C.walletCards(pub, a, WALLET);
+    const read3 = await C.walletCards(pub, a, WALLET);
     check(
-      "unstake([A]) books exactly the figure; claim([]) pays it (the Claimed log and the IMD balance agree), and the figure is back to zero",
-      booked === figure && read3.earned === figure && !got(read3, A)[0].staked && paid === figure && imdAfter - imdBefore === figure && read4.earned === 0n,
-      `paid ${C.imd4(paid ?? 0n)} IMD`,
+      "Claim IMD with nothing selected sends claim(every staked card) and pays exactly the figure (the Claimed log and the IMD balance agree); the card stays staked and the figure is back to zero",
+      ids.join() === String(A) && paid === figure && imdAfter - imdBefore === figure && got(read3, A)[0].staked && read3.earned === 0n && (await view("pendingIMD", [WALLET])) === 0n,
+      `claim([${ids.join(", ")}]) paid ${C.imd4(paid ?? 0n)} IMD`,
     );
+    await mined(C.sendCards(writer(WALLET), a, "unstake", [A]));
+    const read4 = await C.walletCards(pub, a, WALLET);
+    check("unstake([A]) after it books nothing more: the claim had settled the card", !got(read4, A)[0].staked && read4.earned === 0n && (await view("pendingIMD", [WALLET])) === 0n);
   } else {
     skip("the figure after a credit, and a claim that pays it", why);
+    const read2 = await C.walletCards(pub, a, WALLET);
+    const receipt = await mined(C.sendCards(writer(WALLET), a, "claim", C.actionIds(read2.cards, new Set()).claim));
     await mined(C.sendCards(writer(WALLET), a, "unstake", [A]));
-    const receipt = await mined(C.sendCards(writer(WALLET), a, "claim", []));
     const read3 = await C.walletCards(pub, a, WALLET);
-    check("unstake([A]) and claim([]) go through without a credit", !got(read3, A)[0].staked && C.claimedIn(receipt, a, WALLET) !== null);
+    check("Claim IMD with nothing selected (every staked card) and unstake([A]) go through without a credit", !got(read3, A)[0].staked && C.claimedIn(receipt, a, WALLET) !== null);
   }
 }
 

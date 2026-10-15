@@ -292,14 +292,16 @@ export async function cardFacts(client: PublicClient, a: LiveAddresses, id: numb
 export type CardAction = "stake" | "unstake" | "claim";
 
 /// What each button sends for a selection: Stake the selected cards not staked, Unstake the selected staked
-/// ones, Claim IMD the selected staked ones; with none of those selected, Claim IMD sends claim([]) and is
-/// paid what is booked to the wallet only.
+/// ones, Claim IMD the selected staked ones, or, with no staked card selected, every card the wallet staked:
+/// claim(ids) settles them, so it pays the whole figure, IMD earned, not claimed (claim([]) would pay only
+/// what is booked already, nothing in the common case of a card staked and left to earn).
 export function actionIds(cards: readonly Pick<WalletCard, "id" | "staked">[], selected: ReadonlySet<number>): Record<CardAction, number[]> {
   const chosen = cards.filter((c) => selected.has(c.id));
+  const staked = chosen.filter((c) => c.staked).map((c) => c.id);
   return {
     stake: chosen.filter((c) => !c.staked).map((c) => c.id),
-    unstake: chosen.filter((c) => c.staked).map((c) => c.id),
-    claim: chosen.filter((c) => c.staked).map((c) => c.id),
+    unstake: staked,
+    claim: staked.length ? staked : cards.filter((c) => c.staked).map((c) => c.id),
   };
 }
 

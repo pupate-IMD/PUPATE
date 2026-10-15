@@ -122,8 +122,8 @@ export function Workspace() {
   }, [read]);
 
   const ids = useMemo(() => actionIds(read?.cards ?? [], selected), [read, selected]);
+  // With no staked card selected, Claim IMD claims every staked card: the figure is what it pays.
   const toClaim = read ? claimable(read, ids.claim) : 0n;
-  const unsettled = read ? read.earned - read.pending : 0n;
 
   const toggle = (id: number) =>
     setSelected((s) => {
@@ -239,9 +239,6 @@ export function Workspace() {
         <p className={`ws-note ${note.tone ?? ""}`} role="status">
           {note.text}
         </p>
-      ) : null}
-      {!busy && !ids.claim.length && unsettled > 0n ? (
-        <p className="ws-note dim">Select your staked cards, then Claim IMD, to claim what they earned.</p>
       ) : null}
 
       {cards.error && !read ? (
