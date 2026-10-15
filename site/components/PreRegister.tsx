@@ -237,7 +237,6 @@ export function PreRegister({ onListed, onLater }: { onListed?: () => void; onLa
         </ol>
       )}
       <input className="prereg-trap" type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={website} onChange={(e) => setWebsite(e.target.value)} />
-      <p className="fine dim">No airdrop, no allowlist. Follow so the opening reaches you. Epoch 1 is the cheapest and easiest the mine will ever be.</p>
       {onLater && !done ? (
         <button type="button" className="mine-alt prereg-later" onClick={onLater}>
           Not now, let me try the miner first.
