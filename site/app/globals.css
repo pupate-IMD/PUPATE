@@ -731,10 +731,10 @@ footer .serif { color: var(--ink); font-size: 16px; }
   .drawer ul { grid-template-columns: repeat(3, 1fr); }
 }
 
-/* pre-register: a temporary card under the bench, gone when the mine opens (PreRegister.tsx). Four steps
-   down the card, each lit as it holds like the four across the top; a locked step is faint. The honeypot
-   field is off the page. */
-.prereg { margin-top: 28px; padding: 22px 26px 20px; display: grid; gap: 14px; }
+/* pre-register: a temporary card, gone when the mine opens (PreRegister.tsx), shown in a pop-up over the
+   bench by the gate below. Four steps down the card, each lit as it holds like the four across the top; a
+   locked step is faint. The honeypot field is off the page. */
+.prereg { padding: 22px 26px 20px; display: grid; gap: 14px; }
 .prereg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; }
 .prereg-head h2 { font-size: 24px; line-height: 1.1; }
 .prereg-lede { margin-top: 6px; font-size: 13px; color: var(--dim); max-width: 56ch; }
@@ -762,6 +762,23 @@ footer .serif { color: var(--ink); font-size: 16px; }
 @media (max-width: 520px) {
   .prereg { padding: 18px 16px 16px; }
   .prereg-steps .k { width: 100%; }
+}
+/* the gate (PreRegisterGate.tsx): on arrival the card sits in a pop-up over the bench, the page blurred and
+   dimmed behind it (a heavier veil where a browser cannot blur), locked and inert. The backdrop scrolls when
+   the card is taller than the screen; at phone width the card fills the width inside the page's gutters.
+   The link under the form puts the card aside; the pill at the bottom right brings it back, and stays clear
+   of the bench's buttons, which sit on the left. */
+html.prereg-locked { overflow: hidden; }
+.prereg-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 24px var(--gutter); overflow-y: auto; overscroll-behavior: contain; background: color-mix(in srgb, var(--paper) 86%, transparent); }
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .prereg-backdrop { background: color-mix(in srgb, var(--paper) 58%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+}
+.prereg-gate { width: min(100%, 640px); }
+.prereg-gate .prereg { box-shadow: 0 30px 60px -30px color-mix(in srgb, var(--ink) 55%, transparent); }
+.prereg-later { justify-self: start; }
+.prereg-pill { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 4; background: var(--paper); box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--ink) 60%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .prereg-gate { animation: inc-reveal 0.25s ease-out; }
 }
 
 /* why the panel has no quote: one quiet line under the estimate */

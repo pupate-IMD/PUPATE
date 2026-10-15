@@ -14,7 +14,8 @@ import { EPOCH_ONE_BITS, type Power, fmtHashes, fmtRate } from "@/lib/miner/job"
 import { type Found, type GpuState, type LiveLink, type MintCard, useMiner } from "@/lib/miner/useMiner";
 import { GpuSelfTestDev } from "./GpuSelfTestDev";
 import { Incubator } from "./Incubator";
-import { PREREGISTER_URL, PreRegister } from "./PreRegister";
+import { PREREGISTER_URL } from "./PreRegister";
+import { PreRegisterGate } from "./PreRegisterGate";
 import { useAddresses } from "./SimContext";
 
 /// The epoch-one price of the spec, shown before the contracts exist; live, the figures are read from the chain.
@@ -189,10 +190,10 @@ export function Mine() {
   const approved = !!contracts && !!wallet && st?.allowance != null && st.allowance >= st.price;
   /// The ready state: the contracts are live and the vault holds no seat a mint can pick yet.
   const nothingMineable = !!contracts && nums?.mineable === 0;
-  /// The pre-register card, while the list has an address and the mine has not opened. The preview is known
-  /// at build time, so a live site never paints the card before its numbers are read; live, "not opened" is a
-  /// reading that says no card was ever minted and nothing is mineable, and from the first mint on the card
-  /// never returns, whatever the vault holds later.
+  /// The pre-register gate (the card in a pop-up over the page), while the list has an address and the mine
+  /// has not opened. The preview is known at build time, so a live site never paints the card before its
+  /// numbers are read; live, "not opened" is a reading that says no card was ever minted and nothing is
+  /// mineable, and from the first mint on the card never returns, whatever the vault holds later.
   const preview = TARGET === "local" ? !contracts : !STATIC?.metamorph;
   const notOpened = !!contracts && nums !== null && nums.minted === 0 && nums.mineable === 0;
   const preRegister = !!PREREGISTER_URL && (preview || notOpened);
@@ -482,7 +483,7 @@ export function Mine() {
         </section>
       </div>
 
-      {preRegister ? <PreRegister /> : null}
+      {preRegister ? <PreRegisterGate /> : null}
 
       <section className="after" aria-label="After the mint">
         <h2 className="serif">Cards never stop working.</h2>
