@@ -45,6 +45,7 @@ import {
   toBytes,
   toEventSelector,
   toFunctionSelector,
+  toHex,
 } from "viem";
 import { foundry } from "viem/chains";
 import { formatAbiItem } from "viem/utils";
@@ -867,6 +868,562 @@ const useStorage = (value) => Object.defineProperty(globalThis, "localStorage", 
   );
   const paid = C.claimedIn({ logs: [logOf(metamorphAbi, COCOON, "Claimed", { staker: ME, imd: 1n }), logOf(metamorphAbi, MD, "Claimed", { staker: ME, imd: 42n })] }, { metamorph: MD }, ME);
   check("claimedIn reads the token's Claimed for this wallet only", paid === 42n && C.claimedIn({ logs: [] }, { metamorph: MD }, ME) === null);
+}
+
+// ------------------------------------------------------------------ the miner on the page (lib/miner/useMiner.ts)
+
+// useMiner runs here without React or a browser. A few lines stand in for React's hooks (state by call order,
+// effects after each render, every cleanup when the page is left), Workers are recorded, the GPU is a stand-in
+// where a check needs one, and the timers are a clock the checks move by hand. The chain is a stand-in whose
+// calls can be held or made to fail. The hook's callbacks read refs, so one render holds them; a render with
+// new props is how the wallet changes, and a render reads the state.
+const FAKE_REACT = `data:text/javascript,${encodeURIComponent(
+  ["useState", "useRef", "useCallback", "useMemo", "useEffect"].map((n) => `export const ${n} = (...a) => globalThis.__fakeReact.${n}(...a);`).join("\n"),
+)}`;
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "react" && context.parentURL?.endsWith("/lib/miner/useMiner.ts")) return { url: FAKE_REACT, shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+});
+const { useMiner } = await import("../lib/miner/useMiner.ts");
+const { GpuMiner } = await import("../lib/miner/gpu/gpuMiner.ts");
+
+console.log("\n== the miner on the page (lib/miner/useMiner.ts, without React)");
+
+function renderHook(useHook, props) {
+  const slots = [];
+  let at = 0;
+  let after = [];
+  let alive = true;
+  const same = (a, b) => !!a && !!b && a.length === b.length && a.every((x, i) => Object.is(x, b[i]));
+  const memo = (make, deps) => {
+    const k = at++;
+    if (!slots[k] || !same(slots[k].deps, deps)) slots[k] = { value: make(), deps };
+    return slots[k].value;
+  };
+  const react = {
+    useState(init) {
+      const k = at++;
+      if (!slots[k]) {
+        const s = { value: typeof init === "function" ? init() : init };
+        s.set = (x) => {
+          if (alive) s.value = typeof x === "function" ? x(s.value) : x;
+        };
+        slots[k] = s;
+      }
+      return [slots[k].value, slots[k].set];
+    },
+    useRef(init) {
+      const k = at++;
+      return (slots[k] ??= { current: init });
+    },
+    useMemo: memo,
+    useCallback: (fn, deps) => memo(() => fn, deps),
+    useEffect(fn, deps) {
+      const k = at++;
+      const was = slots[k];
+      if (was && same(was.deps, deps)) return;
+      const slot = { effect: true, deps, cleanup: was?.cleanup };
+      slots[k] = slot;
+      after.push(() => {
+        slot.cleanup?.();
+        slot.cleanup = fn() ?? undefined;
+      });
+    },
+  };
+  const h = {
+    result: null,
+    render(next = props) {
+      props = next;
+      globalThis.__fakeReact = react;
+      at = 0;
+      after = [];
+      h.result = useHook(props);
+      for (const run of after) run();
+      return h.result;
+    },
+    get state() {
+      return h.render().state;
+    },
+    get notes() {
+      return h.render().state.log.map((l) => l.text);
+    },
+    unmount() {
+      for (const s of slots) if (s?.effect) s.cleanup?.();
+      alive = false;
+    },
+  };
+  h.render();
+  return h;
+}
+
+/// Timers the checks move by hand: advance(ms) runs every timer due by then, in order, letting the promises
+/// settle between them.
+function handClock() {
+  let now = 0;
+  let seq = 0;
+  const timers = new Map();
+  const add = (fn, ms, every) => {
+    const id = ++seq;
+    timers.set(id, { at: now + Math.max(0, Number(ms) || 0), fn, every });
+    return id;
+  };
+  const drop = (id) => void timers.delete(id);
+  return {
+    timers: { setTimeout: (fn, ms) => add(fn, ms, 0), setInterval: (fn, ms) => add(fn, ms, Math.max(1, Number(ms) || 1)), clearTimeout: drop, clearInterval: drop },
+    intervals: () => [...timers.values()].filter((t) => t.every).length,
+    async advance(ms) {
+      const until = now + ms;
+      for (;;) {
+        await settled();
+        let next = null;
+        for (const [id, t] of timers) if (t.at <= until && (!next || t.at < next.t.at)) next = { id, t };
+        if (!next) break;
+        now = next.t.at;
+        if (next.t.every) next.t.at += next.t.every;
+        else timers.delete(next.id);
+        next.t.fn();
+      }
+      now = until;
+      await settled();
+    },
+  };
+}
+const settled = async () => {
+  for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r));
+};
+
+/// A Worker that records what it is told; the checks post its finds.
+class FakeWorker {
+  static made = [];
+  constructor() {
+    this.inbox = [];
+    this.dead = false;
+    this.onmessage = null;
+    FakeWorker.made.push(this);
+  }
+  postMessage(m) {
+    this.inbox.push(m);
+  }
+  terminate() {
+    this.dead = true;
+  }
+}
+const gpuStarts = [];
+const starts = () => FakeWorker.made.flatMap((w) => w.inbox.filter((m) => m.type === "start").map((m) => m.job));
+/// The engines' activity from a mark on: workers made, jobs handed to the CPU or to the GPU.
+const mark = () => ({ made: FakeWorker.made.length, cpu: starts().length, gpu: gpuStarts.length });
+const since = (m) => ({ made: FakeWorker.made.length - m.made, cpu: starts().length - m.cpu, gpu: gpuStarts.length - m.gpu });
+const quiet = (x) => x.made === 0 && x.cpu === 0 && x.gpu === 0;
+const shown = (x) => `${x.made} worker(s) made, ${x.cpu} CPU job(s), ${x.gpu} GPU job(s)`;
+
+const MD_SI = getAddress("0x00000000000000000000000000000000000000d5");
+const A_SI = { chainId: 31337, metamorph: MD_SI, token: getAddress("0x00000000000000000000000000000000000000d6"), cocoon: COCOON };
+const POLL = 3000;
+const JOB_READ = "multicall:prevWork,effectiveTarget,bits,mintPrice,getBlockNumber,getChainId";
+const PREP_READ = "multicall:mintPrice,balanceOf,allowance";
+const txOf = (n) => `0x${n.toString(16).padStart(64, "0")}`;
+
+/// The chain as the hook reads it, one bit, a wallet with PUPATE and the allowance; a call can be held until
+/// released, or fail once. The wallet's sends are recorded and get the hashes 0x…01, 0x…02, …
+function chainStandIn() {
+  const s = {
+    prevWork: PREV,
+    target: MAX >> 1n,
+    block: 1_000n,
+    receipts: new Map(),
+    minted: [],
+    sent: [],
+    sendError: null,
+    receiptError: null,
+    held: new Map(),
+    fails: new Map(),
+  };
+  const answer = (fn) =>
+    ({
+      prevWork: s.prevWork,
+      effectiveTarget: s.target,
+      bits: 1,
+      mintPrice: PRICE1,
+      getBlockNumber: s.block,
+      getChainId: 31337n,
+      balanceOf: 10n ** 24n,
+      allowance: maxUint256,
+      dutiesDue: [false, false, false],
+      DOMAIN: keccak256(toBytes("Metamorph MD work v1")),
+      anchorHash: `0x${"5a".repeat(32)}`,
+      mineableSeats: [1n],
+      tokenURI: "data:,",
+    })[fn];
+  const gate = async (name) => {
+    const h = s.held.get(name);
+    if (h) await h.promise;
+    const e = s.fails.get(name);
+    if (e) {
+      s.fails.delete(name);
+      throw e;
+    }
+  };
+  const client = {
+    multicall: async ({ contracts }) => {
+      await gate(`multicall:${contracts.map((c) => c.functionName).join(",")}`);
+      return contracts.map((c) => answer(c.functionName));
+    },
+    readContract: async ({ functionName }) => {
+      await gate(functionName);
+      return answer(functionName);
+    },
+    estimateContractGas: async () => {
+      await gate("estimate");
+      return 200_000n;
+    },
+    waitForTransactionReceipt: async ({ hash }) => {
+      await gate("wait");
+      if (s.receiptError) throw s.receiptError;
+      const r = s.receipts.get(hash);
+      if (!r) throw new Error("no receipt in the stand-in");
+      return r;
+    },
+    getTransactionReceipt: async ({ hash }) => {
+      await gate("receipt");
+      const r = s.receipts.get(hash);
+      if (!r) throw new Error(`Transaction receipt with hash "${hash}" could not be found.`);
+      return r;
+    },
+    getContractEvents: async () => {
+      await gate("events");
+      return s.minted;
+    },
+  };
+  const write = async (call) => {
+    s.sent.push(call);
+    await gate("send");
+    if (s.sendError) throw s.sendError;
+    return txOf(s.sent.length);
+  };
+  const hold = (name) => {
+    let release;
+    const promise = new Promise((r) => (release = r));
+    s.held.set(name, { promise });
+    return () => {
+      s.held.delete(name);
+      release();
+    };
+  };
+  return { s, client, write, hold, link: { client, addresses: A_SI, write, wallet: ME } };
+}
+
+/// A nonce that solves a job at one bit, and its proof.
+function solve(job) {
+  for (let n = 1n; ; n++) {
+    const work = J.workOf(job, n);
+    if (J.meets(job, work)) return { nonce: toHex(n, { size: 32 }), digest: work };
+  }
+}
+/// A worker reports a find for the job it was given last.
+function find() {
+  const job = starts().at(-1);
+  const hit = solve(job);
+  FakeWorker.made.findLast((w) => !w.dead).onmessage({ data: { type: "found", worker: 0, jobId: job.id, ...hit } });
+  return { job, ...hit };
+}
+const mintedLog = (f, id) => logOf(metamorphAbi, MD_SI, "Minted", { id, seat: 1376n, round: 1, edition: Number(id), miner: ME, work: f.digest, gilt: false, price: PRICE1, epoch: 1 });
+const receiptOf = (hash, block, logs, status = "success") => ({ status, logs, blockNumber: block, transactionHash: hash });
+
+const realTimers = { setTimeout, clearTimeout, setInterval, clearInterval };
+const realGpu = { probe: GpuMiner.probe, selfTest: GpuMiner.selfTest, start: GpuMiner.prototype.start, stop: GpuMiner.prototype.stop, setPower: GpuMiner.prototype.setPower };
+const clock = handClock();
+globalThis.window = clock.timers;
+Object.assign(globalThis, clock.timers);
+globalThis.Worker = FakeWorker;
+Object.defineProperty(navigator, "hardwareConcurrency", { value: 3, configurable: true });
+GpuMiner.prototype.start = (job) => void gpuStarts.push(job);
+GpuMiner.prototype.stop = () => {};
+GpuMiner.prototype.setPower = () => {};
+/// A live run on the stand-in chain, its first job handed to the engines.
+async function liveRun(c, opts = {}) {
+  FakeWorker.made = [];
+  const h = renderHook(useMiner, c.link);
+  if (opts.auto === false) {
+    h.result.setAuto(false);
+    h.render();
+  }
+  h.result.start({ live: true, wallet: ME });
+  await clock.advance(0);
+  return h;
+}
+
+try {
+  // 1. The live run ends with the page. Left while the start's first reads, a poll's read, a mint's estimate
+  // or its receipt were on their way, or while the GPU's self-test ran in a practice run: nothing is mined,
+  // polled or sent after it.
+  {
+    FakeWorker.made = [];
+    const c = chainStandIn();
+    const release = c.hold("mineableSeats");
+    const h = renderHook(useMiner, c.link);
+    h.result.start({ live: true, wallet: ME });
+    await clock.advance(0);
+    const m0 = mark();
+    h.unmount();
+    release();
+    await clock.advance(4 * POLL);
+    const x = since(m0);
+    check("left during the start's first reads: no engine, no poll, no wallet after it", quiet(x) && clock.intervals() === 0 && c.s.sent.length === 0, shown(x));
+  }
+  {
+    const c = chainStandIn();
+    const h = await liveRun(c);
+    const ran = starts().length > 0;
+    const release = c.hold(JOB_READ);
+    await clock.advance(POLL);
+    const m0 = mark();
+    h.unmount();
+    c.s.prevWork = WORK;
+    release();
+    await clock.advance(4 * POLL);
+    const x = since(m0);
+    check("left during a poll's read (and someone minted meanwhile): the read is dropped, nothing is dispatched", ran && quiet(x) && clock.intervals() === 0, shown(x));
+  }
+  {
+    const c = chainStandIn();
+    const h = await liveRun(c);
+    const release = c.hold("estimate");
+    find();
+    await clock.advance(0);
+    const m0 = mark();
+    h.unmount();
+    release();
+    await clock.advance(10 * POLL);
+    const x = since(m0);
+    check("left while a mint was prepared: the wallet never opens, and nothing mines after it", c.s.sent.length === 0 && quiet(x) && clock.intervals() === 0, `${c.s.sent.length} send(s); ${shown(x)}`);
+  }
+  {
+    const c = chainStandIn();
+    const h = await liveRun(c);
+    const release = c.hold("wait");
+    const f = find();
+    await clock.advance(0);
+    c.s.receipts.set(txOf(1), receiptOf(txOf(1), c.s.block, [mintedLog(f, 3n)]));
+    c.s.prevWork = f.digest;
+    const m0 = mark();
+    h.unmount();
+    release();
+    await clock.advance(10 * POLL);
+    const x = since(m0);
+    check("left while the mint's receipt was awaited: the receipt comes, and nothing is read or mined after it", c.s.sent.length === 1 && quiet(x) && clock.intervals() === 0, shown(x));
+  }
+  {
+    FakeWorker.made = [];
+    let finish;
+    GpuMiner.probe = async () => ({ ok: true, name: "a stand-in GPU" });
+    GpuMiner.selfTest = () => new Promise((r) => (finish = r));
+    const h = renderHook(useMiner, null);
+    await clock.advance(0);
+    h.result.start({ miner: ME });
+    void h.result.setEngine("gpu");
+    await clock.advance(0);
+    const testing = !!finish && h.state.gpu.selfTest?.running === true;
+    const m0 = mark();
+    h.unmount();
+    finish({ ok: true, name: "a stand-in GPU", rate: 5e7, batch: 1 << 20, detail: "", dispatchMs: 10, dispatches: 50, compileMs: 5 });
+    await clock.advance(4 * POLL);
+    const x = since(m0);
+    check("a practice run left while the GPU's self-test ran: the GPU is not switched to or handed a job after it", testing && quiet(x) && clock.intervals() === 0, shown(x));
+    Object.assign(GpuMiner, { probe: realGpu.probe, selfTest: realGpu.selfTest });
+  }
+
+  // 2. An unknown outcome is never sent again, and nothing is mined on its prevWork until the chain shows it.
+  {
+    const c = chainStandIn();
+    c.s.fails.set(PREP_READ, new Error("fetch failed"));
+    const h = await liveRun(c);
+    const f = find();
+    c.s.receipts.set(txOf(1), receiptOf(txOf(1), c.s.block, [mintedLog(f, 4n)]));
+    await clock.advance(2000);
+    const n = h.notes;
+    check(
+      "a network error before the wallet is asked is tried once more: one send, one card",
+      c.s.sent.length === 1 && n.some((l) => l.startsWith("the network stumbled: fetch failed · trying once more")) && n[0] === "Metamorph.md #4 is yours · seat identity.md #1376 · mining the next one",
+      n.slice(0, 4).join(" | "),
+    );
+    h.unmount();
+  }
+  {
+    const c = chainStandIn();
+    c.s.sendError = new Error("the wallet's connection dropped");
+    const h = await liveRun(c);
+    const f = find();
+    await clock.advance(0);
+    const m0 = mark();
+    await clock.advance(5 * POLL);
+    const held = since(m0);
+    const st = h.state;
+    const watching = st.minting && st.sent && c.s.sent.length === 1 && quiet(held) && h.notes.includes("the wallet did not say whether the mint was sent: the wallet's connection dropped · watching for it");
+    c.s.block = f.job.anchor + 50n;
+    await clock.advance(POLL);
+    const atFifty = since(m0).cpu === 0;
+    c.s.block = f.job.anchor + 51n;
+    await clock.advance(POLL);
+    const after = since(m0);
+    check(
+      "a wallet that fails once asked: never asked again, nothing mined on that prevWork while the mint could land; past the window, mining goes on",
+      watching && atFifty && c.s.sent.length === 1 && h.notes[0] === M.LINES.unseen && after.cpu > 0 && starts().at(-1).anchor === c.s.block - 1n,
+      `${c.s.sent.length} send(s); held: ${shown(held)}; then ${after.cpu} CPU job(s)`,
+    );
+    h.unmount();
+  }
+  {
+    const c = chainStandIn();
+    c.s.sendError = new Error("the wallet's connection dropped");
+    const h = await liveRun(c);
+    const f = find();
+    await clock.advance(POLL);
+    const m0 = mark();
+    c.s.prevWork = f.digest;
+    c.s.minted = [{ args: { id: 5n, seat: 1376n, round: 1, edition: 5, miner: ME, work: f.digest, gilt: true, price: PRICE1, epoch: 1 } }];
+    await clock.advance(POLL);
+    const n = h.notes;
+    check(
+      "the same, and the mint did land: prevWork shows its proof, its card is found again and told, mining goes on",
+      c.s.sent.length === 1 && n.includes("Metamorph.md #5 is yours · seat identity.md #1376 · gilt · mining the next one") && h.state.lastMint?.id === 5 && since(m0).cpu > 0,
+      n.slice(0, 3).join(" | "),
+    );
+    h.unmount();
+  }
+  {
+    const c = chainStandIn();
+    c.s.receiptError = new Error("Timed out while waiting for the transaction to be confirmed.");
+    const h = await liveRun(c);
+    const f = find();
+    await clock.advance(0);
+    const m0 = mark();
+    await clock.advance(4 * POLL);
+    const held = since(m0);
+    const watching = h.state.minting && quiet(held) && h.notes.some((l) => l.startsWith("the mint was sent but its block is not seen yet: ") && l.endsWith(" · watching for it"));
+    c.s.receipts.set(txOf(1), receiptOf(txOf(1), c.s.block, [mintedLog(f, 6n), dutyRun(MD_SI, 0, 0n)]));
+    c.s.prevWork = f.digest;
+    await clock.advance(POLL);
+    const n = h.notes;
+    check(
+      "a receipt that does not come: the hash is watched, nothing is sent again or mined meanwhile; the late receipt gives the card and its duty line",
+      watching && c.s.sent.length === 1 && n.includes("Metamorph.md #6 is yours · seat identity.md #1376 · mining the next one") && n.includes("your mint also flushed the vault's tax") && since(m0).cpu > 0,
+      `held: ${shown(held)}; ${n.slice(0, 3).join(" | ")}`,
+    );
+    h.unmount();
+  }
+
+  // 3. Stop with a hash waiting for the Mint button: the hash goes with the run, said so, and the page offers
+  // Start and the practice run again (nothing is pending, nothing runs).
+  {
+    const c = chainStandIn();
+    const h = await liveRun(c, { auto: false });
+    find();
+    await clock.advance(0);
+    const waiting = !!h.state.pending?.live;
+    h.result.stop();
+    const st = h.state;
+    check(
+      "Stop with a live hash waiting: the hash is dropped with the run, and nothing is left pending",
+      waiting && !st.pending && !st.running && !st.minting && h.notes[0] === "stopped · the waiting hash was dropped" && c.s.sent.length === 0,
+      h.notes[0],
+    );
+    h.unmount();
+  }
+  {
+    const c = chainStandIn();
+    const h = await liveRun(c);
+    const release = c.hold("wait");
+    const f = find();
+    await clock.advance(0);
+    h.result.stop();
+    const m0 = mark();
+    c.s.receipts.set(txOf(1), receiptOf(txOf(1), f.job.anchor + 2n, [], "reverted"));
+    c.s.prevWork = WORK;
+    release();
+    await clock.advance(4 * POLL);
+    const n = h.notes;
+    check(
+      "Stop while a mint is on its way: the mint finishes; its line does not promise mining again, and nothing mines after it",
+      n[0] === "someone minted first, your hash expired" && n.includes("stopped") && quiet(since(m0)) && !h.state.minting,
+      n.slice(0, 3).join(" | "),
+    );
+    h.unmount();
+  }
+
+  // 4. A reverted receipt is told apart by the chain.
+  {
+    const job = { anchor: 100n, prevWork: PREV };
+    check(
+      "revertReason: mined past the window is late (BadAnchor), else prevWork moved is the lost race, else another refusal; unsureMint waits out the window's last block",
+      M.revertReason(job, 151n, PREV) === "late" &&
+        M.revertReason(job, 150n, PREV) === "refused" &&
+        M.revertReason(job, 150n, WORK) === "lost" &&
+        M.revertReason(job, 150n, null) === "refused" &&
+        M.unsureMint(job, WORK, { prevWork: WORK, block: 120n }) === "landed" &&
+        M.unsureMint(job, WORK, { prevWork: `0x${"33".repeat(32)}`, block: 120n }) === "moved" &&
+        M.unsureMint(job, WORK, { prevWork: PREV, block: 150n }) === "open" &&
+        M.unsureMint(job, WORK, { prevWork: PREV, block: 151n }) === "late",
+    );
+    const said = [];
+    for (const [block, moved] of [
+      [2n, true],
+      [51n, false],
+      [2n, false],
+    ]) {
+      const c = chainStandIn();
+      const h = await liveRun(c);
+      const anchor = starts().at(-1).anchor;
+      c.s.receipts.set(txOf(1), receiptOf(txOf(1), anchor + block, [], "reverted"));
+      if (moved) c.s.prevWork = WORK;
+      find();
+      await clock.advance(POLL);
+      said.push(h.notes.find((l) => l.endsWith("· mining again")));
+      h.unmount();
+    }
+    check(
+      "a reverted mint: prevWork moved reads as someone minted first; mined past the window as out of time; else as reverted",
+      said[0] === M.LINES.lost && said[1] === "the mint ran out of time (the hash was older than 50 blocks) · mining again" && said[2] === "the mint reverted · mining again",
+      said.join(" | "),
+    );
+  }
+
+  // 5 and 6. Stop and halt put the readings back on the chain's; a disconnect or another wallet stops the run
+  // at once, before any poll.
+  {
+    const c = chainStandIn();
+    const h = await liveRun(c);
+    const during = h.state;
+    h.result.stop();
+    const after = h.state;
+    check("Stop: the readings leave the job (no live price, not live), so the page shows the chain's own", during.live && during.price === PRICE1 && !after.live && after.price === null && !after.running);
+    h.unmount();
+  }
+  for (const [wallet, line] of [
+    [null, M.LINES.walletGone],
+    [THEM, M.LINES.walletChanged],
+  ]) {
+    const c = chainStandIn();
+    const h = await liveRun(c);
+    const m0 = mark();
+    h.render({ ...c.link, wallet });
+    const st = h.state;
+    await clock.advance(2 * POLL);
+    check(
+      `${wallet ? "another wallet" : "a disconnect"} stops the live run at once, before any poll: "${line}"`,
+      !st.running && !st.live && st.price === null && h.notes[0] === line && clock.intervals() === 0 && quiet(since(m0)),
+      h.notes[0],
+    );
+    h.unmount();
+  }
+} finally {
+  Object.assign(globalThis, realTimers);
+  delete globalThis.window;
+  delete globalThis.Worker;
+  delete navigator.hardwareConcurrency;
+  Object.assign(GpuMiner, { probe: realGpu.probe, selfTest: realGpu.selfTest });
+  Object.assign(GpuMiner.prototype, { start: realGpu.start, stop: realGpu.stop, setPower: realGpu.setPower });
 }
 
 // ------------------------------------------------------------------ against the local stack

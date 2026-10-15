@@ -1,7 +1,9 @@
 // The mint, from a found hash to the card: the price against the balance, the PUPATE approval (once, for
 // every mint, and re-checked before each one since an epoch step raises the price), the vault's duties read
 // from dutiesDue() and paid for in the gas limit, mint(anchor, nonce) sent through the wallet, and the
-// receipt read back for the card (Minted) and what the duties paid (DutyRun). The lines the field notes
+// receipt read back for the card (Minted) and what the duties paid (DutyRun). A mint is sent once: when the
+// wallet's answer or the receipt goes missing, the chain is watched until it shows what became of it
+// (settleMint), and a reverted receipt is told apart by the chain (revertReason). The lines the field notes
 // print are here too, so the page and the checks share them.
 //
 // The gas rule is the contract's (MetamorphMD.sol, CONVERT_BACKOFF and _duties): the estimate, plus
@@ -22,10 +24,11 @@ import {
   type Hex,
   type Log,
   type PublicClient,
+  type TransactionReceipt,
 } from "viem";
 import { cocoonAbi, erc20Abi } from "../abi";
 import { metamorphAbi } from "./abi";
-import { MULTICALL3, type LiveAddresses, type LiveJob } from "./job";
+import { ANCHOR_WINDOW, MULTICALL3, type LiveAddresses, type LiveJob, chainNow } from "./job";
 
 /// The padding for each due flush or burn: the contract's DUTY_GAS.
 export const DUTY_PAD = 400_000n;
@@ -264,6 +267,81 @@ export async function findMinted(client: PublicClient, a: LiveAddresses, miner: 
   return hit ? ({ ...hit.args } as MintedCard) : null;
 }
 
+// ------------------------------------------------------------------ a mint whose answer went missing
+
+/// Where a mint stands whose answer went missing (the wallet's, or the block's), as the chain shows it now:
+/// its proof is prevWork ("landed"); prevWork moved to another proof ("moved": someone minted first, or this
+/// mint landed and another followed, which findMinted tells apart); prevWork unmoved and the anchor out of the
+/// window, so it can no longer land ("late"); otherwise it may still land ("open"). Nodes run a call at the
+/// latest block or at the next one, so "late" waits until even the later reading puts the anchor out of reach.
+export function unsureMint(job: Pick<LiveJob, "anchor" | "prevWork">, work: Hex, now: { prevWork: Hex; block: bigint }): "landed" | "moved" | "late" | "open" {
+  const p = now.prevWork.toLowerCase();
+  if (p === work.toLowerCase()) return "landed";
+  if (p !== job.prevWork.toLowerCase()) return "moved";
+  return now.block - job.anchor > ANCHOR_WINDOW ? "late" : "open";
+}
+
+/// Why a mint reverted, read after its receipt: its block was past the anchor's window ("late": the hash was
+/// older than 50 blocks when the mint was mined, the contract's BadAnchor), prevWork moved (someone minted
+/// first: "lost"), or neither ("refused", some other refusal). `prevWorkNow` is null when it could not be read.
+export function revertReason(job: Pick<LiveJob, "anchor" | "prevWork">, block: bigint, prevWorkNow: Hex | null): "late" | "lost" | "refused" {
+  if (block - job.anchor > ANCHOR_WINDOW) return "late";
+  if (prevWorkNow && prevWorkNow.toLowerCase() !== job.prevWork.toLowerCase()) return "lost";
+  return "refused";
+}
+
+/// What became of a mint whose answer went missing.
+export type Settled =
+  | { kind: "receipt"; receipt: TransactionReceipt }
+  | { kind: "landed"; card: MintedCard | null }
+  | { kind: "lost" }
+  | { kind: "late" };
+
+/// Waits out a mint whose answer went missing, and never sends it again: the wallet failed once asked (`hash`
+/// null, it may have sent the mint), or the receipt did not come. Each round reads prevWork and the block, then
+/// the receipt by hash when there is one. The receipt settles it; without one, prevWork at this mint's proof
+/// means it landed (its card from findMinted), prevWork at another proof means someone minted first (unless
+/// findMinted finds this mint before it), and prevWork unmoved past the anchor's window means it can no longer
+/// land. Until one of those shows, the caller mines nothing on this prevWork. Null once `gone()`.
+export async function settleMint(
+  client: PublicClient,
+  a: LiveAddresses,
+  p: {
+    wallet: Address;
+    job: Pick<LiveJob, "anchor" | "prevWork" | "block">;
+    work: Hex;
+    hash: Hex | null;
+    /// The wait between two rounds.
+    pause: () => Promise<void>;
+    /// True once nobody waits for the answer (the page was left).
+    gone: () => boolean;
+    /// A round the chain did not answer, and how many in a row.
+    onMiss?: (e: unknown, misses: number) => void;
+  },
+): Promise<Settled | null> {
+  let misses = 0;
+  while (!p.gone()) {
+    try {
+      const now = await chainNow(client, a);
+      if (p.hash) {
+        const receipt = await client.getTransactionReceipt({ hash: p.hash }).catch(() => null);
+        if (receipt) return { kind: "receipt", receipt };
+      }
+      const where = unsureMint(p.job, p.work, now);
+      if (where === "late") return { kind: "late" };
+      if (where !== "open") {
+        const card = await findMinted(client, a, p.wallet, p.work, p.job.block - 1n);
+        return card ? { kind: "landed", card } : where === "landed" ? { kind: "landed", card: null } : { kind: "lost" };
+      }
+      misses = 0;
+    } catch (e) {
+      p.onMiss?.(e, ++misses);
+    }
+    await p.pause();
+  }
+  return null;
+}
+
 /// The JSON a token URI carries: the art returns data:application/json;base64 (a plain data:application/json
 /// is read too). Null when the URI is not that shape or its text is not JSON. The workspace reads the
 /// attributes from it (lib/metamorph/cards.ts).
@@ -311,6 +389,18 @@ export const LINES = {
   nothing: "nothing to mine until the vault holds a seat",
   soldOut: "3,333 of 3,333 minted",
   declined: "you declined in your wallet · auto-mint is off",
+  /// A reverted mint whose block was past the anchor's window.
+  late: "the mint ran out of time (the hash was older than 50 blocks) · mining again",
+  /// A reverted mint within the window, prevWork unmoved.
+  reverted: "the mint reverted · mining again",
+  /// A mint whose answer went missing and that did not land while it could.
+  unseen: "your mint did not land within 50 blocks · mining again",
+  /// Added to the line that ends a run while a hash waits for the Mint button.
+  dropped: "the waiting hash was dropped",
+  /// A mint refused after its run was stopped: the hash does not wait.
+  droppedStopped: "the hash was dropped · mining is stopped",
+  walletGone: "wallet disconnected · stopped",
+  walletChanged: "the wallet changed · stopped",
 } as const;
 
 /// A token amount for the notes: two significant digits below one (0.046, 0.00023), two decimals above.

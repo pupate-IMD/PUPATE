@@ -168,7 +168,9 @@ export function Mine() {
   const state = m.pending
     ? "A hash is waiting. Mint it, or let auto-mint send the next one by itself."
     : m.minting
-      ? "A hash was found. Your wallet asks you to sign the mint."
+      ? m.sent
+        ? "Waiting for the chain to show your mint."
+        : "A hash was found. Your wallet asks you to sign the mint."
       : m.running
         ? expectedSeconds
           ? `Mining. A hash takes about ${expectedSeconds < 90 ? `${Math.max(1, Math.round(expectedSeconds))} seconds` : `${Math.round(expectedSeconds / 60)} minutes`} on this machine at ${m.bits} bits.`

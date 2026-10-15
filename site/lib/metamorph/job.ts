@@ -124,6 +124,19 @@ export async function liveJob(client: PublicClient, a: LiveAddresses, miner: Add
   };
 }
 
+/// prevWork and the block number from one batch: what a mint whose answer went missing is judged by.
+export async function chainNow(client: PublicClient, a: LiveAddresses): Promise<{ prevWork: Hex; block: bigint }> {
+  const [prevWork, block] = await client.multicall({
+    allowFailure: false,
+    multicallAddress: MULTICALL3,
+    contracts: [
+      { address: a.metamorph, abi: metamorphAbi, functionName: "prevWork" },
+      { address: MULTICALL3, abi: multicall3Views, functionName: "getBlockNumber" },
+    ],
+  });
+  return { prevWork, block };
+}
+
 /// A job must be rebuilt: someone minted (prevWork moved), or the target moved (it eases with silence and
 /// steps at every mint), or the job is for another contract, chain or miner.
 export function jobChanged(prev: LiveJob, next: LiveJob): boolean {
