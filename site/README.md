@@ -16,7 +16,7 @@ Copy `.env.example` to `.env.local`:
 | `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect project id from cloud.reown.com (free). Injected wallets such as MetaMask and Rabby work without it; WalletConnect wallets need it. Without it the console shows "Origin … not found on Allowlist", which is harmless until then. Add `pupate.fun` and `localhost:3000` to the project's allowlist. |
 | `NEXT_PUBLIC_CHAIN` | `mainnet` (default) or `sepolia`; puts that chain first in the wallet's chain list. |
 | `NEXT_PUBLIC_RPC_MAINNET`, `NEXT_PUBLIC_RPC_SEPOLIA` | RPC endpoints for the live reads and the wallet transports (a provider such as Alchemy; without them the public endpoints, which are rate-limited). |
-| `NEXT_PUBLIC_PREREGISTER_URL` | The pre-register list's Worker (`waitlist/README.md`). Set, `/mine` shows the temporary pre-register card while the mine is not open; empty, there is no card. |
+| `NEXT_PUBLIC_PREREGISTER_URL` | The pre-register list's Worker (`waitlist/README.md`). Set, `/mine` opens the temporary pre-register card in a pop-up over the page while the mine is not open (a link under the form puts it aside for the session, a pill brings it back); empty, there is no card. |
 
 These are baked into the export at build time. On the VPS they live in `/etc/pupate/site.env`, which
 `deploy/update.sh` loads before `npm run build`.

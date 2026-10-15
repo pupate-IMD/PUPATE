@@ -36,11 +36,12 @@ function messageFor(handle: string, address: Address): string {
   return `Pre-register @${handle} for Metamorph MD\naddress ${address}\nissued ${new Date().toISOString()}`;
 }
 
-/// A temporary card under the practice run, while the mine has not opened: an X username, a follow on the
-/// honour system, a wallet (or an address pasted in), and one press that signs a free message and puts the
-/// entry on the list. Not a gate: the mine has no allowlist, and the card goes when mining opens. The page
-/// reads nothing from the list; the owner has the count.
-export function PreRegister() {
+/// A temporary card while the mine has not opened: an X username, a follow on the honour system, a wallet
+/// (or an address pasted in), and one press that signs a free message and puts the entry on the list.
+/// PreRegisterGate.tsx shows it in a pop-up over the page: `onListed` tells the gate the entry is on the list
+/// (new, or there already), `onLater` draws the link that puts the pop-up aside. The mine has no allowlist,
+/// and the card goes when mining opens. The page reads nothing from the list; the owner has the count.
+export function PreRegister({ onListed, onLater }: { onListed?: () => void; onLater?: () => void }) {
   const { address, isConnected } = useAccount();
   const wallet: Address | null = isConnected && address ? getAddress(address) : null;
   const { openConnectModal } = useConnectModal();
@@ -102,10 +103,16 @@ export function PreRegister() {
         body = { ...body, message, signature };
       }
       const res = await fetch(`${PREREGISTER_URL}/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (res.status === 409) setNote({ text: "that handle or address is already registered.", tone: "alarm" });
+      if (res.status === 409) {
+        setNote({ text: "that handle or address is already registered.", tone: "alarm" });
+        onListed?.();
+      }
       else if (res.status === 429) setNote({ text: "too many tries from your connection; wait a minute.", tone: "alarm" });
       else if (!res.ok) setNote({ text: "try again, or paste the address instead.", tone: "alarm" });
-      else setDone(true);
+      else {
+        setDone(true);
+        onListed?.();
+      }
     } catch {
       setNote({ text: "the list did not answer, try again.", tone: "alarm" });
     } finally {
@@ -117,7 +124,9 @@ export function PreRegister() {
     <section className="panel prereg" aria-label="Pre-register">
       <header className="prereg-head">
         <div>
-          <h2 className="serif">Be there when it opens.</h2>
+          <h2 className="serif" id="prereg-title">
+            Be there when it opens.
+          </h2>
           <p className="prereg-lede">Leave your X name and an address, and you hear before the mine opens.</p>
         </div>
       </header>
@@ -229,6 +238,11 @@ export function PreRegister() {
       )}
       <input className="prereg-trap" type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={website} onChange={(e) => setWebsite(e.target.value)} />
       <p className="fine dim">No airdrop, no allowlist. Follow so the opening reaches you. Epoch 1 is the cheapest and easiest the mine will ever be.</p>
+      {onLater && !done ? (
+        <button type="button" className="mine-alt prereg-later" onClick={onLater}>
+          Not now, let me try the miner first.
+        </button>
+      ) : null}
     </section>
   );
 }
