@@ -24,5 +24,8 @@
   "launchNumber": 1434,
   "launchTx": "0xac7aff89cdf23f126631da73106cd3aef33c812fd39eace00fafb8e257e522b3",
   "oracleRequestId": "db921753-2067-4094-8547-649f63a72179",
-  "questionHash": "0x0bd457cf1b0d092b4f12904589b3f08b5c67793cc4ef5292d79b2733ba5bab24"
+  "questionHash": "0x0bd457cf1b0d092b4f12904589b3f08b5c67793cc4ef5292d79b2733ba5bab24",
+  "metamorphArt": "0x6D35059c74659D13515155062CaB5912BA68AE94",
+  "metamorphChrysalis": "0x6CE7735edC95Fb7607Abc77f01F11616429b54a3",
+  "metamorphButterfly": "0xA213B7D37017c6adB7C20CB68515965548EfCD4C"
 }

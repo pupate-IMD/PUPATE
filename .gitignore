@@ -4,3 +4,6 @@ broadcast/
 .env
 node_modules/
 brand/previews/
+
+# the pre-register list, downloaded by the owner
+/registrations.csv
