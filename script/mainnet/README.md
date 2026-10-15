@@ -62,6 +62,25 @@ never pays twice.
 Two scripts, the art first, each run once the review is clean. Neither deployment can be corrected: the
 three art contracts have no owner and no setter, and the token keeps the art's address as an immutable.
 
+The wrapper. `script/mainnet/metamorph.mjs` runs this section from any shell, as `launch.mjs` runs the
+launch: `.env` read by the script, forge found where `foundryup` put it, nothing secret printed.
+
+    node script/mainnet/metamorph.mjs status      chain, deployer, base fee, what is recorded, the live checks
+    node script/mainnet/metamorph.mjs art         step 1: the two figures and the router                  gas only
+    node script/mainnet/metamorph.mjs rehearsal   between 1 and 2: the throwaway ERC-721 wearing the router gas only
+    node script/mainnet/metamorph.mjs token       step 2: MetamorphMD at 20 bits                          gas only
+    node script/mainnet/metamorph.mjs record      steps 3 and 4: site/lib/addresses.ts, then the git, keeper
+                                                  and site lines to run by hand
+
+Each command reads the chain first and refuses what this section says to refuse: a step already recorded
+(`--again` deploys over it), a sample length that is not the code's, a base fee above `MAX_BASE_FEE_GWEI`
+(default 2 here). The three that broadcast run the forge script without `--broadcast` first and show its
+addresses and sample lines, ask whether the keeper loop is stopped (the art and the token) and
+`broadcast? (yes/no)` before anything is sent (`--dry-run` sends nothing and asks nothing), check the result
+on chain as the commands below do, and record the addresses in `keeper/.launch/metamorph.json` and
+`keeper/addresses.mainnet.json`; the rehearsal is recorded in the progress file only. The raw commands below
+remain the reference and the fallback.
+
 1. Deploy the art: `MetamorphChrysalis`, `MetamorphButterfly`, then the router `MetamorphArt` with their
    addresses. Look at a rendered sample before broadcasting. `node script/art/parity.mjs` runs the same
    script on a local anvil (port 8546, anvil's public test key), reads 24 cards through `tokenURI`, checks
