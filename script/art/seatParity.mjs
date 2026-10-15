@@ -1,59 +1,37 @@
-// Seat parity: the integer seat traits of the mirror (the contract's uint32 generator, see mirror.mjs) against
-// the site's own float generator, for seats 1..64. The integers (veins, spots, dots, rings, the tone index)
-// must be equal for every seat; the tenths are the contract's (the site adopts them later), and the script
-// also reports, for information, whether they equal the site's floats rounded to a tenth.
+// Seat parity: the seat traits of the mirror (the contract's uint32 generator, see mirror.mjs) against the
+// site's own traits(seat) (site/lib/seat.ts, imported as it is: Node 22.18 or later runs TypeScript without a
+// flag), for seats 1..64. Every field must be equal: the integers (veins, spots, dots, rings, the tone) and
+// the tenths (span, rise, reach, drop, tilt), which the site returns as numbers, tenths / 10.
 //
 // Usage: node script/art/seatParity.mjs   (prints one OK line per seat, exits 1 on any difference)
 
-import { seatTraits } from "./mirror.mjs";
+import { registerHooks } from "node:module";
+import { TONES, seatTraits } from "./mirror.mjs";
 
-// ---- mirrors site/lib/seat.ts; keep in sync (rng and traits, verbatim, with the types removed)
-
-function rng(seed) {
-  let a = (seed * 2654435761) >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const TONES = ["#3ec28f", "#2aa87a", "#5fd0a3", "#37b59a"];
-
-function traits(id) {
-  const r = rng(id);
-  const between = (lo, hi) => lo + r() * (hi - lo);
-  return {
-    span: between(118, 152),
-    rise: between(92, 124),
-    reach: between(78, 104),
-    drop: between(84, 118),
-    veins: 3 + Math.floor(r() * 3),
-    spots: Math.floor(r() * 4),
-    dots: 3 + Math.floor(r() * 5),
-    rings: 3 + Math.floor(r() * 3),
-    tilt: between(-5, 5),
-    tone: TONES[Math.floor(r() * TONES.length)],
-  };
-}
-
-// ---- the comparison
+// site/package.json names no module type, so Node would parse seat.ts as CommonJS first and warn; the hook
+// says it is a TypeScript module. The import comes after it (a static import is resolved before any hook).
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const r = nextResolve(specifier, context);
+    return r.url.endsWith(".ts") ? { ...r, format: "module-typescript" } : r;
+  },
+});
+const { traits } = await import("../../site/lib/seat.ts");
 
 const SEATS = 64;
+const TENTHS = ["span", "rise", "reach", "drop", "tilt"];
 let bad = 0;
-let tenthsEqual = 0;
 for (let seat = 1; seat <= SEATS; seat++) {
   const site = traits(seat);
   const m = seatTraits(seat);
-  const siteTone = TONES.indexOf(site.tone);
   const fields = [
     ["veins", site.veins, m.veins],
     ["spots", site.spots, m.spots],
     ["dots", site.dots, m.dots],
     ["rings", site.rings, m.rings],
-    ["tone", siteTone, m.tone],
+    ["tone", site.tone, TONES[m.tone]],
+    // The site's number is the contract's tenths divided by ten, the same double, nothing rounded twice.
+    ...TENTHS.map((k) => [k, site[k], Number(m[k]) / 10]),
   ];
   const diff = fields.filter(([, a, b]) => a !== b);
   const listed = fields.map(([name, , b]) => `${name} ${b}`).join(", ");
@@ -63,11 +41,6 @@ for (let seat = 1; seat <= SEATS; seat++) {
     bad++;
     console.log(`DIFF seat ${seat}: ${diff.map(([name, a, b]) => `${name} site ${a} mirror ${b}`).join(", ")}`);
   }
-  const tenths = ["span", "rise", "reach", "drop", "tilt"].every((k) => BigInt(Math.round(site[k] * 10)) === m[k]);
-  if (tenths) tenthsEqual++;
 }
-console.log(
-  `${SEATS - bad} of ${SEATS} seats equal the site in every integer; ` +
-    `tenths equal the site's floats rounded to a tenth for ${tenthsEqual} of ${SEATS} (information only)`,
-);
+console.log(`${SEATS - bad} of ${SEATS} seats equal the mirror in every integer and every tenth`);
 process.exit(bad === 0 ? 0 : 1);

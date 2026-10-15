@@ -13,6 +13,12 @@
 // figure. Then useMiner itself, without React (a stand-in for its hooks, its Workers and the chain): the page
 // left while a start's reads, a poll, a mint or the GPU's self-test are on their way; a mint whose answer went
 // missing; Stop with a hash waiting; reverted receipts; the readings after a stop; a wallet that disconnects.
+// Then the seat drawing (lib/seat.ts) against the contract's twin (script/art/mirror.mjs) for 64 seats and a
+// few far ones; and the mine's numbers (lib/metamorph/live.ts): the arithmetic on a scenario (the rate, the
+// percent, the seconds since the last mint, the hour's walk), loadMine against a stand-in chain (the card
+// times read once, the clock, a mint dropped with its block), useMineNumbers without React (at once, every
+// three seconds, skipped polls, a reload, a failed read, another token, the page left); and on the stack,
+// loadMine against the contract's views at the same block and every card's mintedAt.
 //
 //   cd site && npm run mine-check        (or: node scripts/mine-logic.mjs)
 //
@@ -56,13 +62,20 @@ import {
 } from "viem";
 import { foundry } from "viem/chains";
 import { formatAbiItem } from "viem/utils";
-import {
-  METAMORPH_ART_SIGNATURES,
-  METAMORPH_EVENTS,
-  METAMORPH_SIGNATURES,
-  metamorphAbi,
-  metamorphArtAbi,
-} from "../lib/metamorph/abi.ts";
+
+// The site's modules run here as they are. site/package.json names no module type, so Node would parse each
+// .ts file as CommonJS first and warn (MODULE_TYPELESS_PACKAGE_JSON): the hook says they are TypeScript
+// modules. It also adds the ".ts" the site's modules leave off their relative imports (the site's bundler
+// resolves them; Node needs it spelled out). The modules are imported after the hook is in place: a static
+// import is resolved before any hook.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const bare = /^\.\.?\//.test(specifier) && !/\.[cm]?[jt]sx?$/.test(specifier);
+    const r = nextResolve(bare ? `${specifier}.ts` : specifier, context);
+    return r.url.endsWith(".ts") ? { ...r, format: "module-typescript" } : r;
+  },
+});
+const { METAMORPH_ART_SIGNATURES, METAMORPH_EVENTS, METAMORPH_SIGNATURES, metamorphAbi, metamorphArtAbi } = await import("../lib/metamorph/abi.ts");
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -321,15 +334,7 @@ for (const [name, abi, artifact] of [
 
 // ------------------------------------------------------------------ live jobs and the mint (Task 2)
 
-// lib/metamorph/job.ts and mint.ts import their neighbours without an extension, as the site's bundler
-// resolves them; Node needs the ".ts" spelled out, so a resolve hook adds it for relative imports. The
-// modules are imported after the hook is in place (a static import would be resolved before it).
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (/^\.\.?\//.test(specifier) && !/\.[cm]?[jt]sx?$/.test(specifier)) return nextResolve(`${specifier}.ts`, context);
-    return nextResolve(specifier, context);
-  },
-});
+// lib/metamorph/job.ts and mint.ts import their neighbours without an extension; the hook at the top adds it.
 const J = await import("../lib/metamorph/job.ts");
 const M = await import("../lib/metamorph/mint.ts");
 const { cocoonAbi } = await import("../lib/abi.ts");
@@ -1098,17 +1103,18 @@ const addressesOf = (token) => ({ chainId: 31337, metamorph: token, token: getAd
 
 // ------------------------------------------------------------------ the miner on the page (lib/miner/useMiner.ts)
 
-// useMiner runs here without React or a browser. A few lines stand in for React's hooks (state by call order,
-// effects after each render, every cleanup when the page is left), Workers are recorded, the GPU is a stand-in
-// where a check needs one, and the timers are a clock the checks move by hand. The chain is a stand-in whose
-// calls can be held or made to fail. The hook's callbacks read refs, so one render holds them; a render with
-// new props is how the wallet changes, and a render reads the state.
+// useMiner (and later useMineNumbers, lib/metamorph/live.ts) runs here without React or a browser. A few lines
+// stand in for React's hooks (state by call order, effects after each render, every cleanup when the page is
+// left), Workers are recorded, the GPU is a stand-in where a check needs one, and the timers are a clock the
+// checks move by hand. The chain is a stand-in whose calls can be held or made to fail. The hook's callbacks
+// read refs, so one render holds them; a render with new props is how the wallet changes, and a render reads
+// the state.
 const FAKE_REACT = `data:text/javascript,${encodeURIComponent(
   ["useState", "useRef", "useCallback", "useMemo", "useEffect"].map((n) => `export const ${n} = (...a) => globalThis.__fakeReact.${n}(...a);`).join("\n"),
 )}`;
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier === "react" && context.parentURL?.endsWith("/lib/miner/useMiner.ts")) return { url: FAKE_REACT, shortCircuit: true };
+    if (specifier === "react" && /\/lib\/(miner\/useMiner|metamorph\/live)\.ts$/.test(context.parentURL ?? "")) return { url: FAKE_REACT, shortCircuit: true };
     return nextResolve(specifier, context);
   },
 });
@@ -1652,6 +1658,312 @@ try {
   Object.assign(GpuMiner.prototype, { start: realGpu.start, stop: realGpu.stop, setPower: realGpu.setPower });
 }
 
+// ------------------------------------------------------------------ the seat drawing (lib/seat.ts)
+
+console.log("\n== the seat drawing (lib/seat.ts against script/art/mirror.mjs, the contract's twin)");
+{
+  const { traits } = await import("../lib/seat.ts");
+  const { seatTraits, TONES } = await import(pathToFileURL(join(REPO, "script", "art", "mirror.mjs")).href);
+  const TENTHS = ["span", "rise", "reach", "drop", "tilt"];
+  const differences = (seat) => {
+    const s = traits(seat);
+    const m = seatTraits(seat);
+    const fields = [
+      ["veins", s.veins, m.veins],
+      ["spots", s.spots, m.spots],
+      ["dots", s.dots, m.dots],
+      ["rings", s.rings, m.rings],
+      ["tone", s.tone, TONES[m.tone]],
+      // The site's number is the chain's tenths divided by ten: the same double, nothing rounded twice.
+      ...TENTHS.map((k) => [k, s[k], Number(m[k]) / 10]),
+    ];
+    return fields.filter(([, x, y]) => x !== y).map(([k, x, y]) => `seat ${seat} ${k}: site ${x}, chain ${y}`);
+  };
+  const first = Array.from({ length: 64 }, (_, i) => differences(i + 1)).flat();
+  check(
+    "traits(seat) is the contract's seatTraits for seats 1..64: veins, spots, dots, rings and the tone, and span, rise, reach, drop and tilt as its tenths / 10",
+    first.length === 0,
+    first.slice(0, 3).join("; "),
+  );
+  // Past the range where the old float product (seat × 2654435761) stays exact, up to the largest seat a card
+  // can name (a uint32).
+  const far = [1376, 9_999, 3_400_000, 123_456_789, 2 ** 32 - 1].flatMap(differences);
+  check("traits(seat) equals the chain for seats past the first 64, up to 2^32 − 1", far.length === 0, far.slice(0, 3).join("; "));
+}
+
+// ------------------------------------------------------------------ the mine, in numbers (lib/metamorph/live.ts)
+
+console.log("\n== the mine, in numbers (lib/metamorph/live.ts)");
+const L = await import("../lib/metamorph/live.ts");
+{
+  // The arithmetic, on a scenario: epoch 5 (1,234 minted), the price 50,000 × 1.25^4 as the contract steps it,
+  // 20 bits, 12 mints in the last hour.
+  let price5 = 50_000n * E18;
+  for (let e = 1; e < 5; e++) price5 = (price5 * 125n) / 100n;
+  const text = L.numbersText({ minted: 1234, epoch: 5, price: price5, bits: 20, lastHour: 12 });
+  const want = { minted: "1,234", epoch: "5", price: "122,070 PUPATE", difficulty: "≈ 1.0M hashes", bits: "20 bits", rate: "3.5 kH/s", percent: "37.0%" };
+  check(
+    "the figures of a scenario: 1,234 minted, epoch 5 at 122,070 PUPATE, ≈ 1.0M hashes at 20 bits, 12 mints in the hour = 12 × 2^20 ÷ 3,600 = 3.5 kH/s, 37.0%",
+    JSON.stringify(text) === JSON.stringify(want) && L.networkRate(12, 20) === (12 * 2 ** 20) / 3600,
+    JSON.stringify(text),
+  );
+  check(
+    "no mint in the hour: no network rate, a dash; under one hash a second (10 mints at 3 bits) it says so rather than 0 H/s",
+    L.networkRate(0, 20) === null &&
+      L.numbersText({ minted: 9, epoch: 1, price: 50_000n * E18, bits: 20, lastHour: 0 }).rate === "—" &&
+      L.numbersText({ minted: 10, epoch: 1, price: 50_000n * E18, bits: 3, lastHour: 10 }).rate === "< 1 H/s" &&
+      L.fmtNetworkRate(1) === "1 H/s",
+  );
+  const pct = [[0, "0%"], [1, "0.03%"], [33, "0.99%"], [34, "1.0%"], [1667, "50.0%"], [3332, "99.9%"], [3333, "100%"]];
+  const pctOff = pct.filter(([n, s]) => L.fmtPercent(n) !== s).map(([n]) => `${n}: ${L.fmtPercent(n)}`);
+  check("percent minted, rounded down to what it shows: 0%, 0.03%, 0.99%, 1.0%, 50.0%, 99.9%, and 100% only at 3,333", pctOff.length === 0, pctOff.join(", "));
+  const MINT = 1_800_000_000;
+  const at = (s) => (MINT + s) * 1000;
+  const since = [
+    [L.secondsSince({ lastMintAt: null, skew: 0 }, at(42)), null, "—"],
+    [L.secondsSince({ lastMintAt: MINT, skew: 0 }, at(42) + 999), 42, "42 s"],
+    [L.secondsSince({ lastMintAt: MINT, skew: 0 }, at(252)), 252, "4 min 12 s"],
+    [L.secondsSince({ lastMintAt: MINT, skew: 0 }, at(7500)), 7500, "2 h 5 min"],
+    [L.secondsSince({ lastMintAt: MINT, skew: 0 }, at(273_600)), 273_600, "3 d 4 h"],
+    [L.secondsSince({ lastMintAt: MINT, skew: 100 }, at(42)), 142, "2 min 22 s"],
+    [L.secondsSince({ lastMintAt: MINT, skew: 0 }, at(-30)), 0, "0 s"],
+  ];
+  const sinceOff = since.filter(([s, n, t]) => s !== n || L.fmtSince(s) !== t).map(([s]) => `${s}: ${L.fmtSince(s)}`);
+  check(
+    "seconds since the last mint: a dash before the first, 42 s, 4 min 12 s, 2 h 5 min, 3 d 4 h; on the chain's clock where it runs ahead; never below zero",
+    sinceOff.length === 0,
+    sinceOff.join(", "),
+  );
+  const T = 1_900_000_000;
+  const byId = new Map([[1, T - 5000], [2, T - 4000], [3, T - 3600], [4, T - 3599], [5, T - 100], [6, T - 1]]);
+  const full = L.hourWalk(6, T, (id) => byId.get(id));
+  const part = L.hourWalk(6, T, (id) => (id >= 5 ? byId.get(id) : undefined));
+  const small = L.hourWalk(6, T, (id) => (id >= 5 ? byId.get(id) : undefined), 2);
+  check(
+    "the hour's walk: from the newest card down, a card exactly an hour old ends it (3 in the hour); one it does not know stops it and names the ids from there down",
+    full.count === 3 && full.missing.length === 0 && part.count === 2 && part.missing.join() === "4,3,2,1" && small.missing.join() === "4,3" && L.hourWalk(0, T, () => undefined).count === 0,
+    `${full.count}; ${part.count} + [${part.missing}]`,
+  );
+}
+
+/// The chain as loadMine reads it: the contract's numbers, Multicall3's block and timestamp, each card's
+/// mintedAt. Every multicall is recorded by the functions it asked for; one can be held until released, or
+/// fail.
+function numbersWorld(over = {}) {
+  const w = {
+    minted: 0,
+    epoch: 1,
+    price: PRICE1,
+    bits: 20,
+    lastMintAt: 1_000_000,
+    open: [1376n],
+    block: 100n,
+    stamp: 1_000_000n,
+    times: new Map(),
+    reads: [],
+    hold: null,
+    fail: 0,
+    ...over,
+  };
+  w.cardReads = () => w.reads.filter((r) => r[0] === "cards");
+  w.client = {
+    async multicall({ contracts }) {
+      w.reads.push(contracts.map((c) => c.functionName));
+      if (w.fail > 0) {
+        w.fail--;
+        throw new Error("the node did not answer");
+      }
+      if (w.hold) await w.hold.promise;
+      return contracts.map((c) => {
+        switch (c.functionName) {
+          case "totalMinted":
+            return w.minted;
+          case "epoch":
+            return w.epoch;
+          case "mintPrice":
+            return w.price;
+          case "bits":
+            return w.bits;
+          case "lastMintAt":
+            return w.lastMintAt;
+          case "mineableSeats":
+            return w.open;
+          case "getBlockNumber":
+            return w.block;
+          case "getCurrentBlockTimestamp":
+            return w.stamp;
+          case "cards": {
+            const id = Number(c.args[0]);
+            return [1376, 1, id, false, w.times.get(id) ?? 0, PRICE1, getAddress(ME), toHex(id, { size: 32 })];
+          }
+          default:
+            throw new Error(`the stand-in has no ${c.functionName}`);
+        }
+      });
+    },
+  };
+  /// A card minted at `t`, as the contract books it, in a block of its own.
+  w.mint = (t) => {
+    w.block++;
+    w.minted++;
+    w.times.set(w.minted, t);
+    w.lastMintAt = t;
+  };
+  return w;
+}
+const numbersAt = (n) => ({ chainId: 31337, metamorph: getAddress(`0x${n.toString(16).padStart(40, "0")}`) });
+const deferred = () => {
+  let release;
+  const promise = new Promise((r) => (release = r));
+  return { promise, release };
+};
+
+{
+  const T = 2_000_000_000;
+  const ms = (s) => s * 1000;
+  const a1 = numbersAt(0xe1);
+  // Before the first mint: lastMintAt() is the deploy's time, and no card is read.
+  const w = numbersWorld({ stamp: BigInt(T), lastMintAt: T - 50_000 });
+  const n0 = await L.loadMine(w.client, a1, ms(T));
+  check(
+    "loadMine before the first mint: the figures as the contract gives them, no last mint (lastMintAt() is the deploy's time), nothing in the hour, one eth_call",
+    n0.minted === 0 && n0.lastMintAt === null && n0.lastHour === 0 && n0.epoch === 1 && n0.price === PRICE1 && n0.bits === 20 && n0.mineable === 1 && n0.block === 100n && w.reads.length === 1 && w.reads[0].join() === "totalMinted,epoch,mintPrice,bits,lastMintAt,mineableSeats,getBlockNumber,getCurrentBlockTimestamp",
+    w.reads.map((r) => r.join("+")).join(" | "),
+  );
+  // 70 cards over two hours, one every 100 s, the last 200 s ago: cards 37..70 are within the hour.
+  for (let k = 1; k <= 70; k++) w.mint(T - 7200 + 100 * k);
+  w.reads.length = 0;
+  const n1 = await L.loadMine(w.client, a1, ms(T));
+  check(
+    "70 cards over two hours: 34 in the last hour (a card exactly an hour old is not), read in one eth_call of 64 card times after the numbers; the last mint is the newest card's",
+    n1.minted === 70 && n1.lastHour === 34 && n1.lastMintAt === T - 200 && w.reads.length === 2 && w.cardReads().length === 1 && w.cardReads()[0].length === 64,
+    `${n1.lastHour} in the hour, ${w.reads.length} eth_call(s)`,
+  );
+  w.reads.length = 0;
+  const n2 = await L.loadMine(w.client, a1, ms(T + 1));
+  check("the next reading reads no card again: each card's time is kept", n2.lastHour === 34 && w.reads.length === 1 && L.sameNumbers(n1, n2));
+  w.mint(T + 10);
+  w.stamp = BigInt(T + 10);
+  w.reads.length = 0;
+  const n3 = await L.loadMine(w.client, a1, ms(T + 10));
+  check(
+    "a new mint: one card read (the new one), 35 in the hour",
+    n3.minted === 71 && n3.lastHour === 35 && w.cardReads().length === 1 && w.cardReads()[0].length === 1 && !L.sameNumbers(n2, n3),
+  );
+  w.reads.length = 0;
+  const n4 = await L.loadMine(w.client, a1, ms(T + 1000));
+  check("as the hour moves on, older cards leave it without a read: 25 in the hour 1,000 s later", n4.lastHour === 25 && w.cardReads().length === 0, `${n4.lastHour}`);
+  // The chain's clock ahead of this machine's (a local chain moved on): the hour and the seconds since the
+  // last mint run on the chain's. A node answers with its latest block's time, which stands still between
+  // blocks: the lead is measured when the block is first seen and kept, so the seconds count on. Behind this
+  // machine's clock (a block a few seconds old), the machine's.
+  w.block++;
+  w.stamp = BigInt(T + 10_000);
+  const ahead = await L.loadMine(w.client, a1, ms(T + 1000));
+  const still = await L.loadMine(w.client, a1, ms(T + 1003));
+  w.block++;
+  w.stamp = BigInt(T + 988);
+  const behind = await L.loadMine(w.client, a1, ms(T + 1000));
+  check(
+    "the clock: the chain's where it runs ahead (skew 9,000 s, nothing in the hour, the last mint 9,990 s ago), kept while the block stands (3 s later, 9,993 s), this machine's once a block lags (skew 0)",
+    ahead.skew === 9000 &&
+      ahead.now === T + 10_000 &&
+      ahead.lastHour === 0 &&
+      L.secondsSince(ahead, ms(T + 1000)) === 9990 &&
+      still.skew === 9000 &&
+      L.secondsSince(still, ms(T + 1003)) === 9993 &&
+      behind.skew === 0 &&
+      behind.now === T + 1000 &&
+      behind.lastHour === 25,
+    `skew ${ahead.skew} / ${still.skew} / ${behind.skew}`,
+  );
+  // A card dropped with its block: totalMinted falls back, its time is forgotten, and the card that takes the
+  // id later is read afresh.
+  w.stamp = BigInt(T + 20);
+  w.minted = 70;
+  w.lastMintAt = T - 200;
+  const n5 = await L.loadMine(w.client, a1, ms(T + 20));
+  w.mint(T + 15);
+  w.reads.length = 0;
+  const n6 = await L.loadMine(w.client, a1, ms(T + 20));
+  check(
+    "a mint dropped with its block: the count falls back with totalMinted, and the card that takes its id is read again with its own time",
+    n5.minted === 70 && n5.lastHour === 34 && n6.minted === 71 && n6.lastHour === 35 && w.cardReads().length === 1 && n6.lastMintAt === T + 15,
+  );
+  const empty = numbersWorld({ open: [] });
+  check("no seat to mine: mineable 0 (the page's ready state)", (await L.loadMine(empty.client, numbersAt(0xe2), ms(1_000_000))).mineable === 0);
+}
+
+// The hook, without React (renderHook's stand-in) and on the hand clock.
+{
+  const clock2 = handClock();
+  globalThis.window = clock2.timers;
+  try {
+    const a1 = numbersAt(0xe3);
+    const a2 = numbersAt(0xe4);
+    const w = numbersWorld({ stamp: 1_000_000n });
+    w.mint(999_000);
+    const h = renderHook((p) => L.useMineNumbers(p.client, p.a), { client: w.client, a: a1 });
+    await clock2.advance(0);
+    const r0 = h.render().numbers;
+    const first = w.reads.length;
+    check("useMineNumbers reads at once: the reading of this token, before any poll", !!r0 && r0.minted === 1 && first >= 1 && clock2.intervals() === 1, `${first} eth_call(s)`);
+    await clock2.advance(3000);
+    const r1 = h.render().numbers;
+    check("a poll every three seconds; the same figures keep the same reading, so the page does not render again", w.reads.length === first + 1 && r1 === r0);
+    w.mint(1_000_000);
+    await clock2.advance(3000);
+    const r2 = h.render().numbers;
+    check("a changed figure is a new reading", r2 !== r0 && r2.minted === 2 && r2.lastMintAt === 1_000_000);
+    // A read held on the node: the polls meanwhile are skipped; a reload asked for then runs when it ends.
+    w.hold = deferred();
+    await clock2.advance(3000);
+    const started = w.reads.length;
+    await clock2.advance(6000);
+    h.render().reload();
+    await clock2.advance(0);
+    const whileHeld = w.reads.length;
+    const held = w.hold;
+    w.hold = null;
+    held.release();
+    await clock2.advance(0);
+    check(
+      "a poll that finds a read on its way is skipped; a reload asked for meanwhile runs once it ends",
+      whileHeld === started && w.reads.length === started + 1,
+      `${started} → ${whileHeld} → ${w.reads.length}`,
+    );
+    const r3 = h.render().numbers;
+    w.fail = 1;
+    await clock2.advance(3000);
+    const r4 = h.render().numbers;
+    check("a failed read keeps the last reading", r4 === r3 && !!r4);
+    // Another deployment: its reading is never mixed with this one's.
+    const w2 = numbersWorld({ minted: 0 });
+    w2.hold = deferred();
+    h.render({ client: w2.client, a: a2 });
+    await clock2.advance(0);
+    const between = h.render().numbers;
+    w2.hold.release();
+    w2.hold = null;
+    await clock2.advance(0);
+    const other = h.render().numbers;
+    check(
+      "another token: nothing shows until its own reading lands, and the old one's poll stops",
+      between === null && !!other && other.scope !== r4.scope && other.minted === 0 && clock2.intervals() === 1,
+    );
+    h.unmount();
+    const after = w.reads.length + w2.reads.length;
+    await clock2.advance(9000);
+    check("the page left: no read and no timer after it", w.reads.length + w2.reads.length === after && clock2.intervals() === 0);
+    const none = renderHook((p) => L.useMineNumbers(p.client, p.a), { client: null, a: null });
+    await clock2.advance(6000);
+    check("no client or no contracts (the preview): no reading, no read, no timer", none.render().numbers === null && clock2.intervals() === 0);
+    none.unmount();
+  } finally {
+    delete globalThis.window;
+  }
+}
+
 // ------------------------------------------------------------------ against the local stack
 
 // The CPU worker's own 192 bytes and search (lib/miner/miner.worker.ts, run()), copied line for line: a Web
@@ -1720,6 +2032,11 @@ if (!(await stackUp())) {
     await cardsOnTheStack();
   } catch (e) {
     check("the workspace's checks on the stack ran to the end", false, e instanceof Error ? e.message.split("\n")[0] : String(e));
+  }
+  try {
+    await numbersOnTheStack();
+  } catch (e) {
+    check("the numbers' checks on the stack ran to the end", false, e instanceof Error ? e.message.split("\n")[0] : String(e));
   }
 }
 
@@ -2116,6 +2433,37 @@ async function cardsOnTheStack() {
     const read3 = await C.walletCards(pub, a, WALLET);
     check("Claim IMD with nothing selected (every staked card) and unstake([A]) go through without a credit", !got(read3, A)[0].staked && C.claimedIn(receipt, a, WALLET) !== null);
   }
+}
+
+async function numbersOnTheStack() {
+  console.log(`\n== the mine, in numbers, against the local stack (${RPC})`);
+  const a = JSON.parse(readFileSync(LOCAL, "utf8"));
+  const pub = createPublicClient({ chain: foundry, transport: http(RPC), pollingInterval: 200 });
+  const md = { address: a.metamorph, abi: metamorphAbi };
+  const n = await L.loadMine(pub, a);
+  // The contract's own views at the block the reading ran at.
+  const view = (functionName, args) => pub.readContract({ ...md, functionName, args, blockNumber: n.block });
+  const [minted, epoch, price, bits, lastMintAt, open] = await Promise.all(["totalMinted", "epoch", "mintPrice", "bits", "lastMintAt", "mineableSeats"].map((f) => view(f)));
+  check(
+    "loadMine on the stack: totalMinted, epoch, mintPrice, bits and the mineable seats as the contract's views give them at the block it read",
+    n.minted === minted && n.epoch === epoch && n.price === price && n.bits === bits && n.mineable === open.length,
+    `${n.minted} minted, epoch ${n.epoch}, ${M.amount(n.price)} PUPATE, ${n.bits} bits, ${n.mineable} mineable`,
+  );
+  // The hour, counted again from every card's mintedAt read one by one.
+  const cards = await Promise.all(Array.from({ length: minted }, (_, i) => view("cards", [BigInt(i + 1)])));
+  const inHour = cards.filter((c) => c[4] > n.now - L.HOUR).length;
+  const text = L.numbersText(n);
+  check(
+    "the mints of the last hour = the cards whose mintedAt is within the hour, every card read; the rate is that × 2^bits ÷ 3,600",
+    n.lastHour === inHour && text.rate === L.fmtNetworkRate(inHour ? (inHour * 2 ** n.bits) / 3600 : null),
+    `${n.lastHour} in the hour, ${text.rate}`,
+  );
+  const block = await pub.getBlock({ blockNumber: n.block });
+  check(
+    "the last mint: lastMintAt(), the newest card's mintedAt (none before the first mint); the reading's clock is no earlier than its block's",
+    (minted > 0 ? n.lastMintAt === lastMintAt && cards[minted - 1][4] === lastMintAt : n.lastMintAt === null) && n.now >= Number(block.timestamp) && L.secondsSince(n, Date.now()) >= 0,
+    `${L.fmtSince(L.secondsSince(n, Date.now()))} since the last mint, skew ${n.skew} s`,
+  );
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");

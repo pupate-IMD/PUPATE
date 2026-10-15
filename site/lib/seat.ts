@@ -1,5 +1,10 @@
 // What is drawn and listed for one seat: the shape of its chrysalis and butterfly, fixed by the
 // seat's number, and the sample record of its work in the swarm.
+//
+// The shape is the chain's: traits(seat) is ArtTraits.seatTraits (src/metamorph/art/ArtTraits.sol, its
+// JavaScript twin script/art/mirror.mjs), rng's draws taken as the 32-bit words they are and the lengths and
+// the tilt drawn in tenths, rounded half up, so the seat pages, the emergence card and the token draw the
+// same butterfly. script/art/seatParity.mjs holds this file against the mirror; so does npm run mine-check.
 
 /// A small deterministic generator, so a seat always draws the same way.
 export function rng(seed: number): () => number {
@@ -27,22 +32,47 @@ export interface Traits {
 }
 
 const TONES = ["#3ec28f", "#2aa87a", "#5fd0a3", "#37b59a"];
+const WORD = 4294967296; // 2^32
 
-export function traits(id: number): Traits {
-  const r = rng(id);
-  const between = (lo: number, hi: number) => lo + r() * (hi - lo);
-  return {
-    span: between(118, 152),
-    rise: between(92, 124),
-    reach: between(78, 104),
-    drop: between(84, 118),
-    veins: 3 + Math.floor(r() * 3),
-    spots: Math.floor(r() * 4),
-    dots: 3 + Math.floor(r() * 5),
-    rings: 3 + Math.floor(r() * 3),
-    tilt: between(-5, 5),
-    tone: TONES[Math.floor(r() * TONES.length)],
+/// rng's generator as the contract runs it, in uint32 arithmetic: each draw is the 32-bit word u that rng
+/// divides by 2^32. The seed's product is taken modulo 2^32 with Math.imul, so it is exact for every seat.
+function words(seat: number): () => number {
+  let a = Math.imul(seat, 2654435761) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return (t ^ (t >>> 14)) >>> 0;
   };
+}
+
+/// lo + u/2^32 × (hi − lo) in tenths, rounded half up: lo × 10 + ((u × (hi − lo) × 10 + 2^31) >> 32), the
+/// contract's between(u, lo, hi, 10). Exact in a double: u × (hi − lo) × 10 stays below 2^42.
+function tenths(u: number, lo: number, hi: number): number {
+  return lo * 10 + Math.floor((u * (hi - lo) * 10 + WORD / 2) / WORD);
+}
+
+/// floor(u × n / 2^32), the contract's count(u, n): what Math.floor(rng() × n) gave, exactly.
+function count(u: number, n: number): number {
+  return Math.floor((u * n) / WORD);
+}
+
+/// The seat's traits as the chain draws them: the integers as before (veins, spots, dots, rings, the tone),
+/// the lengths and the tilt in tenths, as numbers (123.4 is the contract's 1234).
+export function traits(seat: number): Traits {
+  const u = words(seat);
+  const span = tenths(u(), 118, 152);
+  const rise = tenths(u(), 92, 124);
+  const reach = tenths(u(), 78, 104);
+  const drop = tenths(u(), 84, 118);
+  const veins = 3 + count(u(), 3);
+  const spots = count(u(), 4);
+  const dots = 3 + count(u(), 5);
+  const rings = 3 + count(u(), 3);
+  const tilt = tenths(u(), -5, 5);
+  const tone = TONES[count(u(), TONES.length)];
+  return { span: span / 10, rise: rise / 10, reach: reach / 10, drop: drop / 10, veins, spots, dots, rings, tilt: tilt / 10, tone };
 }
 
 export type JobKind = "Oracle panel" | "Launch review" | "Launch build";

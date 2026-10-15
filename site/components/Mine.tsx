@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useQuery } from "@tanstack/react-query";
-import { formatUnits, type Address } from "viem";
+import type { Address } from "viem";
 import { useAccount, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
 import { TARGET_CHAIN_ID } from "@/lib/addresses";
 import type { LiveAddresses } from "@/lib/metamorph/job";
+import { EPOCHS, type MineNumbers, SUPPLY, fmtPupate, fmtSince, numbersText, secondsSince, useMineNumbers } from "@/lib/metamorph/live";
 import { type WriteContract, mintStatus } from "@/lib/metamorph/mint";
 import { EPOCH_ONE_BITS, type Power, fmtHashes, fmtRate } from "@/lib/miner/job";
 import { type Found, type GpuState, type LiveLink, type MintCard, useMiner } from "@/lib/miner/useMiner";
@@ -15,10 +16,11 @@ import { GpuSelfTestDev } from "./GpuSelfTestDev";
 import { Incubator } from "./Incubator";
 import { useAddresses } from "./SimContext";
 
-/// The epoch-one figures of the spec, shown before the contracts exist; live, they are read from the chain.
+/// The epoch-one price of the spec, shown before the contracts exist; live, the figures are read from the chain.
 const PRICE = "50,000";
-const EPOCHS = 11;
-const SUPPLY = 3333;
+/// The four steps across the top, lit as each one holds: a wallet connected, PUPATE approved, the miner
+/// running, auto-mint on.
+const STEPS = ["Connect", "Approve PUPATE", "Mine", "Auto-mint"] as const;
 const PREVIEW_CARDS = [1, 12, 57, 133, 240];
 const METER = 48;
 /// Places in the drawer. Find n always takes place (n - 1) mod 8: a new card fills the next place, or
@@ -27,7 +29,6 @@ const METER = 48;
 const DRAWER = 8;
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const pupate = (wei: bigint) => Number(formatUnits(wei, 18)).toLocaleString("en-US", { maximumFractionDigits: 0 });
 
 /// Which preview card a practice hash "mints": the hash picks, as it will live. The reveal and the drawer
 /// show the card's 540 px WebP (scripts/card-bitmaps.mjs renders it from the SVG): a bitmap draws at once,
@@ -40,6 +41,19 @@ function cardFor(f: Found): { id: number; src: string; title: string; gilt: bool
 /// A card a live mint made: its real id and seat from the receipt, its image from tokenURI once read.
 function mintedCard(c: MintCard): { id: number; src: string | undefined; title: string; gilt: boolean } {
   return { id: c.id, src: c.image, title: `Metamorph.md #${c.id} · seat identity.md #${c.seat}${c.gilt ? " · gilt" : ""}`, gilt: c.gilt };
+}
+
+/// The seconds since the last mint, counted on from the last reading once a second; only this line renders
+/// again as it counts. A dash before the first mint, and in the preview.
+function Since({ n }: { n: Pick<MineNumbers, "lastMintAt" | "skew"> | null }) {
+  const [, tick] = useState(0);
+  const counting = n?.lastMintAt != null;
+  useEffect(() => {
+    if (!counting) return;
+    const t = window.setInterval(() => tick((x) => x + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [counting]);
+  return <>{fmtSince(n ? secondsSince(n, Date.now()) : null)}</>;
 }
 
 /// A row of digits that fills as the search approaches the hashes a hit takes on average.
@@ -110,6 +124,8 @@ export function Mine() {
     retry: 1,
   });
   const refetchStatus = status.refetch;
+  // The mine, in numbers: read every three seconds, and at once after a mint.
+  const { numbers: nums, reload: reloadNumbers } = useMineNumbers(contracts ? client : null, contracts);
   const [reveal, setReveal] = useState<{ src: string; title: string; gilt: boolean } | null>(null);
   const sinceFound = useRef(0);
   const hashesNow = useRef(0);
@@ -146,10 +162,12 @@ export function Mine() {
     if (shownMint?.image) showCard({ ...mintedCard(shownMint), src: shownMint.image });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownMint?.k]);
-  // The wallet's PUPATE after each mint.
+  // The wallet's PUPATE and the mine's numbers after each mint.
   useEffect(() => {
-    if (m.lastMint) void refetchStatus();
-  }, [m.lastMint?.k, refetchStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!m.lastMint) return;
+    void refetchStatus();
+    reloadNumbers();
+  }, [m.lastMint?.k, refetchStatus, reloadNumbers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const active = m.running || !!m.pending;
   const expectedHashes = 2 ** m.bits;
@@ -158,12 +176,16 @@ export function Mine() {
   const [rateNumber, rateUnit] = m.running ? [rateText.replace(/ .*/, ""), rateText.replace(/^\S+ /, "")] : ["0", "H/s"];
 
   const st = status.data;
-  /// Live readings: the job being mined gives the price and the difficulty while a live run has one; else
-  /// the status read does.
+  /// Live readings: the job being mined gives the price while a live run has one; else the numbers do, or
+  /// the status read until they come.
   const jobOn = m.live && m.price !== null;
-  const price = jobOn ? m.price : (st?.price ?? null);
-  const liveBits = jobOn ? m.bits : (st?.bits ?? null);
+  const price = jobOn ? m.price : (nums?.price ?? st?.price ?? null);
+  const epochNow = nums?.epoch ?? st?.epoch ?? null;
   const needsApproval = !!wallet && st?.allowance != null && st.allowance < st.price;
+  const approved = !!contracts && !!wallet && st?.allowance != null && st.allowance >= st.price;
+  /// The ready state: the contracts are live and the vault holds no seat a mint can pick yet.
+  const nothingMineable = !!contracts && nums?.mineable === 0;
+  const stepOn = [!!wallet, approved, m.running, m.auto];
 
   const state = m.pending
     ? "A hash is waiting. Mint it, or let auto-mint send the next one by itself."
@@ -175,13 +197,15 @@ export function Mine() {
         ? expectedSeconds
           ? `Mining. A hash takes about ${expectedSeconds < 90 ? `${Math.max(1, Math.round(expectedSeconds))} seconds` : `${Math.round(expectedSeconds / 60)} minutes`} on this machine at ${m.bits} bits.`
           : "Mining. Measuring this machine."
-        : contracts && wallet
-          ? needsApproval
-            ? "Not mining. Approve PUPATE once, then start; a practice run costs nothing."
-            : "Not mining. Start when you are ready; a practice run costs nothing."
-          : wallet
-            ? "Not mining. Start when you are ready; a practice run costs nothing."
-            : "Not mining. Connect a wallet, or practice without one.";
+        : nothingMineable
+          ? "Ready. Nothing to mine until the vault holds a seat."
+          : contracts && wallet
+            ? needsApproval
+              ? "Not mining. Approve PUPATE once, then start; a practice run costs nothing."
+              : "Not mining. Start when you are ready; a practice run costs nothing."
+            : wallet
+              ? "Not mining. Start when you are ready; a practice run costs nothing."
+              : "Not mining. Connect a wallet, or practice without one.";
 
   /// The main button. The preview keeps its practice chain; live it walks Connect wallet, Approve PUPATE,
   /// Start mining, Stop mining, with Mint it now for a hash that waits.
@@ -199,6 +223,8 @@ export function Mine() {
     if (!wallet) return { label: "Connect wallet", onClick: () => openConnectModal?.() };
     if (m.approving) return { label: "Approving PUPATE…", onClick: () => undefined, disabled: true };
     if (needsApproval) return { label: "Approve PUPATE", onClick: () => void approve().then(() => refetchStatus()) };
+    // Nothing to mine until the vault holds a seat: the price shows and the practice run stays a link away.
+    if (nothingMineable) return { label: "Start mining", onClick: () => undefined, disabled: true };
     // Until the wallet's allowance is known the button waits, so Approve comes before Start when it is due.
     return { label: "Start mining", onClick: () => start({ live: true, wallet }), disabled: status.isLoading };
   }
@@ -215,65 +241,114 @@ export function Mine() {
       : m.found.slice(0, DRAWER).map((f) => ({ f, c: cardFor(f), place: (f.n - 1) % DRAWER }))
   ).sort((a, b) => a.place - b.place);
   const gpuOption = gpuSwitch(m.gpu);
+  /// The mine, in numbers: live from the chain once read (a dash for a figure the chain cannot give yet);
+  /// the preview keeps the epoch-one figures and the practice difficulty.
+  const nt = nums ? numbersText(nums) : null;
+  const wait = "…";
+  const band = contracts
+    ? {
+        minted: nt?.minted ?? wait,
+        epoch: nt?.epoch ?? wait,
+        price: nt?.price ?? wait,
+        difficulty: nt?.difficulty ?? wait,
+        bits: nt?.bits ?? wait,
+        rate: nt?.rate ?? wait,
+        percent: nt?.percent ?? wait,
+      }
+    : {
+        minted: "0",
+        epoch: "1",
+        price: `${PRICE} PUPATE`,
+        difficulty: `≈ ${fmtHashes(expectedHashes)} hashes`,
+        bits: m.engine === "gpu" ? `practice target ${m.bits} bits` : `${EPOCH_ONE_BITS} bits`,
+        rate: "—",
+        percent: "0%",
+      };
 
   return (
     <section className="wrap mine-page" aria-label="Mine">
       <header className="bench-head">
         <div>
-          <h1 className="serif">Mine a card of a seat that works.</h1>
+          <h1 className="serif">Clock in.</h1>
           <p className="mine-lede">
             Your machine searches for a hash with enough leading zeros. Find one, pay the mint in PUPATE, and the hash picks
             which seat your card comes from. Lucky hashes come out gilt.
           </p>
+          <ol className="mine-steps" aria-label="Four steps">
+            {STEPS.map((label, i) => (
+              <li key={label} className={stepOn[i] ? "on" : undefined}>
+                <span className="n">{i + 1}</span> {label}
+              </li>
+            ))}
+          </ol>
           {contracts ? null : <span className="chip gold">Preview · contracts not live</span>}
         </div>
-        <dl className="readings" aria-label="The mine today">
-          <div>
-            <dt>mint price</dt>
-            {contracts ? (
+        <div>
+          <p className="mint-price">
+            Mint price: {contracts ? (price !== null ? `${fmtPupate(price)} PUPATE` : "…") : `${PRICE} PUPATE`}{" "}
+            <span className="dim">
+              · epoch {contracts ? (epochNow ?? "…") : 1} of {EPOCHS}
+            </span>
+          </p>
+          <dl className="readings" aria-label="Your wallet">
+            <div>
+              <dt>wallet</dt>
+              <dd>{wallet ? short(wallet) : <span className="dim">not connected</span>}</dd>
+            </div>
+            <div>
+              <dt>PUPATE</dt>
               <dd>
-                {price !== null ? `${pupate(price)} PUPATE` : "…"} <span className="dim">· epoch {st?.epoch ?? "…"} of {EPOCHS}</span>
+                {contracts && st?.balance != null ? fmtPupate(st.balance) : <span className="dim">—</span>}{" "}
+                <Link className="chip jade" href="/buy/">
+                  Buy
+                </Link>
               </dd>
-            ) : (
-              <dd>
-                {PRICE} PUPATE <span className="dim">· epoch 1 of {EPOCHS}</span>
-              </dd>
-            )}
-          </div>
-          <div>
-            <dt>difficulty</dt>
-            {contracts ? (
-              <dd>
-                {liveBits !== null ? `≈ ${fmtHashes(2 ** liveBits)} hashes` : "…"} <span className="dim">· {liveBits ?? "…"} bits</span>
-              </dd>
-            ) : (
-              <dd>
-                ≈ {fmtHashes(expectedHashes)} hashes{" "}
-                <span className="dim">· {m.engine === "gpu" ? `practice target ${m.bits} bits` : `${EPOCH_ONE_BITS} bits`}</span>
-              </dd>
-            )}
-          </div>
+            </div>
+          </dl>
+        </div>
+      </header>
+
+      <section className="numbers" aria-label="The mine, in numbers">
+        <h2 className="serif">The mine, in numbers</h2>
+        <dl>
           <div>
             <dt>minted</dt>
             <dd>
-              0 <span className="dim">of {SUPPLY.toLocaleString("en-US")}</span>
+              {band.minted} <span className="dim">of {SUPPLY.toLocaleString("en-US")}</span>
             </dd>
           </div>
           <div>
-            <dt>wallet</dt>
-            <dd>{wallet ? short(wallet) : <span className="dim">not connected</span>}</dd>
+            <dt>epoch</dt>
+            <dd>
+              {band.epoch} <span className="dim">of {EPOCHS}</span>
+            </dd>
           </div>
           <div>
-            <dt>PUPATE</dt>
+            <dt>price</dt>
+            <dd>{band.price}</dd>
+          </div>
+          <div>
+            <dt>difficulty</dt>
             <dd>
-              {contracts && st?.balance != null ? pupate(st.balance) : <span className="dim">—</span>}{" "}
-              <Link className="chip jade" href="/buy/">
-                Buy
-              </Link>
+              {band.difficulty} <span className="dim">· {band.bits}</span>
+            </dd>
+          </div>
+          <div>
+            <dt>network rate</dt>
+            <dd>{band.rate}</dd>
+          </div>
+          <div>
+            <dt>percent minted</dt>
+            <dd>{band.percent}</dd>
+          </div>
+          <div>
+            <dt>since the last mint</dt>
+            <dd>
+              <Since n={contracts ? nums : null} />
             </dd>
           </div>
         </dl>
-      </header>
+      </section>
 
       <div className={`panel bench ${m.running ? "on" : ""}`}>
         <Incubator sample={m.sample} running={m.running && !m.pending} reveal={reveal} />
@@ -421,8 +496,8 @@ export function Mine() {
         </div>
         <p className="mine-foot dim">
           {contracts ? "" : "Preview: the contracts are not live. "}A practice run hashes for real and mints nothing. 303 cards per seat
-          the vault holds, 3,333 in all; the price rises each epoch of 303 mints. 30% of every mint goes to the developer. The design in
-          full:{" "}
+          the vault holds, 3,333 in all; the price rises each epoch of 303 mints. A mint sometimes does the vault&apos;s housekeeping on
+          the way; the miner is paid for it. 30% of every mint goes to the developer. The design in full:{" "}
           <a href="https://github.com/pupate-IMD/PUPATE/blob/main/docs/superpowers/specs/2026-10-13-metamorph-md-design.md" target="_blank" rel="noreferrer">
             Metamorph MD on GitHub ↗
           </a>
