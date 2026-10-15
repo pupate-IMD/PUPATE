@@ -89,18 +89,26 @@ three art contracts have no owner and no setter, and the token keeps the art's a
    Sepolia key will do as `SEPOLIA_KEY` (keep it in `.env`, which is gitignored); the four transactions take
    9,595,604 gas together, as the local run measured them, in Sepolia ETH only. Simulate without `--broadcast`
    first, then broadcast; both print the four addresses and a line per token, `token 1 stage 0 gilt false
-   tokenURI bytes 21045` and so on, the code alone fixing the numbers. Then open
-   `https://testnets.opensea.io/assets/sepolia/<MetamorphRehearsal address>/<id>` for ids 1 to 8 (press
-   "Refresh metadata" if the image is missing at first) and the cards in a wallet that shows Sepolia NFTs
-   (MetaMask on Sepolia imports one by the rehearsal's address and the id). What should be there, as in the
-   browser view of `out/art/`: the digit contours that draw the figure and the halo rings around it, a
-   chrysalis in its whole shell. A chrysalis without its shell, only the frame, the labels and the plain
-   strokes left, means that marketplace or wallet rasterises on a server without `<textPath>`. The rehearsal
-   contracts are throwaway: nothing from them is recorded in the address book, and nothing depends on them.
+   tokenURI bytes 21045` and so on, the code alone fixing the numbers. OpenSea retired its testnet site
+   (`testnets.opensea.io` redirects to its "Farewell testnets" article, and its API knows no Sepolia), so the
+   testnet look is Sepolia Etherscan's token page,
+   `https://sepolia.etherscan.io/nft/<MetamorphRehearsal address>/<id>` for ids 1 to 8, and a wallet that
+   shows Sepolia NFTs (MetaMask on Sepolia imports one by the rehearsal's address and the id). The marketplace
+   look is on mainnet, between step 1 and step 2: once the real router is deployed and checked, run the same
+   script with `ART=<metamorphArt>` in the environment and it deploys nothing but the throwaway ERC-721
+   (about 1.95M gas), wearing that router; then open
+   `https://opensea.io/assets/ethereum/<MetamorphRehearsal address>/<id>` and the cards in a wallet, and
+   only then deploy the token. What should be there, as in the browser view of `out/art/`: the digit
+   contours that draw the figure and the halo rings around it, a chrysalis in its whole shell. A chrysalis
+   without its shell, only the frame, the labels and the plain strokes left, means that marketplace or wallet
+   rasterises on a server without `<textPath>`. The rehearsal contracts are throwaway: nothing from them is
+   recorded in the address book, nothing depends on them, and the eight cards stay in the deployer's wallet
+   (hide the collection on OpenSea afterwards if its name should not show beside the real one).
 
        set -a; . ./.env; set +a
        forge script script/RehearseMetamorphArt.s.sol --rpc-url "$SEPOLIA_RPC_URL" --private-key "$SEPOLIA_KEY"
        forge script script/RehearseMetamorphArt.s.sol --rpc-url "$SEPOLIA_RPC_URL" --private-key "$SEPOLIA_KEY" --broadcast          --gas-estimate-multiplier 900 --slow --retries 10 --delay 8
+       ART=<metamorphArt> forge script script/RehearseMetamorphArt.s.sol --rpc-url "$MAINNET_RPC_URL" --private-key "$KEEPER_PRIVATE_KEY" --broadcast
 
    The multiplier is the lesson of the first Sepolia rehearsal (`docs/deployment.md`, "What the Sepolia
    rehearsal taught"): forge simulates on the project's `cancun` EVM and Sepolia runs a newer schedule under

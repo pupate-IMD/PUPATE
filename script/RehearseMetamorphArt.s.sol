@@ -8,29 +8,38 @@ import {MetamorphButterfly} from "../src/metamorph/art/MetamorphButterfly.sol";
 import {MetamorphChrysalis} from "../src/metamorph/art/MetamorphChrysalis.sol";
 import {MetamorphRehearsal} from "./rehearsal/MetamorphRehearsal.sol";
 
-/// @notice TESTNET ONLY. The art of Metamorph MD on a testnet beside a throwaway ERC-721 that wears it, so the
-/// owner can look at a card where collectors will see it (a testnet marketplace's item page, a wallet) before
-/// the mainnet deployment, which cannot be corrected; `script/mainnet/README.md`, "Metamorph MD", step 1, says
-/// why (`<textPath>`). Deploys the two figures and the router exactly as `DeployMetamorphArt` does, then
-/// `MetamorphRehearsal` with eight cards of the parity sample (`node script/art/mirror.mjs sample`), minted to
-/// the deployer: four chrysalises and four butterflies, plain and gilt, every form and every halo among them
-/// and every halo in each stage. No env and no constructor argument but the cards: the four contracts have no
-/// owner and no setter. The run, a dry run included, ends by reading every token's URI through the rehearsal
-/// and prints the length of each. Nothing from this run belongs in the address book.
+/// @notice A REHEARSAL, never the deployment. The art of Metamorph MD beside a throwaway ERC-721 that wears it,
+/// so the owner can look at a card where collectors will see it (a marketplace's item page, a wallet) before
+/// the token takes the art, which cannot be corrected; `script/mainnet/README.md`, "Metamorph MD", step 1, says
+/// why (`<textPath>`). Without `ART` in the environment it deploys the two figures and the router exactly as
+/// `DeployMetamorphArt` does (a testnet); with `ART=<router>` it deploys nothing but the ERC-721, wearing that
+/// router (mainnet, between the art and the token). The ERC-721, `MetamorphRehearsal`, holds eight cards of the
+/// parity sample (`node script/art/mirror.mjs sample`), minted to the deployer: four chrysalises and four
+/// butterflies, plain and gilt, every form and every halo among them and every halo in each stage. The
+/// contracts have no owner and no setter. The run, a dry run included, ends by reading every token's URI
+/// through the rehearsal and prints the length of each. Nothing from this run belongs in the address book.
 contract RehearseMetamorphArt is Script {
     function run() external returns (MetamorphRehearsal rehearsal) {
         IMetamorphArt.View[] memory views = _views();
+        address existing = vm.envOr("ART", address(0));
+        require(existing == address(0) || existing.code.length > 0, "ART has no code");
 
         vm.startBroadcast();
-        MetamorphChrysalis chrysalis = new MetamorphChrysalis();
-        MetamorphButterfly butterfly = new MetamorphButterfly();
-        MetamorphArt art = new MetamorphArt(chrysalis, butterfly);
+        IMetamorphArt art;
+        if (existing == address(0)) {
+            MetamorphChrysalis chrysalis = new MetamorphChrysalis();
+            MetamorphButterfly butterfly = new MetamorphButterfly();
+            art = new MetamorphArt(chrysalis, butterfly);
+            console2.log("MetamorphChrysalis", address(chrysalis));
+            console2.log("MetamorphButterfly", address(butterfly));
+            console2.log("MetamorphArt", address(art));
+        } else {
+            art = IMetamorphArt(existing);
+            console2.log("MetamorphArt (existing)", existing);
+        }
         rehearsal = new MetamorphRehearsal(art, views);
         vm.stopBroadcast();
 
-        console2.log("MetamorphChrysalis", address(chrysalis));
-        console2.log("MetamorphButterfly", address(butterfly));
-        console2.log("MetamorphArt", address(art));
         console2.log("MetamorphRehearsal", address(rehearsal));
 
         // Every card through the rehearsal, reads that are never broadcast.
