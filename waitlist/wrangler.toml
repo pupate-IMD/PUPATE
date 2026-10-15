@@ -1,0 +1,11 @@
+# The pre-register list's Worker (README.md walks through the deploy). The D1 database id is the one
+# `wrangler d1 create pupate-preregister` prints; the admin key is a secret (`wrangler secret put ADMIN_KEY`),
+# never a variable here.
+name = "pupate-preregister"
+main = "src/index.ts"
+compatibility_date = "2026-10-12"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pupate-preregister"
+database_id = "<fill after wrangler d1 create>"

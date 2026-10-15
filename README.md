@@ -95,6 +95,7 @@ nothing can raise it. There is no function that withdraws from the vault.
 ├── script/       deploy scripts, and script/mainnet/ — the runner that took the launch through IMD
 ├── keeper/       off-chain IMD paid-action client, the keeper loop, and the mainnet addresses
 ├── site/         the website — Next.js static export, RainbowKit; reads the live chain
+├── waitlist/     the pre-register list behind the mine page's temporary form — a Cloudflare Worker on D1
 ├── docs/         the spec, the reviews and audits, deployment record, plans
 ├── brand/        logo, banner and social image
 └── launch.json   IMD launch manifest, as launched (#1434)
