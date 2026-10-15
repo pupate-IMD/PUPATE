@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { type Address, getAddress, isAddress } from "viem";
-import { useAccount, useSignMessage } from "wagmi";
-import { isUserRejection } from "@/lib/metamorph/mint";
+import { useAccount } from "wagmi";
 
 /// The list's Worker (waitlist/), baked in at build time; empty, and Mine.tsx leaves the card out.
 export const PREREGISTER_URL = (process.env.NEXT_PUBLIC_PREREGISTER_URL ?? "").replace(/\/+$/, "");
@@ -30,22 +29,15 @@ function keepFollowed(): void {
   } catch {}
 }
 
-/// The message the wallet signs: three lines, the handle, the checksummed address, the time; the Worker
-/// rebuilds it word for word before it believes the signature.
-function messageFor(handle: string, address: Address): string {
-  return `Pre-register @${handle} for Metamorph MD\naddress ${address}\nissued ${new Date().toISOString()}`;
-}
-
 /// A temporary card while the mine has not opened: an X username, a follow on the honour system, a wallet
-/// (or an address pasted in), and one press that signs a free message and puts the entry on the list.
-/// PreRegisterGate.tsx shows it in a pop-up over the page: `onListed` tells the gate the entry is on the list
-/// (new, or there already), `onLater` draws the link that puts the pop-up aside. The mine has no allowlist,
-/// and the card goes when mining opens. The page reads nothing from the list; the owner has the count.
-export function PreRegister({ onListed, onLater }: { onListed?: () => void; onLater?: () => void }) {
+/// (or an address pasted in), and one press that puts the entry on the list. Nothing is signed and nothing is
+/// sent before that press. PreRegisterGate.tsx shows it in a pop-up over the page: `onListed` tells the gate
+/// the entry is on the list (new, or there already). The mine has no allowlist, and the card goes when mining
+/// opens. The page reads nothing from the list; the owner has the count.
+export function PreRegister({ onListed }: { onListed?: () => void }) {
   const { address, isConnected } = useAccount();
   const wallet: Address | null = isConnected && address ? getAddress(address) : null;
   const { openConnectModal } = useConnectModal();
-  const { signMessageAsync } = useSignMessage();
   const [handle, setHandle] = useState("");
   const [followed, setFollowed] = useState(false);
   const clicked = useRef(false);
@@ -82,7 +74,6 @@ export function PreRegister({ onListed, onLater }: { onListed?: () => void; onLa
   const pastedOk = pasted !== "" && isAddress(pasted);
   /// The address the entry is for: pasted and checksummed, or the wallet's.
   const chosen: Address | null = pasting ? (pastedOk ? getAddress(pasted) : null) : wallet;
-  const signs = !pasting && !!wallet;
   const canRegister = handleOk && followed && !!chosen && !busy;
 
   async function register() {
@@ -90,18 +81,7 @@ export function PreRegister({ onListed, onLater }: { onListed?: () => void; onLa
     setBusy(true);
     setNote(null);
     try {
-      let body: Record<string, unknown> = { handle, address: chosen, followed, website };
-      if (signs) {
-        const message = messageFor(handle, chosen);
-        let signature: string;
-        try {
-          signature = await signMessageAsync({ message });
-        } catch (e) {
-          setNote({ text: isUserRejection(e) ? "you declined in your wallet; nothing was sent." : "your wallet did not sign; nothing was sent.", tone: "dim" });
-          return;
-        }
-        body = { ...body, message, signature };
-      }
+      const body = { handle, address: chosen, followed, website };
       const res = await fetch(`${PREREGISTER_URL}/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (res.status === 409) {
         setNote({ text: "that handle or address is already registered.", tone: "alarm" });
@@ -132,7 +112,7 @@ export function PreRegister({ onListed, onLater }: { onListed?: () => void; onLa
       </header>
       {done ? (
         <p className="done" role="status">
-          {"You're on the list. We'll say it on X first."}
+          {"You're on the waitlist."}
         </p>
       ) : (
         <ol className="prereg-steps">
@@ -225,7 +205,7 @@ export function PreRegister({ onListed, onLater }: { onListed?: () => void; onLa
             <div className="row">
               <span className="k">register</span>
               <button type="button" className="btn primary" disabled={!canRegister} onClick={() => void register()}>
-                {busy ? (signs ? "Sign in your wallet…" : "Sending…") : "Register"}
+                {busy ? "Sending…" : "Register"}
               </button>
               {note ? (
                 <span className={`hint ${note.tone}`} role="status">
@@ -237,11 +217,6 @@ export function PreRegister({ onListed, onLater }: { onListed?: () => void; onLa
         </ol>
       )}
       <input className="prereg-trap" type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={website} onChange={(e) => setWebsite(e.target.value)} />
-      {onLater && !done ? (
-        <button type="button" className="mine-alt prereg-later" onClick={onLater}>
-          Not now, let me try the miner first.
-        </button>
-      ) : null}
     </section>
   );
 }

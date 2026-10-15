@@ -27,7 +27,8 @@ and the Worker rebuilds that message from the body's handle and address and the 
 requires the message to be exactly that, the issued time to be within ten minutes of now, and the signature
 to recover to the address (viem's `verifyMessage`, so a plain wallet; a smart-contract wallet's signature is
 refused and the page offers the pasted path instead). Only then is the row `verified = 1`. An address
-pasted without a wallet is `verified = 0`.
+pasted without a wallet is `verified = 0`. The page sends no signature today (the owner chose one press and
+no wallet prompt), so every entry from the page is `verified = 0`; the signed path stays for a later version.
 
 ## Routes
 

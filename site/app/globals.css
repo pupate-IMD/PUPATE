@@ -775,8 +775,6 @@ html.prereg-locked { overflow: hidden; }
 }
 .prereg-gate { width: min(100%, 640px); }
 .prereg-gate .prereg { box-shadow: 0 30px 60px -30px color-mix(in srgb, var(--ink) 55%, transparent); }
-.prereg-later { justify-self: start; }
-.prereg-pill { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 4; background: var(--paper); box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--ink) 60%, transparent); }
 @media (prefers-reduced-motion: no-preference) {
   .prereg-gate { animation: inc-reveal 0.25s ease-out; }
 }
