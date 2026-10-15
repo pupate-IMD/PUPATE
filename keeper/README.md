@@ -30,6 +30,33 @@ base fee plus tip is above `GAS_PRICE_CAP_GWEI` the keeper waits instead of send
 logged with its hash, gas and status. After a step that changed state the tick re-reads the state, so
 a flush and the buy or burn it makes possible can happen in the same tick.
 
+### The mine's duties (Metamorph MD)
+
+When the addresses file names `metamorph`, four more steps run at the end of every tick, after the
+vault's own (`lib/metamorph.mjs`). They are public functions of the token that the mine leaves to anyone;
+without `metamorph` the keeper logs one line at start (`no metamorph in the addresses: the mine duties …
+are skipped`) and runs exactly as before, so the mainnet keeper needs nothing new until the contracts exist.
+
+| step | call | when |
+|---|---|---|
+| noteSeats | `MetamorphMD.noteSeat(seat)`, one transaction per seat | a seat the vault holds is not in `notedSeats()` |
+| forgetSeats | `MetamorphMD.forgetSeat(seat)`, one transaction per seat | a seat in `notedSeats()` the vault no longer holds |
+| convert | `MetamorphMD.convert()` with a gas limit of the estimate + 1,000,000 | `pot() >= mintPrice() × CONVERT_PRICES / 5` (20 mint prices: 1,000,000 PUPATE at epoch 1's 50,000), or `ethPot() != 0`; and `CONVERT_SPACING` (5) blocks after `lastConvertBlock()`, counted at the block the transaction would land in |
+| poke | `MetamorphMD.poke(ids)`, 50 cards per transaction | a staked card whose `stageOf(id)` no longer matches its weight (stage 0 weighs 1, stage 1 weighs 2), so an emerged card earns double and its image follows |
+
+"Holds" is the token's own test: on Cocoon's books (`seats(id)`) and in Cocoon's wallet (`ownerOf(id)`).
+The candidates come from the seat cache (`SeatBought` / `SeatAdopted` minus `SeatSold` since `FROM_BLOCK`)
+and from `notedSeats()`, and each is confirmed on chain in the tick's own state read, so a seat whose
+listing filled but which is not settled yet, or one bought earlier in the same tick, is decided by what
+the chain says, not by the logs. The staked cards come from `StakedCard` minus `Unstaked` since
+`FROM_BLOCK` (cached with the seats), each confirmed with `stakeOf(id)`. A refused call is logged by its
+error and skipped (`skip noteSeat #5: SeatNotHeld`, `skip forgetSeat #5: SeatHeld`, `skip convert:
+TooSoon (2 blocks)`); the gas price cap holds as for every step. The conversion pays its caller 0.5% of
+the IMD it buys, to the keeper's wallet. The keeper converts at a fifth of the pot a mint converts at
+(`CONVERT_PRICES` prices), about hourly at full pace. Each tick logs the mine's numbers in
+its status line (`mine 29 minted, noted #1 #2, pot 1,015,000 PUPATE`) and, after a conversion, what it
+sold and bought.
+
 ### Run it
 
     node bin/keeper.mjs --status                 # print the state and exit
@@ -37,6 +64,7 @@ a flush and the buy or burn it makes possible can happen in the same tick.
     node bin/keeper.mjs --loop                   # a tick every LOOP_EVERY seconds (pm2 / systemd)
     node bin/keeper.mjs --once --force-report    # report now, whatever the age of the stored one
     DRY_RUN=1 node bin/keeper.mjs --once         # simulate everything, send nothing
+    node bin/keeper.mjs --once --dry-run         # the same: every decision printed, the mine's four included
 
 Two ways to keep it running on a small VPS:
 
@@ -81,7 +109,7 @@ never printed.
 | `LISTINGS_FILE` | `keeper/listings.json` | for `file` |
 | `OPENSEA_API_KEY`, `OPENSEA_API`, `OPENSEA_CHAIN` | –, `https://api.opensea.io`, `ethereum` | for `opensea` |
 | `HARVEST_TOKENS` | none | comma list of ERC-20s to auction when Cocoon holds a balance |
-| `LOG_CHUNK` | `50000` | blocks per `eth_getLogs` call when scanning seat events |
+| `LOG_CHUNK` | `50000` | blocks per `eth_getLogs` call when scanning seat events (and Metamorph MD's stake events) |
 | `DRY_RUN` | unset | `1`: simulate every step, never send (also `--dry-run`) |
 | `STATUS_DIR` | `site/public` | where `status.json` and `listings.json` are rewritten after every tick and on `--status` (see [the status feed](#the-status-feed)); relative to the repository root; an empty string disables the feed |
 
@@ -103,7 +131,7 @@ never printed.
   OpenSea's signed zone (`0x000056F7…D100`) is dropped because its orders need extra data.
 - Gas price cap, sequential nonce, receipt wait, one purchase per tick.
 - The keeper never takes an auction and never holds Cocoon's ETH; its only income is the caller reward
-  of `buySeat` and `burn`.
+  of `buySeat` and `burn` (ETH) and of Metamorph MD's `convert` (IMD).
 
 ### The status feed
 
@@ -125,14 +153,15 @@ chain's clock and ISO strings for the keeper's own clock.
 | field | meaning |
 |---|---|
 | `generatedAt`, `chainId`, `block`, `blockTimestamp` | when the file was written, and the block the state was read at |
-| `addresses` | `token`, `hook`, `cocoon`, `feed`, `timelock`, `collection`, `seaport`, `universalRouter`, `quoter` |
+| `addresses` | `token`, `hook`, `cocoon`, `feed`, `timelock`, `collection`, `seaport`, `universalRouter`, `quoter`, `metamorph` (`null` until Metamorph MD is in the addresses) |
 | `hook` | `buyTaxBps`, `taxBps`, `openedAt`, `totalTaxWei`, `claimsWei` (the tax waiting on the PoolManager, what `flush` would move) |
 | `feed` | `floorWei`, `floorEth`, `issuedAt`, `freshUntil`, `fresh`, `reportSource` (this keeper's `ATTESTATION_SOURCE`), and `lastRequestId`, `lastRequestAt` (the IMD oracle request behind the newest report this keeper fetched, `null` until it has fetched one; the site's oracle panel loads that request and verifies it in the browser) |
 | `vault` | `seatPotWei`, `burnPotWei`, `developerWei`, `imdBurnWei`, `heldCount`, `heldCostWei`, `mode` (`NEUTRAL`, `ACCUMULATE` or `BURN`), `seatShareBps`, `wired`, `lastBurnBlock`, `burnSpacing`, `params` (every field of `getParams()`) |
 | `seats[]` | each held seat: `tokenId`, `costWei`, `boughtAt`, `round`, `filled` (sold, `settleSeat` due), and `listing` { `startWei`, `endWei`, `startTime`, `decayEnd`, `priceNowWei`, `priceNowEth` }: Cocoon's falling Seaport order, its price at `blockTimestamp` computed with `lib/listings.mjs`'s port of `SeatListing` (Seaport's linear interpolation, rounded up) |
 | `auctions` | `imd`: `{ lotWei, lotEth, demandWei, startedAt }` or `null`; `harvest[]`: `{ token, lotWei, startWei, startedAt, priceNowWei }` for each running `HARVEST_TOKENS` auction |
 | `supply` | `totalWei`, `burnedWei` (1,000,000,000 PUPATE minus `totalSupply`) |
-| `steps` | `flush`, `buySeat`, `burn`, `startImdAuction`, `settle`, `startAuction`, `report`, each `{ ready, why }`: what the keeper would do with this state, under this keeper's thresholds (`MIN_FLUSH_WEI`, `MIN_BURN_WEI`, `MIN_IMD_AUCTION_WEI`, `LISTING_SOURCE`). `buySeat` adds `bestListingWei` (the cheapest listing that passes `_checkOrder` and is open on Seaport, when there is one), `ceilingWei` (floor × (1 + tolerance)), `affordableWei` (what the seat pot covers after the reward) and `source`; `settle` adds `tokenIds` |
+| `mine` | Metamorph MD's numbers, so the site has them when the browser's RPC is slow; `null` without `metamorph` in the addresses, `{ address, error }` when the token could not be read: `address`, `minted`, `epoch`, `price` (the mint price, PUPATE in 18 decimals), `bits` (the difficulty now), `lastMintAt`, `pot` (PUPATE waiting to be converted), `ethPot` (wei), `dutiesDue` { `flush`, `burn`, `convert` } (the token's `dutiesDue()`: what the next mint runs), `lastConvertBlock`, `notedSeats`, `mineableSeats`, `stakedCards` |
+| `steps` | `flush`, `buySeat`, `burn`, `startImdAuction`, `settle`, `startAuction`, `report`, each `{ ready, why }`: what the keeper would do with this state, under this keeper's thresholds (`MIN_FLUSH_WEI`, `MIN_BURN_WEI`, `MIN_IMD_AUCTION_WEI`, `LISTING_SOURCE`). `buySeat` adds `bestListingWei` (the cheapest listing that passes `_checkOrder` and is open on Seaport, when there is one), `ceilingWei` (floor × (1 + tolerance)), `affordableWei` (what the seat pot covers after the reward) and `source`; `settle` adds `tokenIds`. With Metamorph MD also `noteSeats` and `forgetSeats` (each with `tokenIds`), `convert`, and `poke` (with `ids`), from the same decision functions the tick runs (`lib/metamorph.mjs`) |
 | `keeper` | `lastTickAt` (ISO; the site turns red past ten minutes), `lastActions` (the last 20 transactions with a receipt: `{ at, action, hash, gasUsed, block, status }`, kept in the state file), `listingSource`, `attestationSource`, `dryRun`, `address` |
 
 **`listings.json`** (`"schema": "pupate-listings/1"`): the market the buy step last looked at, with
@@ -179,6 +208,28 @@ funds the pot from anvil #3, lets the keeper buy, has anvil #4 fill Cocoon's fal
 keeper settle and burn. It prints PASS/FAIL per assertion and the gas of every transaction the keeper
 sent, and exits non-zero on a failure. anvil's keys are derived from its public mnemonic inside the
 test and passed to the keeper's environment only.
+
+### The mine test
+
+With a fresh local fork up (`node script/local/up.mjs`: Metamorph MD at one bit, the vault's one seat
+noted, nothing minted; the fork test and the site's `npm run mine-check` change the stack, so bring a new
+one up first):
+
+    node keeper/test/metamorph.mjs
+
+It runs the keeper `--once` as anvil #2 through the four duties: the first tick finds the seat `up.mjs`
+noted and leaves it; a second seat handed to Cocoon and adopted is noted on the next tick; anvil #5 mints
+(the clock moved on 100 s before each mint, so the difficulty stays at one bit) until the pot holds
+`CONVERT_PRICES / 5` mint prices, anvil #1 buys PUPATE so the launch pool holds ETH, and the keeper
+converts with the estimate + 1,000,000 as its gas limit and receives the caller's IMD; a staked card's
+seat is bought from Cocoon's listing, `--dry-run` prints the four decisions and sends nothing, and the
+next tick settles the seat, forgets it and pokes the card to weight 2. Last, one tick settles a sold seat,
+buys seat 1376 from a listing, notes it and forgets the sold one, after the test has read the keeper's
+own state and shown that it counts the sold seat out of the vault while the logs still hold it. Then the
+keeper's own `noteSeats` and `forgetSeats`, run in a dry run on states made stale on purpose, meet
+`SeatNotHeld`, `SeatHeld` and `SeatNotNoted` in the simulation and log and skip each. The
+keeper's seat cache for chain 31337 is cleared first, its status feed goes to `.state/metamorph-status`,
+and a stand-in for IMD's seat API answers in the test, so the work feed calls no outside service.
 
 ## IMD client
 
@@ -238,9 +289,11 @@ with `schedule.topup` (`{"scheduleId", "runs"}`), or start the schedule from
   path; `lib/state.mjs` the multicall, the seat cache, the status line; `lib/listings.mjs` Cocoon's own
   Seaport orders (a port of `src/cocoon/SeatListing.sol`), `_checkOrder` client-side, the listing sources;
   `lib/oracle.mjs` report timing, the local signer, the paid IMD flow; `lib/actions.mjs` the six steps and
-  their decision functions; `lib/status.mjs` the status feed (`status.json`, `listings.json`);
-  `lib/abi.mjs` the ABI slices; `lib/log.mjs` formatting; `lib/imd.mjs` the IMD client.
-- `test/fork.mjs` the fork test. `.state/` (git-ignored) the seat cache and the test's listings file.
+  their decision functions; `lib/metamorph.mjs` the mine's four duties and theirs; `lib/status.mjs` the
+  status feed (`status.json`, `listings.json`); `lib/abi.mjs` the ABI slices; `lib/log.mjs` formatting;
+  `lib/imd.mjs` the IMD client.
+- `test/fork.mjs` the fork test; `test/metamorph.mjs` the mine test. `.state/` (git-ignored) the seat
+  cache and the tests' listings files and status feed.
 
 ## The work feed (`work.json`)
 

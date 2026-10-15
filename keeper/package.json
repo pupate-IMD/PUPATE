@@ -16,7 +16,8 @@
     "keeper:status": "node bin/keeper.mjs --status",
     "keeper:once": "node bin/keeper.mjs --once",
     "keeper:loop": "node bin/keeper.mjs --loop",
-    "test:fork": "node test/fork.mjs"
+    "test:fork": "node test/fork.mjs",
+    "test:mine": "node test/metamorph.mjs"
   },
   "dependencies": {
     "@x402/core": "2.28.0",

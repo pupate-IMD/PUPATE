@@ -14,6 +14,12 @@
 //   d. buy     Cocoon.buySeat with the cheapest valid listing under floor * (1 + tolerance) the pot covers
 //   e. burn    Cocoon.burn when the burn pot is at least MIN_BURN_WEI and burnSpacing blocks have passed
 //   f. auctions Cocoon.startAuction for each HARVEST_TOKENS balance, Cocoon.startImdAuction for the IMD-burn ETH
+//   then Cocoon.claimDeveloper, and, when the addresses file names Metamorph MD (lib/metamorph.mjs):
+//   noteSeats   MetamorphMD.noteSeat for each seat the vault holds (on its books and in its wallet) not noted
+//   forgetSeats MetamorphMD.forgetSeat for each noted seat the vault no longer holds
+//   convert     MetamorphMD.convert when the pot holds CONVERT_PRICES / 5 mint prices or ETH waits, past
+//               CONVERT_SPACING blocks; gas limit = the estimate + 1,000,000
+//   poke        MetamorphMD.poke for the staked cards whose stage no longer matches their weight, 50 a call
 // Every step is simulated with eth_call first; a revert is logged by its custom error name and skipped.
 // After the tick, STATUS_DIR/status.json and listings.json are rewritten (lib/status.mjs): the state,
 // what each step would do right now, and the keeper's last actions, for anyone without an RPC.
@@ -24,7 +30,8 @@ import { auctions, burn, buy, claim, flush, report, settle } from '../lib/action
 import { createClients, createTx, revertReason } from '../lib/chain.mjs';
 import { describeConfig, loadConfig } from '../lib/config.mjs';
 import { log, setTick, warn } from '../lib/log.mjs';
-import { loadCache, readState, saveCache, statusLine, statusReport, syncSeats } from '../lib/state.mjs';
+import { convertPot, forgetSeats, noteSeats, poke } from '../lib/metamorph.mjs';
+import { loadCache, readState, saveCache, statusLine, statusReport, syncSeats, syncStakes } from '../lib/state.mjs';
 import { rememberAction, writeStatusFiles } from '../lib/status.mjs';
 import { writeWorkFile } from '../lib/work.mjs';
 
@@ -69,6 +76,7 @@ async function main() {
   }
   if (cfg.attestationSource === 'imd' && !dryRun) log('ATTESTATION_SOURCE=imd: a due report costs 0.5 IMD from the keeper wallet (Permit2)');
   if (cfg.listingSource === 'opensea') log('LISTING_SOURCE=opensea: this source is untested; watch the first purchases');
+  if (!cfg.addresses.metamorph) log('no metamorph in the addresses: the mine duties (noteSeats, forgetSeats, convert, poke) are skipped');
 
   const cache = loadCache(cfg.stateFile, cfg.chainId, cfg.addresses.cocoon, cfg.fromBlock);
   const tx = createTx({
@@ -138,10 +146,18 @@ async function main() {
   log('stopped');
 }
 
-/** Sync the seat cache to the chain head and read the state. */
+/** Sync the seat cache (and the mine's staked cards) to the chain head and read the state. */
 async function load(ctx) {
   const latest = await ctx.pub.getBlockNumber();
   await syncSeats({ pub: ctx.pub, cocoon: ctx.a.cocoon, fromBlock: ctx.cfg.fromBlock, toBlock: latest, cache: ctx.cache, chunk: ctx.cfg.logChunk });
+  if (ctx.a.metamorph) {
+    // A failed scan of the stakes must not hold the vault's steps back: poke works on the cards read so far.
+    try {
+      await syncStakes({ pub: ctx.pub, metamorph: ctx.a.metamorph, fromBlock: ctx.cfg.fromBlock, toBlock: latest, cache: ctx.cache, chunk: ctx.cfg.logChunk });
+    } catch (e) {
+      warn(`the staked cards' logs: ${revertReason(e)}`);
+    }
+  }
   ctx.persist();
   return ctx.refresh();
 }
@@ -165,6 +181,15 @@ async function tick(ctx, n) {
       ['burn', burn],
       ['auctions', auctions],
       ['claim', claim],
+      // The mine's duties, on the state the vault's steps left (re-read after any of them acted).
+      ...(ctx.a.metamorph
+        ? [
+            ['noteSeats', noteSeats],
+            ['forgetSeats', forgetSeats],
+            ['convert', convertPot],
+            ['poke', poke],
+          ]
+        : []),
     ];
     for (const [name, fn] of steps) {
       let r = null;

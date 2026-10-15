@@ -1,15 +1,19 @@
 // What the keeper knows at the start of a tick: the protocol's state in one multicall, the seats
 // Cocoon holds (from its SeatBought / SeatAdopted / SeatSold logs, cached incrementally in
-// .state/<chainId>.json), and for each held seat whether its listing has filled.
+// .state/<chainId>.json), and for each held seat whether its listing has filled. With Metamorph MD
+// in the addresses file, the mine's state too: its numbers, the seats it noted, the vault's seats
+// confirmed on chain, and the staked cards (from its StakedCard / Unstaked logs, cached the same way).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isAddressEqual } from 'viem';
-import { MODE, cocoonAbi, erc20Abi, erc721Abi, feedAbi, hookAbi, poolManagerAbi, seaportAbi } from './abi.mjs';
-import { MULTICALL3 } from './chain.mjs';
+import { isAddressEqual, zeroAddress } from 'viem';
+import { MODE, cocoonAbi, erc20Abi, erc721Abi, feedAbi, hookAbi, metamorphAbi, poolManagerAbi, seaportAbi } from './abi.mjs';
+import { MULTICALL3, revertReason } from './chain.mjs';
 import { seatComponents } from './listings.mjs';
 import { fmtDuration, fmtEth, fmtTokens, short } from './log.mjs';
 
 const SEAT_EVENTS = cocoonAbi.filter((x) => x.type === 'event' && ['SeatBought', 'SeatAdopted', 'SeatSold'].includes(x.name));
+const STAKE_EVENTS = metamorphAbi.filter((x) => x.type === 'event' && ['StakedCard', 'Unstaked'].includes(x.name));
+const ascending = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
 
 // ------------------------------------------------------------------ the cache file
 
@@ -25,6 +29,8 @@ export function emptyCache(chainId, cocoon, fromBlock) {
     // For the status feed: when the last tick finished and the last transactions sent (see status.mjs).
     lastTickAt: null,
     lastActions: [],
+    // Metamorph MD's staked cards, { metamorph, scannedTo, staked: { id: staker } } (see syncStakes).
+    mine: null,
   };
 }
 
@@ -59,18 +65,17 @@ export function isRangeRefusal(e) {
 }
 
 /**
- * Scan Cocoon's seat events from where the cache stopped up to `toBlock`, in LOG_CHUNK pieces. When the
- * node refuses a range it is halved and retried, and the size that worked is kept in the cache, so
- * the next tick starts from it instead of learning it again.
+ * Scan `events` of `address` from block `from` up to `toBlock`, in LOG_CHUNK pieces, handing each piece
+ * to `onChunk(logs, to)` in chain order. When the node refuses a range it is halved and retried, and
+ * the size that worked is kept in the cache, so the next tick starts from it instead of learning it again.
  */
-export async function syncSeats({ pub, cocoon, fromBlock, toBlock, cache, chunk }) {
-  let from = cache.scannedTo === null ? BigInt(fromBlock) : BigInt(cache.scannedTo) + 1n;
+async function scanLogs({ pub, address, events, from, toBlock, cache, chunk }, onChunk) {
   let step = BigInt(cache.logChunk && cache.logChunk < chunk ? cache.logChunk : chunk);
   while (from <= toBlock) {
     const to = from + step - 1n < toBlock ? from + step - 1n : toBlock;
     let logs;
     try {
-      logs = await pub.getLogs({ address: cocoon, events: SEAT_EVENTS, fromBlock: from, toBlock: to });
+      logs = await pub.getLogs({ address, events, fromBlock: from, toBlock: to });
     } catch (e) {
       if (!isRangeRefusal(e) || step <= 1n) throw e;
       step = step / 2n < 1n ? 1n : step / 2n;
@@ -78,6 +83,15 @@ export async function syncSeats({ pub, cocoon, fromBlock, toBlock, cache, chunk 
       continue;
     }
     logs.sort((x, y) => (x.blockNumber === y.blockNumber ? Number(x.logIndex) - Number(y.logIndex) : x.blockNumber < y.blockNumber ? -1 : 1));
+    onChunk(logs, to);
+    from = to + 1n;
+  }
+}
+
+/** Scan Cocoon's seat events from where the cache stopped up to `toBlock` (see scanLogs). */
+export async function syncSeats({ pub, cocoon, fromBlock, toBlock, cache, chunk }) {
+  const from = cache.scannedTo === null ? BigInt(fromBlock) : BigInt(cache.scannedTo) + 1n;
+  await scanLogs({ pub, address: cocoon, events: SEAT_EVENTS, from, toBlock, cache, chunk }, (logs, to) => {
     for (const l of logs) {
       const id = l.args.tokenId.toString();
       if (l.eventName === 'SeatSold') {
@@ -87,8 +101,29 @@ export async function syncSeats({ pub, cocoon, fromBlock, toBlock, cache, chunk 
       }
     }
     cache.scannedTo = Number(to);
-    from = to + 1n;
+  });
+  return cache;
+}
+
+/**
+ * Scan Metamorph MD's StakedCard / Unstaked events into `cache.mine.staked` (card id -> staker), from
+ * FROM_BLOCK and then from where the last scan stopped, as syncSeats does for the seats. Another token
+ * address starts the set over. The set only names candidates: readState confirms each with stakeOf.
+ */
+export async function syncStakes({ pub, metamorph, fromBlock, toBlock, cache, chunk }) {
+  if (!cache.mine || !cache.mine.metamorph || !isAddressEqual(cache.mine.metamorph, metamorph)) {
+    cache.mine = { metamorph, scannedTo: null, staked: {} };
   }
+  const m = cache.mine;
+  const from = m.scannedTo === null ? BigInt(fromBlock) : BigInt(m.scannedTo) + 1n;
+  await scanLogs({ pub, address: metamorph, events: STAKE_EVENTS, from, toBlock, cache, chunk }, (logs, to) => {
+    for (const l of logs) {
+      const id = l.args.id.toString();
+      if (l.eventName === 'StakedCard') m.staked[id] = l.args.staker;
+      else delete m.staked[id];
+    }
+    m.scannedTo = Number(to);
+  });
   return cache;
 }
 
@@ -206,6 +241,17 @@ export async function readState({ pub, cfg, cache, keeperAddress }) {
     });
   }
 
+  // Metamorph MD, when the addresses file names it, in reads of its own: a mine that cannot be read
+  // leaves the vault's steps alone, and its four duties idle with the reason.
+  let mine = null;
+  if (a.metamorph) {
+    try {
+      mine = await readMine({ pub, a, cache, replayHeld: heldIds, seats });
+    } catch (e) {
+      mine = { error: revertReason(e) };
+    }
+  }
+
   const keeperBalance = keeperAddress ? await pub.getBalance({ address: keeperAddress }) : null;
 
   return {
@@ -228,9 +274,94 @@ export async function readState({ pub, cfg, cache, keeperAddress }) {
     counter,
     harvest,
     seats,
+    mine,
     keeperBalance,
   };
 }
+
+/**
+ * The mine's side of the state, from Metamorph MD and Cocoon: one multicall for the numbers and the
+ * noted seats, then one for what must be confirmed. The vault's seats are confirmed the way the token
+ * checks them itself (`_vaultHolds`: on Cocoon's books and in Cocoon's wallet): `seats` are the replay's
+ * held seats readState already found on the books, with their owner, and a noted seat the replay does not
+ * list as held is read here the same way, so a noted seat is never forgotten on the logs' word alone.
+ * The staked cards are the replay's candidates confirmed with `stakeOf` (a non-zero staker), each with
+ * `stageOf`. Returns { error: null, noted, mineable, held, stakes, pot, ethPot, ... }.
+ */
+async function readMine({ pub, a, cache, replayHeld, seats }) {
+  const md = a.metamorph;
+  const r = await pub.multicall({
+    contracts: [
+      call(md, metamorphAbi, 'notedSeats'),
+      call(md, metamorphAbi, 'mineableSeats'),
+      call(md, metamorphAbi, 'pot'),
+      call(md, metamorphAbi, 'ethPot'),
+      call(md, metamorphAbi, 'lastConvertBlock'),
+      call(md, metamorphAbi, 'mintPrice'),
+      call(md, metamorphAbi, 'totalMinted'),
+      call(md, metamorphAbi, 'bits'),
+      call(md, metamorphAbi, 'epoch'),
+      call(md, metamorphAbi, 'lastMintAt'),
+      call(md, metamorphAbi, 'CONVERT_SPACING'),
+      call(md, metamorphAbi, 'CONVERT_PRICES'),
+      call(md, metamorphAbi, 'dutiesDue'),
+    ],
+    allowFailure: false,
+    multicallAddress: MULTICALL3,
+  });
+  const noted = [...r[0]];
+  const replayed = new Set(replayHeld.map(String));
+  const extra = noted.filter((id) => !replayed.has(id.toString()));
+  const stakedIds = Object.keys(cache.mine?.staked || {})
+    .map((id) => BigInt(id))
+    .sort(ascending);
+  const q = [];
+  for (const id of extra) q.push(call(a.cocoon, cocoonAbi, 'seats', [id]), call(a.collection, erc721Abi, 'ownerOf', [id]));
+  for (const id of stakedIds) q.push(call(md, metamorphAbi, 'stakeOf', [id]), call(md, metamorphAbi, 'stageOf', [id]));
+  // Two calls per staked card: in pieces of 8 KB of calldata (about 220 calls, a few million gas per
+  // eth_call) rather than viem's 1 KB, so thousands of staked cards stay a few dozen calls a tick.
+  const r2 = q.length ? await pub.multicall({ contracts: q, allowFailure: true, multicallAddress: MULTICALL3, batchSize: 8_192 }) : [];
+
+  const held = seats.filter((x) => !x.gone).map((x) => x.tokenId);
+  extra.forEach((id, i) => {
+    const [books, owner] = [r2[2 * i], r2[2 * i + 1]];
+    if (books.status === 'success' && books.result[5] && owner.status === 'success' && isAddressEqual(owner.result, a.cocoon)) held.push(id);
+  });
+  held.sort(ascending);
+
+  const stakes = [];
+  const at = 2 * extra.length;
+  stakedIds.forEach((id, i) => {
+    const [st, stage] = [r2[at + 2 * i], r2[at + 2 * i + 1]];
+    if (st.status !== 'success' || stage.status !== 'success') return; // unreadable this tick: the next one retries
+    const [staker, weight] = st.result;
+    if (isAddressEqual(staker, zeroAddress)) return; // unstaked after the logs were read
+    stakes.push({ id, staker, weight: Number(weight), stage: Number(stage.result) });
+  });
+
+  const [flushDue, burnDue, convertDue] = r[12];
+  return {
+    error: null,
+    noted,
+    mineable: [...r[1]],
+    held,
+    stakes,
+    pot: r[2],
+    ethPot: r[3],
+    lastConvertBlock: r[4],
+    mintPrice: r[5],
+    totalMinted: Number(r[6]),
+    bits: Number(r[7]),
+    epoch: Number(r[8]),
+    lastMintAt: BigInt(r[9]),
+    convertSpacing: BigInt(r[10]),
+    convertPrices: r[11],
+    dutiesDue: { flush: flushDue, burn: burnDue, convert: convertDue },
+  };
+}
+
+/** "#1 #1376", or "12 seats" past six of them, or "none". */
+const seatTags = (ids) => (ids.length === 0 ? 'none' : ids.length > 6 ? `${ids.length} seats` : ids.map((id) => `#${id}`).join(' '));
 
 /** The compact one-line status printed every tick. */
 export function statusLine(s) {
@@ -240,10 +371,16 @@ export function statusLine(s) {
     : `floor ${fmtEth(s.feed.floorWei)} ${s.feed.fresh ? `fresh (stale in ${fmtDuration(s.feed.freshUntil - now)})` : `STALE (${fmtDuration(now - s.feed.freshUntil)} ago)`}`;
   const seats = s.seats.length ? s.seats.map((x) => `#${x.tokenId}${x.gone || x.filled ? '(sold)' : ''}`).join(' ') : '0';
   const imd = s.imdAuction.lot === 0n ? 'none' : `${fmtEth(s.imdAuction.lot)} lot`;
+  const mine = !s.mine
+    ? ''
+    : s.mine.error
+      ? ' | mine unreadable'
+      : ` | mine ${s.mine.totalMinted} minted, noted ${seatTags(s.mine.noted)}, pot ${fmtTokens(s.mine.pot)}`;
   return (
     `block ${s.block.number} | ${feed} | hook claims ${fmtEth(s.claims)} | pots seat ${fmtEth(s.pots.seat)} burn ${fmtEth(s.pots.burn)} ` +
     `dev ${fmtEth(s.pots.dev)} imd ${fmtEth(s.pots.imd)} | held ${seats} | mode ${s.mode.name} | supply ${fmtTokens(s.totalSupply)} | ` +
     `imd auction ${imd}` +
+    mine +
     (s.keeperBalance !== null ? ` | keeper ${fmtEth(s.keeperBalance)}` : '')
   );
 }
@@ -274,6 +411,20 @@ export function statusReport(s, cfg) {
         `owner ${x.owner ? short(x.owner) : '?'} falling ${x.status[0] ? `${x.status[0].isValidated ? 'validated' : 'not validated'}${x.status[0].totalFilled ? ' FILLED' : ''}` : '?'} ` +
         `tail ${x.status[1] ? `${x.status[1].isValidated ? 'validated' : 'not validated'}${x.status[1].isCancelled ? ' cancelled' : ''}` : '?'}` +
         (x.gone || x.filled ? '  -> settle' : ''),
+    );
+  }
+  if (s.mine?.error) lines.push(`mine      unreadable: ${s.mine.error}`);
+  else if (s.mine) {
+    const m = s.mine;
+    const yes = (b) => (b ? 'yes' : 'no');
+    lines.push(
+      `mine      minted ${m.totalMinted}, epoch ${m.epoch}, mint price ${fmtTokens(m.mintPrice)}, ${m.bits} bit${m.bits === 1 ? '' : 's'}, ` +
+        `last mint ${new Date(Number(m.lastMintAt) * 1000).toISOString()}`,
+      `          noted ${seatTags(m.noted)}, mineable ${seatTags(m.mineable)}, the vault holds ${seatTags(m.held)}`,
+      `          pot ${fmtTokens(m.pot)}, ethPot ${fmtEth(m.ethPot)}, lastConvertBlock ${m.lastConvertBlock} (spacing ${m.convertSpacing}), ` +
+        `duties due: flush ${yes(m.dutiesDue.flush)} burn ${yes(m.dutiesDue.burn)} convert ${yes(m.dutiesDue.convert)}`,
+      `          staked ${m.stakes.length} card${m.stakes.length === 1 ? '' : 's'}, ` +
+        `${m.stakes.filter((x) => x.stage + 1 !== x.weight).length} of them at a weight their stage no longer has`,
     );
   }
   if (s.keeperBalance !== null) lines.push(`keeper    balance ${fmtEth(s.keeperBalance)}`);

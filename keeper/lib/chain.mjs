@@ -86,25 +86,29 @@ export function createTx({ pub, wallet, account, dryRun, gasCapWei, txTimeoutSec
   }
 
   /**
-   * Simulate, then send and wait. `label` is what the log line says.
+   * Simulate, then send and wait. `label` is what the log line says. The gas limit is the estimate plus
+   * 25%, or, with `opts.padGas`, the estimate plus that many gas: a fixed padding, the way the mine page
+   * pads a mint for the duties it runs (the conversion takes 1,000,000).
+   * @param {{padGas?: bigint}} [opts]
    * @returns {{status: 'sent'|'dry'|'reverted'|'waiting'|'failed'|'nokey', hash?, gasUsed?, receipt?, result?, reason?}}
    */
-  async function run(label, call) {
+  async function run(label, call, opts = {}) {
     const sim = await simulate(call);
     if (!sim.ok) {
       log(`skip ${label}: ${sim.reason}`);
       return { status: 'reverted', reason: sim.reason };
     }
-    let gas;
+    const padded = opts.padGas !== undefined;
+    let estimate, gas;
     try {
-      gas = await pub.estimateContractGas({ ...call, account: account ?? undefined });
-      gas = (gas * 125n) / 100n;
+      estimate = await pub.estimateContractGas({ ...call, account: account ?? undefined });
+      gas = padded ? estimate + opts.padGas : (estimate * 125n) / 100n;
     } catch (e) {
       log(`skip ${label}: gas estimate failed: ${revertReason(e)}`);
       return { status: 'failed', reason: revertReason(e) };
     }
     if (dryRun) {
-      log(`dry run: would send ${label} (gas estimate ${gas})`);
+      log(`dry run: would send ${label} (gas estimate ${padded ? `${estimate} + ${opts.padGas} = ${gas}` : gas})`);
       return { status: 'dry', result: sim.result, gas };
     }
     if (!wallet || !account) {
@@ -120,6 +124,7 @@ export function createTx({ pub, wallet, account, dryRun, gasCapWei, txTimeoutSec
       return { status: 'waiting', reason: 'gas price above cap' };
     }
     if (nonce === null) await syncNonce();
+    if (padded) log(`gas for ${label}: estimate ${estimate} + ${opts.padGas} = ${gas}`);
     let hash;
     try {
       hash = await wallet.writeContract({

@@ -3,9 +3,9 @@
 // judges, third-party keepers, and the site's "keeper alive" panel.
 //
 //   status.json    schema pupate-status/1: the chain, the hook, the feed, the vault, the held seats
-//                  with their listings, the auctions, the supply, what each step would do right now
-//                  (the keeper's own decision functions on the same state) and the keeper's last
-//                  tick and last transactions.
+//                  with their listings, the auctions, the supply, the mine (Metamorph MD's numbers,
+//                  when the addresses name it), what each step would do right now (the keeper's own
+//                  decision functions on the same state) and the keeper's last tick and last transactions.
 //   listings.json  schema pupate-listings/1: the market the buy step last looked at (OpenSea only;
 //                  the file source and none give an empty array), each listing with its check
 //                  result and no signature.
@@ -19,6 +19,7 @@ import { formatEther } from 'viem';
 import { burnDecision, flushDecision, harvestDecisions, imdAuctionDecision, reportDecision, scanListings, settleDecision } from './actions.mjs';
 import { currentPrice, endPrice, seatParameters, startPrice } from './listings.mjs';
 import { jsonSafe, warn } from './log.mjs';
+import { convertDecision, forgetSeatsDecision, noteSeatsDecision, pokeDecision } from './metamorph.mjs';
 
 export const STATUS_SCHEMA = 'pupate-status/1';
 export const LISTINGS_SCHEMA = 'pupate-listings/1';
@@ -39,6 +40,47 @@ export function rememberAction(cache, entry) {
 /** A scan that never happened, so the files can still be written when scanListings itself failed. */
 export function emptyScan(cfg, why) {
   return { source: cfg.listingSource, fetchedAt: null, ceiling: 0n, affordable: 0n, checked: [], tryList: [], ready: false, why, best: null, error: why };
+}
+
+/**
+ * The mine's numbers for status.json, so the site has them when the browser's RPC is slow: null without
+ * Metamorph MD in the addresses, `{ address, error }` when its state could not be read this tick.
+ */
+export function buildMine(cfg, s) {
+  const m = s.mine;
+  if (!m) return null;
+  const address = cfg.addresses.metamorph;
+  if (m.error) return { address, error: m.error };
+  return {
+    address,
+    minted: str(m.totalMinted),
+    epoch: str(m.epoch),
+    price: str(m.mintPrice),
+    bits: str(m.bits),
+    lastMintAt: str(m.lastMintAt),
+    pot: str(m.pot),
+    ethPot: str(m.ethPot),
+    dutiesDue: { flush: Boolean(m.dutiesDue.flush), burn: Boolean(m.dutiesDue.burn), convert: Boolean(m.dutiesDue.convert) },
+    lastConvertBlock: str(m.lastConvertBlock),
+    notedSeats: m.noted.map(str),
+    mineableSeats: m.mineable.map(str),
+    stakedCards: str(m.stakes.length),
+  };
+}
+
+/** What the mine's four duties would do with this state, for the `steps` block. */
+function mineSteps(cfg, s) {
+  if (!s.mine) return {};
+  const note = noteSeatsDecision(cfg, s);
+  const forget = forgetSeatsDecision(cfg, s);
+  const convert = convertDecision(cfg, s);
+  const poke = pokeDecision(cfg, s);
+  return {
+    noteSeats: { ready: note.ready, why: note.why, tokenIds: note.due.map(str) },
+    forgetSeats: { ready: forget.ready, why: forget.why, tokenIds: forget.due.map(str) },
+    convert: { ready: convert.ready, why: convert.why },
+    poke: { ready: poke.ready, why: poke.why, ids: poke.due.map(str) },
+  };
 }
 
 /** status.json. `scan` is scanListings' result on the same state `s`. */
@@ -88,6 +130,7 @@ export function buildStatus({ cfg, s, cache, scan, keeperAddress, dryRun }) {
       seaport: a.seaport,
       universalRouter: a.universalRouter ?? null,
       quoter: a.quoter ?? null,
+      metamorph: a.metamorph ?? null,
     },
     hook: {
       buyTaxBps: str(s.buyTaxBps),
@@ -134,6 +177,7 @@ export function buildStatus({ cfg, s, cache, scan, keeperAddress, dryRun }) {
         .map((h) => ({ token: h.token, lotWei: str(h.auction.lot), startWei: str(h.auction.start), startedAt: str(h.auction.startedAt), priceNowWei: str(h.auction.price) })),
     },
     supply: { totalWei: str(s.totalSupply), burnedWei: str(burned) },
+    mine: buildMine(cfg, s),
     steps: {
       flush: { ready: flush.ready, why: flush.why },
       buySeat: {
@@ -149,6 +193,7 @@ export function buildStatus({ cfg, s, cache, scan, keeperAddress, dryRun }) {
       settle: { ready: settle.ready, why: settle.why, tokenIds: settle.due.map((x) => str(x.tokenId)) },
       startAuction: { ready: harvest.ready, why: harvest.why },
       report: { ready: report.ready, why: report.why },
+      ...mineSteps(cfg, s),
     },
     keeper: {
       lastTickAt: cache.lastTickAt ?? null,
