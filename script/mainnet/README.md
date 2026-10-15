@@ -100,7 +100,15 @@ three art contracts have no owner and no setter, and the token keeps the art's a
 
        set -a; . ./.env; set +a
        forge script script/RehearseMetamorphArt.s.sol --rpc-url "$SEPOLIA_RPC_URL" --private-key "$SEPOLIA_KEY"
-       forge script script/RehearseMetamorphArt.s.sol --rpc-url "$SEPOLIA_RPC_URL" --private-key "$SEPOLIA_KEY" --broadcast
+       forge script script/RehearseMetamorphArt.s.sol --rpc-url "$SEPOLIA_RPC_URL" --private-key "$SEPOLIA_KEY" --broadcast          --gas-estimate-multiplier 900 --slow --retries 10 --delay 8
+
+   The multiplier is the lesson of the first Sepolia rehearsal (`docs/deployment.md`, "What the Sepolia
+   rehearsal taught"): forge simulates on the project's `cancun` EVM and Sepolia runs a newer schedule under
+   which contract creation costs about seven times the estimate, so with the default margin all four
+   transactions run out of gas and burn their whole limit (as happened on 2026-10-15, ~12.5M gas lost). With
+   `900` the four took 64.9M gas in all (12.0M, 12.9M, 29.2M and 10.8M), under 0.002 Sepolia ETH at the
+   gas price of the day.
+   Mainnet needs no multiplier: its `eth_estimateGas` agrees with forge.
 
    Stop the keeper loop (`node keeper/bin/keeper.mjs --loop`, or the pm2 or systemd unit that runs it)
    before the broadcast, wait until its last transaction is mined, and start it again when step 2 is done.
