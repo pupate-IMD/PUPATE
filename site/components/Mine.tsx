@@ -6,7 +6,7 @@ import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useQuery } from "@tanstack/react-query";
 import type { Address } from "viem";
 import { useAccount, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
-import { TARGET_CHAIN_ID } from "@/lib/addresses";
+import { MAINNET, SEPOLIA, TARGET, TARGET_CHAIN_ID } from "@/lib/addresses";
 import type { LiveAddresses } from "@/lib/metamorph/job";
 import { EPOCHS, type MineNumbers, SUPPLY, fmtPupate, fmtSince, numbersText, secondsSince, useMineNumbers } from "@/lib/metamorph/live";
 import { type WriteContract, mintStatus } from "@/lib/metamorph/mint";
@@ -19,6 +19,9 @@ import { useAddresses } from "./SimContext";
 
 /// The epoch-one price of the spec, shown before the contracts exist; live, the figures are read from the chain.
 const PRICE = "50,000";
+/// The target chain's addresses as built: Metamorph MD among them means a live site, whatever the context has
+/// loaded yet (it starts empty on every first render). The local target reads its file at runtime instead.
+const STATIC = TARGET === "mainnet" ? MAINNET : TARGET === "sepolia" ? SEPOLIA : null;
 /// The four steps across the top, lit as each one holds: a wallet connected, PUPATE approved, the miner
 /// running, auto-mint on.
 const STEPS = ["Connect", "Approve PUPATE", "Mine", "Auto-mint"] as const;
@@ -186,9 +189,13 @@ export function Mine() {
   const approved = !!contracts && !!wallet && st?.allowance != null && st.allowance >= st.price;
   /// The ready state: the contracts are live and the vault holds no seat a mint can pick yet.
   const nothingMineable = !!contracts && nums?.mineable === 0;
-  /// The pre-register card, while the list has an address and the mine is not open: in the preview always;
-  /// live, only once the numbers say the vault holds no seat a mint can pick (not before they are read).
-  const preRegister = !!PREREGISTER_URL && (!contracts || nothingMineable);
+  /// The pre-register card, while the list has an address and the mine has not opened. The preview is known
+  /// at build time, so a live site never paints the card before its numbers are read; live, "not opened" is a
+  /// reading that says no card was ever minted and nothing is mineable, and from the first mint on the card
+  /// never returns, whatever the vault holds later.
+  const preview = TARGET === "local" ? !contracts : !STATIC?.metamorph;
+  const notOpened = !!contracts && nums !== null && nums.minted === 0 && nums.mineable === 0;
+  const preRegister = !!PREREGISTER_URL && (preview || notOpened);
   const stepOn = [!!wallet, approved, m.running, m.auto];
 
   const state = m.pending

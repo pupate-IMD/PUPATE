@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { type Address, getAddress, isAddress } from "viem";
 import { useAccount, useSignMessage } from "wagmi";
@@ -13,8 +13,6 @@ const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
 const X_URL = "https://x.com/pupateIMD";
 /// The follow check, remembered across visits.
 const FOLLOWED_KEY = "metamorph:prereg:followed";
-/// The count shows from here; below it the card says nothing about numbers.
-const SHOW_COUNT_FROM = 100;
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -38,9 +36,10 @@ function messageFor(handle: string, address: Address): string {
   return `Pre-register @${handle} for Metamorph MD\naddress ${address}\nissued ${new Date().toISOString()}`;
 }
 
-/// A temporary card under the practice run, while the mine is not open: an X username, a follow on the
+/// A temporary card under the practice run, while the mine has not opened: an X username, a follow on the
 /// honour system, a wallet (or an address pasted in), and one press that signs a free message and puts the
-/// entry on the list. Not a gate: the mine has no allowlist, and the card goes when mining opens.
+/// entry on the list. Not a gate: the mine has no allowlist, and the card goes when mining opens. The page
+/// reads nothing from the list; the owner has the count.
 export function PreRegister() {
   const { address, isConnected } = useAccount();
   const wallet: Address | null = isConnected && address ? getAddress(address) : null;
@@ -56,7 +55,6 @@ export function PreRegister() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [note, setNote] = useState<{ text: string; tone: "dim" | "alarm" } | null>(null);
-  const [count, setCount] = useState<number | null>(null);
 
   // The follow check from an earlier visit.
   useEffect(() => {
@@ -78,19 +76,6 @@ export function PreRegister() {
       document.removeEventListener("visibilitychange", back);
     };
   }, []);
-
-  // How many are on the list: read once, and again after an entry. A list that does not answer shows nothing.
-  const readCount = useCallback(async () => {
-    try {
-      const res = await fetch(`${PREREGISTER_URL}/count`);
-      if (!res.ok) return;
-      const { count } = (await res.json()) as { count?: unknown };
-      if (typeof count === "number") setCount(count);
-    } catch {}
-  }, []);
-  useEffect(() => {
-    void readCount();
-  }, [readCount]);
 
   const handleOk = HANDLE.test(handle);
   const pastedOk = pasted !== "" && isAddress(pasted);
@@ -118,11 +103,9 @@ export function PreRegister() {
       }
       const res = await fetch(`${PREREGISTER_URL}/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (res.status === 409) setNote({ text: "that handle or address is already registered.", tone: "alarm" });
-      else if (!res.ok) setNote({ text: "the list could not take that entry; paste the address instead.", tone: "alarm" });
-      else {
-        setDone(true);
-        void readCount();
-      }
+      else if (res.status === 429) setNote({ text: "too many tries from your connection; wait a minute.", tone: "alarm" });
+      else if (!res.ok) setNote({ text: "try again, or paste the address instead.", tone: "alarm" });
+      else setDone(true);
     } catch {
       setNote({ text: "the list did not answer, try again.", tone: "alarm" });
     } finally {
@@ -137,7 +120,6 @@ export function PreRegister() {
           <h2 className="serif">Be there when it opens.</h2>
           <p className="prereg-lede">Leave your X name and an address, and you hear before the mine opens.</p>
         </div>
-        {count !== null && count >= SHOW_COUNT_FROM ? <span className="count num">{count.toLocaleString("en-US")} miners pre-registered</span> : null}
       </header>
       {done ? (
         <p className="done" role="status">
