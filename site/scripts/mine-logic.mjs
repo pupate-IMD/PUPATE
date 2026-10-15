@@ -18,7 +18,7 @@
 // percent, the seconds since the last mint, the hour's walk), loadMine against a stand-in chain (the card
 // times read once, the clock, a mint dropped with its block), useMineNumbers without React (at once, every
 // three seconds, skipped polls, a reload, a failed read, another token, the page left); and on the stack,
-// loadMine against the contract's views at the same block and every card's mintedAt.
+// loadMine against the contract's views at the same block, every card's mintedAt and the Minted logs.
 //
 //   cd site && npm run mine-check        (or: node scripts/mine-logic.mjs)
 //
@@ -1714,6 +1714,8 @@ const L = await import("../lib/metamorph/live.ts");
       L.numbersText({ minted: 10, epoch: 1, price: 50_000n * E18, bits: 3, lastHour: 10 }).rate === "< 1 H/s" &&
       L.fmtNetworkRate(1) === "1 H/s",
   );
+  const one = L.numbersText({ minted: 0, epoch: 1, price: 50_000n * E18, bits: 1, lastHour: 0 });
+  check("one bit is \"1 bit\" (a local chain at MIN_BITS=1), ≈ 2 hashes", one.bits === "1 bit" && one.difficulty === "≈ 2 hashes", `${one.difficulty} · ${one.bits}`);
   const pct = [[0, "0%"], [1, "0.03%"], [33, "0.99%"], [34, "1.0%"], [1667, "50.0%"], [3332, "99.9%"], [3333, "100%"]];
   const pctOff = pct.filter(([n, s]) => L.fmtPercent(n) !== s).map(([n]) => `${n}: ${L.fmtPercent(n)}`);
   check("percent minted, rounded down to what it shows: 0%, 0.03%, 0.99%, 1.0%, 50.0%, 99.9%, and 100% only at 3,333", pctOff.length === 0, pctOff.join(", "));
@@ -2463,6 +2465,18 @@ async function numbersOnTheStack() {
     "the last mint: lastMintAt(), the newest card's mintedAt (none before the first mint); the reading's clock is no earlier than its block's",
     (minted > 0 ? n.lastMintAt === lastMintAt && cards[minted - 1][4] === lastMintAt : n.lastMintAt === null) && n.now >= Number(block.timestamp) && L.secondsSince(n, Date.now()) >= 0,
     `${L.fmtSince(L.secondsSince(n, Date.now()))} since the last mint, skew ${n.skew} s`,
+  );
+  // The same hour as the Minted logs tell it: each log's block timestamp is its card's mintedAt, so the walk
+  // over the cards counts what the logs count.
+  const logs = await pub.getContractEvents({ ...md, eventName: "Minted", fromBlock: BigInt(a.fromBlock), toBlock: n.block });
+  const stamps = new Map();
+  for (const l of logs) if (!stamps.has(l.blockNumber)) stamps.set(l.blockNumber, Number((await pub.getBlock({ blockNumber: l.blockNumber })).timestamp));
+  const logHour = logs.filter((l) => stamps.get(l.blockNumber) > n.now - L.HOUR).length;
+  const newest = logs.length ? stamps.get(logs[logs.length - 1].blockNumber) : null;
+  check(
+    "the Minted logs agree: one per card, the logs of the last hour (by their blocks' timestamps) are the hour's mints, and the newest log's block is the last mint",
+    logs.length === minted && logHour === n.lastHour && newest === n.lastMintAt,
+    `${logs.length} Minted logs, ${logHour} in the hour, the newest at ${newest}`,
   );
 }
 

@@ -125,7 +125,7 @@ export interface NumbersText {
   price: string;
   /// "≈ 1.0M hashes"
   difficulty: string;
-  /// "20 bits"
+  /// "20 bits" ("1 bit" at one)
   bits: string;
   /// "3.5 kH/s", or a dash with no mint in the hour.
   rate: string;
@@ -138,7 +138,7 @@ export function numbersText(n: Pick<MineNumbers, "minted" | "epoch" | "price" | 
     epoch: String(n.epoch),
     price: `${fmtPupate(n.price)} PUPATE`,
     difficulty: `≈ ${fmtHashes(2 ** n.bits)} hashes`,
-    bits: `${n.bits} bits`,
+    bits: `${n.bits} bit${n.bits === 1 ? "" : "s"}`,
     rate: fmtNetworkRate(networkRate(n.lastHour, n.bits)),
     percent: fmtPercent(n.minted),
   };
