@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "keccak-kat": "node scripts/keccak-kat.mjs",
     "mine-check": "node scripts/mine-logic.mjs",
+    "mine-live": "node scripts/mine-live.mjs",
     "copy-check": "node scripts/copy-check.mjs"
   },
   "dependencies": {

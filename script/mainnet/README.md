@@ -138,11 +138,47 @@ three art contracts have no owner and no setter, and the token keeps the art's a
    (`BadWiring`). Nothing can be corrected after the deployment. With `ETHERSCAN_API_KEY` set, add
    `--verify` here as well, and start the keeper loop again.
 
-Then record `metamorph` and `metamorphArt` in `keeper/addresses.mainnet.json` and `site/lib/addresses.ts`,
-and note the seats. `noteSeat(seat)` is permissionless, so anyone can call it. The keeper does not call
-it yet: the mine page and keeper plan adds it to the keeper's tick. To find the vault's seats,
-replay Cocoon's `SeatBought` and `SeatAdopted` events from `fromBlock` in `keeper/addresses.mainnet.json`,
-drop every seat whose last event is a `SeatSold`, and call `noteSeat` for each one the vault still holds
-(it reverts `SeatNotHeld` for any other). After a sale, call `forgetSeat(seat)`, also permissionless, so
-that mints stop walking a seat the vault no longer holds. A seat the vault buys again can be noted again,
-in its new round.
+3. Record the two addresses, and the keeper takes the mine's duties. Add `"metamorph"` (the token,
+   `MetamorphMD`) and `"metamorphArt"` (the router, `MetamorphArt`) to `keeper/addresses.mainnet.json`, and
+   the same two fields to `MAINNET` in `site/lib/addresses.ts`; commit both. The keeper reads `metamorph`
+   from its addresses file only (no environment variable names it), so the keeper's `.env` on the VPS must
+   name that file: `ADDRESSES=/opt/pupate/app/keeper/addresses.mainnet.json`, an absolute path, since the
+   keeper runs in `keeper/`. Any `TOKEN=`, `COCOON=`, … lines may stay; each still overrides the file. Print
+   the decisions once without sending anything, then restart the loop the usual way (`deploy/update.sh`, or
+   `pm2 restart pupate-keeper --update-env`):
+
+       node keeper/bin/keeper.mjs --once --dry-run
+
+   The start line is the one it always was, with ` metamorph <MetamorphMD>` at the end of the address line,
+   where the keeper said `no metamorph in the addresses: the mine duties (noteSeats, forgetSeats, convert,
+   poke) are skipped` before. From the next tick on the keeper notes every seat the vault holds
+   (`noteSeat`), forgets every seat the vault sold (`forgetSeat`), converts the pot once it holds 20 mint
+   prices, and pokes the staked cards that emerged (`keeper/README.md`, "The mine's duties"); its
+   `status.json` gains the `mine` block. Seats the vault already holds are noted on that first tick.
+
+   `noteSeat(seat)` and `forgetSeat(seat)` stay permissionless, so anyone can call them while the keeper is
+   down. To find the vault's seats by hand, replay Cocoon's `SeatBought` and `SeatAdopted` events from
+   `fromBlock` in `keeper/addresses.mainnet.json`, drop every seat whose last event is a `SeatSold`, and
+   call `noteSeat` for each one the vault still holds (it reverts `SeatNotHeld` for any other). After a sale,
+   `forgetSeat(seat)` stops mints walking a seat the vault no longer holds. A seat the vault buys again can
+   be noted again, in its new round.
+
+4. Publish the site. The mine page and Your cards read `metamorph` and `metamorphArt` from `MAINNET` in
+   `site/lib/addresses.ts` at build time, so the deployment that carries them is the one that opens the
+   mine. From `site/`:
+
+       npm run mine-live
+       npm run copy-check && npm run typecheck && npm run build
+       vercel --prod --yes
+
+   `npm run mine-live` is the end-to-end run of the same code on the local stack: headless Edge with a dev
+   wallet connects through RainbowKit, approves PUPATE, mines and mints at one bit, stakes, claims and
+   unstakes on /cards/, and loses one forced race. It uses a running stack (`node script/local/up.mjs`), or
+   brings one up and down itself when `MAINNET_RPC_URL` is in the shell (`set -a; . ../.env; set +a`), and it
+   ends with `mine-live: 23 of 23 steps passed`. Do not deploy on anything less.
+
+   Then look at `https://pupate.fun/mine/`: no preview chip, the mint price, the epoch and the numbers from
+   the chain. Until the keeper has noted the first seat the mine reads "Ready. Nothing to mine until the
+   vault holds a seat.", Start mining stays off and the practice run is a link away. The page switches on
+   by itself once `mineableSeats()` is not empty: no second deployment. Announce it as
+   "contracts live, mining opens with the first seat".

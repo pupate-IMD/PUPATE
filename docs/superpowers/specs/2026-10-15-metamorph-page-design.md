@@ -68,3 +68,55 @@ The page uses: mine, hash, mint price, epoch (1 of 11), gilt, chrysalis / emerge
 ## Out of scope
 
 The work-feed attribute; the oracle; any contract change (if the page or the keeper needs one, it is a new revision plan, not this one).
+
+## Errata from the implementation (2026-10-15)
+
+Where the six tasks of the plan departed from the text above, by ruling or by what the build showed. Each is recorded in its task's report (`.superpowers/sdd/2026-10-15-metamorph-page/task-<n>-report.md`); where this document and the code differ, the code and this list hold.
+
+**Addresses, the ABI, the local stack (Task 1)**
+
+- The fork deploys through one local script, `script/local/DeployMetamorphLocal.s.sol`, at `MIN_BITS=1`, not through `DeployMetamorphArt` and `DeployMetamorph` (the mainnet script refuses any `MIN_BITS` but 20). It mirrors both: the same constructor arguments, pool keys and art check.
+- The vault's seat on the fork is a real mainnet seat handed to Cocoon by impersonating its holder (`up.mjs` step 8; seat #1 unless `SEAT` says otherwise, never 1376, which the keeper's fork test buys); the forge script adopts and notes it.
+- The ABI carries every custom error of the token (28) and `ANCHOR_WINDOW()`, `MAX_SUPPLY()` and `EPOCH()` besides the views listed.
+- The keeper's tests are scripts against a fresh local stack, `keeper/test/metamorph.mjs` (`npm run test:mine`) beside `keeper/test/fork.mjs`, not `keeper/test/metamorph.test.mjs` under the node test runner. `fork.mjs`'s held-seat counts became relative, since the stack now starts with one seat.
+
+**Live jobs and the mint (Task 2)**
+
+- The block number comes from the same multicall as the state (Multicall3's `getBlockNumber`), the anchor is that block − 1 and its hash is the contract's `anchorHash(n)`. The engines' two target words are `effectiveTarget()`'s top 64 bits, so they never pass a hash the contract refuses; every find is checked again on the main thread against the whole target before the wallet opens.
+- The gas line reads `sending with N gas, the vault's work included`, and only when a due duty padded the limit; "duties" is a forbidden word on the page. The conversion's duty line reads `your mint also turned the stakers' share into IMD · you earned <z> IMD`.
+- The success line puts ` · gilt` after the seat, and drops ` · mining the next one` once the miner has stopped (a hash minted from the button after Stop).
+- The lines the specs left open are the page's: `your hash waited too long and expired · mining again`, `the difficulty changed before your mint landed · mining again`, `you declined in your wallet · auto-mint is off`, `nothing to mine until the vault holds a seat`, `3,333 of 3,333 minted`, `PUPATE approved for every mint`, `the mint ran out of time (the hash was older than 50 blocks) · mining again`, `the mint reverted · mining again`, `your mint did not land within 50 blocks · mining again`, `stopped · the waiting hash was dropped`, `the hash was dropped · mining is stopped`, `wallet disconnected · stopped`, `the wallet changed · stopped`.
+- "One retry on a transient RPC error" holds only before the wallet is asked to send. A mint that left the wallet is never sent again: when the wallet's answer or the receipt goes missing, the chain is watched (prevWork, the block, the receipt) until it shows what became of the mint. A reverted receipt is told apart by its block first (past the anchor's window), then by prevWork (someone minted first), else `the mint reverted`.
+- A hash waiting for the Mint button is kept while it is valid: dropped when prevWork moves or its anchor reaches age 40, kept when the target only eased. Stop drops it, and `or stop mining` stands beside Mint it now. A poll that straddles a mint, or that meets a node still behind the page's own receipt, is skipped. A live run does not start while `mineableSeats()` is empty, ends the moment the wallet disconnects or changes, and ends with the page.
+- The allowance is checked again before every mint (an epoch step raises the price) and approved again, to the maximum, when it is below the price: "approve once" holds for as long as the maximum lasts.
+
+**The workspace (Task 3)**
+
+- A card's page is `/cards/view/?id=<n>`, not `/cards/<id>`: a static export would need every id at build time, and the site's `/seat/?id=` already works this way.
+- Ruling: Claim IMD with nothing selected claims for every staked card of the wallet (`claim(<their ids>)`, settling them), not `claim([])`. `pendingIMD` grows only when a card is settled, so `claim([])` would pay nothing in the common case of a card staked and left; the figure shown is what the button pays, and it is enabled only when that is above zero.
+- Nothing is invalidated after a mint: a new id has no image cached yet, and the key carries the stage. The images are cached under `metamorph:img:<id>:<stage>:<gilt>`, the stored value tagged with the chain and the token so another deployment's card under the same key is never shown, and a failed `tokenURI` read is tried again after 2, 6, 18 and 54 s.
+- The folded `Transfer` set is confirmed with `ownerOf`, and `balanceOf` is read in the same single multicall (`batchSize: 0`, so the figure and the list come from one block); each poll reads the last 12 blocks again, and a ledger that disagrees with `balanceOf` is read again from `fromBlock`, at most once a minute. Every write is simulated first, so a refusal is said in words and never opens the wallet.
+- The leaderboard ranks miners by cards only, gilt shown beside them, ties newest card first: the top 20 and the wallet's own row.
+
+**The numbers, the words, the seat (Task 4)**
+
+- The mints of the last hour are counted from each card's `mintedAt` (its mint block's timestamp, read through Multicall3), not from `Minted` logs; a stack check holds the two equal.
+- The numbers poll on their own three-second timer, reading their own block in the same multicall, not the job poller's.
+- The difficulty reads "≈ N hashes" from `2^bits()`, not from `effectiveTarget()`; after a retarget that can understate the expected hashes up to twice (the exact figure is 2^256 / `effectiveTarget()`; left for the final wave). One bit reads "1 bit".
+- The time since the last mint is a duration ("4 min 12 s"), a dash before the first mint.
+- The housekeeping sentence is in the mine page's own footer, not in How.tsx or the docs. The dots between the four steps are drawn by CSS.
+- Ruling: the forbidden words bind the Metamorph surface only: the mine page, `/cards` and their components (Mine, Incubator, Workspace, CardTile, Gallery, Leaderboard, CardView) and the strings `site/lib/metamorph` and `site/lib/miner` render. The vault's pages keep their established words (seat pot, burn pot, duties). `npm run copy-check` reads exactly that surface, not all of `site/components` and `site/app`.
+
+**The keeper (Task 5)**
+
+- Ruling: the mine's numbers live in `status.json`, its `mine` block rewritten every tick, not in `work.json` (which holds IMD's seat records and is refreshed every ten minutes at most). No site code reads either feed for the mine yet.
+- "Held" is the token's own test, on Cocoon's books and in its wallet, checked on chain in every tick's state read: noteSeats never tries a seat already gone from the wallet, and forgetSeats never forgets on the logs' word alone.
+- The keeper's transaction path gained a `padGas` option (the estimate plus a fixed pad instead of the default +25%), which `convert` uses with 1,000,000.
+- The mine is read in its own multicalls: a missing or unreadable `metamorph` idles the four duties with the reason and never stops the vault's steps. `metamorph` is read from the addresses file only (`cfg.addresses.metamorph`), with no environment variable, so the VPS keeper needs `ADDRESSES` naming `keeper/addresses.mainnet.json`.
+- convert's spacing is counted at the block the transaction would land in (head + 1), as the burn's is; at the exact edge the simulation still says `TooSoon`, which is logged and skipped.
+
+**The end-to-end run (Task 6)**
+
+- The dev wallet is the driver's, not a page component: `site/scripts/mine-live.mjs` puts an EIP-1193 provider into every page over the DevTools protocol, announces it through EIP-6963 (RainbowKit lists it under Installed, and the run connects through the modal), and signs in its own process with viem's `privateKeyToAccount` (anvil's public key #1 unless `--account` names another). There is no `site/components/DevWallet.tsx` and no `?dev-wallet=` flag: the site carries no dev-wallet code, and the run still builds the production export and looks through `out/` for every anvil key.
+- The race is forced, not waited for, in the order the plan gives: a find waits, the rival mints the same prevWork, then Mint it now is pressed. The waiting nonce is read where the page's engines report it (the driver's probe keeps the live job a Worker is handed and its finds), and the rival's nonce is drawn so that the page's proof, folded again with the rival's proof as prevWork, has its top bit set, which no target takes; at a few bits a stale nonce would otherwise solve the new job by chance. For the second or so of the race the page's reads wait at the browser's door (the DevTools Fetch domain), so its own three-second poll cannot see the rival's mint first and drop the hash with the same line by another way.
+- Claim IMD is run after a real credit: anvil #6 buys PUPATE through the Universal Router first (a fresh fork's launch pool holds no ETH to sell the pot into), and anvil #7 calls `convert()` once the dev wallet's card is staked.

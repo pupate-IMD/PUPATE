@@ -66,6 +66,20 @@ sold and bought.
     DRY_RUN=1 node bin/keeper.mjs --once         # simulate everything, send nothing
     node bin/keeper.mjs --once --dry-run         # the same: every decision printed, the mine's four included
 
+With Metamorph MD deployed the keeper starts the same way, with the same flags: nothing on the command line
+turns the mine's duties on. They run once the addresses file names `metamorph`
+(`keeper/addresses.mainnet.json` on mainnet, `site/public/addresses.local.json` on the fork), and the
+keeper's first lines say which (addresses written here as names):
+
+    chain 1 (addresses from /opt/pupate/app/keeper/addresses.mainnet.json)
+    cocoon <Cocoon> hook <PupateHook> feed <FloorFeed> token <PupateToken> metamorph <MetamorphMD>
+
+Without `metamorph` the address line ends at the token and the keeper adds `no metamorph in the addresses:
+the mine duties (noteSeats, forgetSeats, convert, poke) are skipped`. `metamorph` is read from the file
+only; no environment variable names it. So a keeper configured with `COCOON=`, `TOKEN=`, … lines needs
+`ADDRESSES` to name the file as well: on the VPS, `ADDRESSES=/opt/pupate/app/keeper/addresses.mainnet.json`
+in `/opt/pupate/app/.env`, then `pm2 restart pupate-keeper --update-env`.
+
 Two ways to keep it running on a small VPS:
 
 - **`--loop` under a supervisor.** `pm2 start bin/keeper.mjs --name pupate-keeper -- --loop`, or a

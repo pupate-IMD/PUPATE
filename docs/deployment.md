@@ -62,6 +62,36 @@ timelock.
 - Pair the first seat: the operator calls `Cocoon.authorizeWorker` with IMD's pairing message, then
   completes the pairing on IMD with any signature bytes.
 
+## 5. Metamorph MD: the mine opens
+
+The contracts can be live before the vault holds a seat. `script/mainnet/README.md`, "Metamorph MD", is the
+runbook: the art, then the token at 20 bits, then the two addresses recorded and the keeper restarted, then
+the site.
+
+- **The keeper's new duties.** With `metamorph` in its addresses file (`keeper/addresses.mainnet.json`,
+  named by `ADDRESSES` in the keeper's `.env` on the VPS) the keeper runs four more steps at the end of
+  every tick, all of them public functions of the token: `noteSeats` (`noteSeat` for every seat the vault
+  holds that is not noted yet), `forgetSeats` (`forgetSeat` for every noted seat the vault sold),
+  `convert` (`convert()` once the pot holds 20 mint prices, or any ETH, five blocks after the last one,
+  with the estimate + 1,000,000 as its gas limit; the caller's 0.5% of the IMD bought goes to the keeper's
+  wallet) and `poke` (`poke(ids)` for staked cards that emerged, 50 a transaction, so they weigh 2). "Holds"
+  is the token's own test, on Cocoon's books and in its wallet, read on chain every tick. The flags and the
+  start line are unchanged; without `metamorph` the keeper says so at start and runs exactly as before. The
+  status feed gains a `mine` block (minted, epoch, price, bits, the last mint, the pot, the duties due, the
+  noted and mineable seats, the staked cards). `keeper/README.md`, "The mine's duties", has the details,
+  and `node keeper/test/metamorph.mjs` runs all four on a fresh local stack.
+- **The page switches on when the vault holds a noted seat.** The deployment that carries `metamorph` and
+  `metamorphArt` in `MAINNET` (`site/lib/addresses.ts`) turns `/mine/` and `/cards/` from the preview into
+  the live pages. While `mineableSeats()` is empty the mine reads "Ready. Nothing to mine until the vault
+  holds a seat.", with the price and the numbers from the chain, Start mining off and the practice run
+  open. The page reads `mineableSeats()` every three seconds, so the first seat the keeper notes opens
+  mining by itself, with no second deployment. A sale closes that seat again: `forgetSeats` forgets it,
+  and the mine waits for the next one.
+- **Proof before the deployment.** `cd site && npm run mine-live` drives the same pages in headless Edge
+  against the local stack with a dev wallet: connect through RainbowKit, approve, mine and mint at one
+  bit, the card in the drawer with its tokenURI image, stake, claim IMD after a real conversion, unstake,
+  and one forced lost race. The site is deployed only after it ends with every step passed.
+
 ## What each party holds afterwards
 
 | Party | Can do | Cannot do |
