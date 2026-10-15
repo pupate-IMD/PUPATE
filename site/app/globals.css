@@ -731,6 +731,39 @@ footer .serif { color: var(--ink); font-size: 16px; }
   .drawer ul { grid-template-columns: repeat(3, 1fr); }
 }
 
+/* pre-register: a temporary card under the bench, gone when the mine opens (PreRegister.tsx). Four steps
+   down the card, each lit as it holds like the four across the top; a locked step is faint. The honeypot
+   field is off the page. */
+.prereg { margin-top: 28px; padding: 22px 26px 20px; display: grid; gap: 14px; }
+.prereg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; }
+.prereg-head h2 { font-size: 24px; line-height: 1.1; }
+.prereg-lede { margin-top: 6px; font-size: 13px; color: var(--dim); max-width: 56ch; }
+.prereg-head .count { font-size: 12px; color: var(--jade-ink); }
+.prereg-steps { list-style: none; margin: 0; padding: 0; display: grid; }
+.prereg-steps li { display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: baseline; padding: 12px 0; border-top: 1px dotted var(--hair); font-size: 13px; }
+.prereg-steps .n { font-family: var(--serif); font-size: 20px; line-height: 1; color: var(--faint); }
+.prereg-steps li.on .n { color: var(--jade-ink); }
+.prereg-steps li.off { color: var(--faint); }
+.prereg-steps .row { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; min-width: 0; }
+.prereg-steps .k { flex: none; width: 76px; color: var(--dim); font-size: 12px; }
+.prereg-field { display: inline-flex; align-items: center; height: 36px; border: 1px solid var(--hair); padding: 0 10px; min-width: 0; }
+.prereg-field:focus-within { border-color: var(--ink); }
+.prereg-field .at { color: var(--dim); }
+.prereg-field input { border: 0; background: transparent; color: inherit; font: inherit; outline: none; padding: 0; min-width: 0; width: 17ch; }
+.prereg-field input::placeholder { color: var(--faint); }
+.prereg-field.wide { flex: 1 1 280px; max-width: 100%; }
+.prereg-field.wide input { width: 100%; }
+.prereg .hint { font-size: 12px; color: var(--dim); }
+.prereg .hint.alarm { color: var(--alarm); }
+.prereg .check { color: var(--jade-ink); }
+.prereg .done { padding: 8px 0 2px; font-size: 16px; color: var(--jade-ink); }
+.prereg .fine { max-width: 72ch; }
+.prereg-trap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); opacity: 0; }
+@media (max-width: 520px) {
+  .prereg { padding: 18px 16px 16px; }
+  .prereg-steps .k { width: 100%; }
+}
+
 /* why the panel has no quote: one quiet line under the estimate */
 .swap .hint {
   margin: 6px 0 0;

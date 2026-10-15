@@ -14,6 +14,7 @@ import { EPOCH_ONE_BITS, type Power, fmtHashes, fmtRate } from "@/lib/miner/job"
 import { type Found, type GpuState, type LiveLink, type MintCard, useMiner } from "@/lib/miner/useMiner";
 import { GpuSelfTestDev } from "./GpuSelfTestDev";
 import { Incubator } from "./Incubator";
+import { PREREGISTER_URL, PreRegister } from "./PreRegister";
 import { useAddresses } from "./SimContext";
 
 /// The epoch-one price of the spec, shown before the contracts exist; live, the figures are read from the chain.
@@ -185,6 +186,9 @@ export function Mine() {
   const approved = !!contracts && !!wallet && st?.allowance != null && st.allowance >= st.price;
   /// The ready state: the contracts are live and the vault holds no seat a mint can pick yet.
   const nothingMineable = !!contracts && nums?.mineable === 0;
+  /// The pre-register card, while the list has an address and the mine is not open: in the preview always;
+  /// live, only once the numbers say the vault holds no seat a mint can pick (not before they are read).
+  const preRegister = !!PREREGISTER_URL && (!contracts || nothingMineable);
   const stepOn = [!!wallet, approved, m.running, m.auto];
 
   const state = m.pending
@@ -470,6 +474,8 @@ export function Mine() {
           )}
         </section>
       </div>
+
+      {preRegister ? <PreRegister /> : null}
 
       <section className="after" aria-label="After the mint">
         <h2 className="serif">Cards never stop working.</h2>

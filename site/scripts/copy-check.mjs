@@ -1,7 +1,7 @@
 // The copy check: the words the Metamorph surface never shows a visitor (the spec's "Copy and words"):
 // series, target (outside "practice target"), anchor, prevWork, retarget, pot, convert, refresh, duties,
 // with their plural and verb forms (and "conversion"). The surface is exactly the mine page, /cards and what
-// renders them: components/{Mine,Incubator,Workspace,CardTile,CardView,Gallery,Leaderboard}.tsx,
+// renders them: components/{Mine,Incubator,PreRegister,Workspace,CardTile,CardView,Gallery,Leaderboard}.tsx,
 // app/mine/** and app/cards/**, lib/metamorph/** and lib/miner/** (whose field notes and errors reach the
 // page). The vault's own pages keep their words.
 //
@@ -23,7 +23,7 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), "..");
-const COMPONENTS = ["Mine", "Incubator", "Workspace", "CardTile", "CardView", "Gallery", "Leaderboard"];
+const COMPONENTS = ["Mine", "Incubator", "PreRegister", "Workspace", "CardTile", "CardView", "Gallery", "Leaderboard"];
 const TREES = ["app/mine", "app/cards", "lib/metamorph", "lib/miner"];
 
 const FORBIDDEN = /\b(series|(?:re)?target(?:s|ed|ing)?|anchor(?:s|ed|ing)?|prevwork|pots?|convert(?:s|ed|ing|ers?)?|conversions?|refresh(?:es|ed|ing)?|duties)\b/gi;
