@@ -81,6 +81,27 @@ three art contracts have no owner and no setter, and the token keeps the art's a
    plain strokes. The art cannot be changed once the token has it, so this is the last look before that;
    whether it is worth a testnet deployment is the owner's call.
 
+   Rehearsal on Sepolia. `script/RehearseMetamorphArt.s.sol` is that testnet deployment: the two figures and
+   the router exactly as the mainnet script deploys them, then `MetamorphRehearsal`
+   (`script/rehearsal/MetamorphRehearsal.sol`), a throwaway ERC-721 ("Metamorph MD rehearsal", MMDR) with
+   eight cards of the parity sample minted to the deployer, four chrysalises and four butterflies, a gilt one
+   in each stage, every form and every halo among them, whose `tokenURI(id)` is the router's card. Any funded
+   Sepolia key will do as `SEPOLIA_KEY` (keep it in `.env`, which is gitignored); the four transactions take
+   9,595,604 gas together, as the local run measured them, in Sepolia ETH only. Simulate without `--broadcast`
+   first, then broadcast; both print the four addresses and a line per token, `token 1 stage 0 gilt false
+   tokenURI bytes 21045` and so on, the code alone fixing the numbers. Then open
+   `https://testnets.opensea.io/assets/sepolia/<MetamorphRehearsal address>/<id>` for ids 1 to 8 (press
+   "Refresh metadata" if the image is missing at first) and the cards in a wallet that shows Sepolia NFTs
+   (MetaMask on Sepolia imports one by the rehearsal's address and the id). What should be there, as in the
+   browser view of `out/art/`: the digit contours that draw the figure and the halo rings around it, a
+   chrysalis in its whole shell. A chrysalis without its shell, only the frame, the labels and the plain
+   strokes left, means that marketplace or wallet rasterises on a server without `<textPath>`. The rehearsal
+   contracts are throwaway: nothing from them is recorded in the address book, and nothing depends on them.
+
+       set -a; . ./.env; set +a
+       forge script script/RehearseMetamorphArt.s.sol --rpc-url "$SEPOLIA_RPC_URL" --private-key "$SEPOLIA_KEY"
+       forge script script/RehearseMetamorphArt.s.sol --rpc-url "$SEPOLIA_RPC_URL" --private-key "$SEPOLIA_KEY" --broadcast
+
    Stop the keeper loop (`node keeper/bin/keeper.mjs --loop`, or the pm2 or systemd unit that runs it)
    before the broadcast, wait until its last transaction is mined, and start it again when step 2 is done.
    The deploy key is the keeper's key, and the three transactions depend on one another: the router takes the
