@@ -1473,12 +1473,29 @@ try {
     const h = await liveRun(c);
     const f = find();
     c.s.receipts.set(txOf(1), receiptOf(txOf(1), c.s.block, [mintedLog(f, 4n)]));
-    await clock.advance(2000);
+    await clock.advance(5000);
     const n = h.notes;
     check(
       "a network error before the wallet is asked is tried once more: one send, one card",
       c.s.sent.length === 1 && n.some((l) => l.startsWith("the network stumbled: fetch failed · trying once more")) && n[0] === "Metamorph.md #4 is yours · seat identity.md #1376 · mining the next one",
       n.slice(0, 4).join(" | "),
+    );
+    h.unmount();
+  }
+  {
+    const c = chainStandIn();
+    c.s.fails.set(PREP_READ, new Error("fetch failed"));
+    const h = await liveRun(c);
+    find();
+    await clock.advance(0);
+    c.s.fails.set(PREP_READ, new Error("429 too many requests"));
+    await clock.advance(5000);
+    const st = h.state;
+    const n = h.notes;
+    check(
+      "two network errors before the wallet is asked: nothing is sent, and the hash waits for the Mint button while the run is on",
+      c.s.sent.length === 0 && !!st.pending?.live && st.running && !st.minting && n.some((l) => l.startsWith("the mint did not go through: 429 too many requests · your hash waits for Mint it now")),
+      `${c.s.sent.length} send(s); pending ${!!st.pending?.live}; running ${st.running}; ${n.slice(0, 3).join(" | ")}`,
     );
     h.unmount();
   }

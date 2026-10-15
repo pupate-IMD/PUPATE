@@ -163,7 +163,8 @@ const MAX_CPU_THREADS = 255;
 /// How often a live run reads the chain for its job.
 const POLL_MS = 3000;
 /// The pause before the one retry of a mint that met a network error before the wallet was asked to send.
-const RETRY_MS = 1500;
+/// The pause before prepareMint's one retry: long enough to outlast a public endpoint's rate-limit window.
+const RETRY_MS = 4000;
 /// How long a sent mint's receipt is waited for before the chain is watched for it instead (settleMint),
 /// which also sees someone else's mint and the end of the anchor's window.
 const RECEIPT_MS = 120_000;
@@ -539,8 +540,9 @@ export function useMiner(link: LiveLink | null = null) {
   const again = useCallback((line: string) => (runningRef.current ? line : line.replace(/ · mining again$/, "")), []);
 
   /// Sends a live find as a mint: the checks and the approval (prepareMint), the padded gas limit, the
-  /// wallet, the block, the receipt. One retry after a network error before the wallet is asked to send; from
-  /// then on the mint is never sent again: a wallet that fails once asked (it may have sent it) or a receipt
+  /// wallet, the block, the receipt. One retry after a network error before the wallet is asked to send; a
+  /// second error leaves the hash waiting for the Mint button (it stays valid for the anchor's window, so it is
+  /// never lost to the page). Once the wallet is asked, the mint is never sent again: a wallet that fails once asked (it may have sent it) or a receipt
   /// that does not come leaves the chain watched (settleMint) until it shows what became of the mint, and
   /// nothing is mined on its prevWork meanwhile. A reverted receipt is told apart by the chain. A refusal of
   /// the wallet turns auto-mint off and leaves the hash waiting for the Mint button while the run is on. The
@@ -585,7 +587,8 @@ export function useMiner(link: LiveLink | null = null) {
               return null;
             }
             if (attempt >= 1) {
-              say(again(`the mint did not go through: ${errorText(e)} · mining again`), "dim");
+              // Nothing was sent: the find is still good, so it waits for Mint it now instead of being thrown away.
+              wait(`the mint did not go through: ${errorText(e)} · your hash waits for Mint it now`, "dim");
               return null;
             }
             say(`the network stumbled: ${errorText(e)} · trying once more`, "dim");
