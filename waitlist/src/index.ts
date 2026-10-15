@@ -1,8 +1,10 @@
 // The pre-register list behind the mine page's temporary form (site/components/PreRegister.tsx): a Worker
 // over one D1 table (schema.sql). Three routes. POST /register takes a handle and an address, with the
 // message the wallet signed and its signature where the page had a wallet, bare where the address was
-// pasted; GET /count says how many rows there are; GET /export?key=… hands the owner the CSV, and without
-// the right key it is a 404 like any other path. Nothing is kept but the row: no IP, no user agent.
+// pasted; GET /count says how many rows there are (for the owner's curl, not the page: the figure is held
+// in the isolate for a minute, so the table is not counted on every call); GET /export?key=… hands the owner
+// the CSV, and without the right key it is a 404 like any other path. Nothing is kept but the row: no IP, no
+// user agent. The connection's address is read once, for the rate limit on /register, and goes no further.
 //
 // The signed path proves the address: the Worker rebuilds the message the page shows the wallet from the
 // body's handle and address and the message's own issued line, requires the message to be exactly that,
@@ -12,6 +14,8 @@ import { getAddress, isAddress, isHex, verifyMessage } from "viem";
 
 export interface Env {
   DB: D1Database;
+  /// The rate limit on /register (wrangler.toml): three a minute from one connection.
+  REGISTER_LIMIT: RateLimit;
   /// `wrangler secret put ADMIN_KEY`: the export's key. Unset, the export does not exist.
   ADMIN_KEY?: string;
 }
@@ -26,10 +30,15 @@ const ISSUED = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_BODY = 4096;
 /// How far from now a message's issued time may lie, either way.
 const ISSUED_WINDOW_MS = 10 * 60 * 1000;
+/// How long a count is kept in the isolate before the table is counted again.
+const COUNT_TTL_MS = 60_000;
 const COLUMNS = ["id", "handle", "address", "followed", "verified", "message", "signature", "created_at"] as const;
 
 type Row = Record<(typeof COLUMNS)[number], string | number | null>;
 type Headers = Record<string, string>;
+
+/// The last count and when it was read; per isolate.
+let counted: { count: number; at: number } | null = null;
 
 /// The message the page shows the wallet, word for word: the handle, the checksummed address, the time.
 export function expectedMessage(handle: string, address: string, issued: string): string {
@@ -74,14 +83,17 @@ function cors(request: Request): Headers {
   };
 }
 
-function json(body: unknown, status: number, headers: Headers): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...headers, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+function json(body: unknown, status: number, headers: Headers, cache = "no-store"): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...headers, "Content-Type": "application/json", "Cache-Control": cache } });
 }
 
 const malformed = (headers: Headers) => json({ error: "malformed" }, 400, headers);
 const notFound = (headers: Headers) => json({ error: "not found" }, 404, headers);
 
 async function register(request: Request, env: Env, headers: Headers): Promise<Response> {
+  // Three a minute from one connection; the address is the limit's key and is kept nowhere.
+  const { success } = await env.REGISTER_LIMIT.limit({ key: request.headers.get("cf-connecting-ip") ?? "" });
+  if (!success) return json({ error: "too many tries" }, 429, headers);
   if (Number(request.headers.get("Content-Length") ?? 0) > MAX_BODY) return json({ error: "too large" }, 413, headers);
   const text = await request.text();
   if (new TextEncoder().encode(text).length > MAX_BODY) return json({ error: "too large" }, 413, headers);
@@ -129,9 +141,14 @@ async function register(request: Request, env: Env, headers: Headers): Promise<R
   return json({ ok: true }, 200, headers);
 }
 
+/// The count, read from the table at most once a minute per isolate and cacheable for as long.
 async function count(env: Env, headers: Headers): Promise<Response> {
-  const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM registrations").first<{ count: number }>();
-  return json({ count: row?.count ?? 0 }, 200, headers);
+  const now = Date.now();
+  if (!counted || now - counted.at > COUNT_TTL_MS) {
+    const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM registrations").first<{ count: number }>();
+    counted = { count: row?.count ?? 0, at: now };
+  }
+  return json({ count: counted.count }, 200, headers, "public, max-age=60");
 }
 
 async function exportCsv(env: Env, headers: Headers): Promise<Response> {
@@ -153,7 +170,9 @@ export default {
       if (request.method === "GET" && pathname === "/count") return await count(env, headers);
       if (request.method === "GET" && pathname === "/export" && keyHolds(searchParams.get("key"), env.ADMIN_KEY)) return await exportCsv(env, headers);
       return notFound(headers);
-    } catch {
+    } catch (e) {
+      // The cause, for `wrangler tail`: the message only, never a body, an address or a connection.
+      console.error((e as Error)?.message ?? String(e));
       return json({ error: "the list is down" }, 500, headers);
     }
   },

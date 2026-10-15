@@ -9,3 +9,10 @@ compatibility_date = "2026-10-12"
 binding = "DB"
 database_name = "pupate-preregister"
 database_id = "<fill after wrangler d1 create>"
+
+# POST /register: three a minute from one connection (keyed on the connection's address, which is never
+# stored). The namespace id is any number unique among this account's rate limits.
+[[ratelimits]]
+name = "REGISTER_LIMIT"
+namespace_id = "1001"
+simple = { limit = 3, period = 60 }
