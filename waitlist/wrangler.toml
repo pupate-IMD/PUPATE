@@ -8,7 +8,7 @@ compatibility_date = "2026-10-12"
 [[d1_databases]]
 binding = "DB"
 database_name = "pupate-preregister"
-database_id = "<fill after wrangler d1 create>"
+database_id = "ea56a0be-f094-48d1-a493-611b607018eb"
 
 # POST /register: three a minute from one connection (keyed on the connection's address, which is never
 # stored). The namespace id is any number unique among this account's rate limits.
