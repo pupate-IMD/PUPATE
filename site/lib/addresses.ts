@@ -67,6 +67,8 @@ export const MAINNET: Addresses | null = {
   imd: IMD,
   seaport: SEAPORT,
   poolKey: { fee: 12500, tickSpacing: 60 },
+  metamorph: "0xf77De2D44e90BF070bd4b8934470a5769c18e394",
+  metamorphArt: "0x6D35059c74659D13515155062CaB5912BA68AE94",
 };
 
 /// The Sepolia rehearsal of 2026-10-10 (script/sepolia/up.mjs): the real contracts against a mock

@@ -446,7 +446,11 @@ The owner's decision of 2026-10-16: the mine opens now, and the vault cannot aff
 0.25 ETH against the cheapest identity.md seat at 1.95 ETH, and no fresh floor). The rule changes in one
 place and the token is redeployed from this code; the art, the price, the epochs, the 3,333, the 70/30
 split, the staking, the duties, `poke`, `convert`, the work chain and the retarget stay as they are. The
-first `MetamorphMD`, `0xA96e3AD80f1bc2D3A94cb774BbDB94b842729D09`, is abandoned with 0 mints.
+first `MetamorphMD`, `0xA96e3AD80f1bc2D3A94cb774BbDB94b842729D09`, is abandoned with 0 mints. The live one is
+`0xf77De2D44e90BF070bd4b8934470a5769c18e394` (block 26204486); `0xE416b74A5ff79425f59F031b3DAa9DA1Dbf57E03`,
+the same code deployed one run earlier, is abandoned with 0 mints too. Neither abandoned contract has a key,
+so both stay callable: only the live address is published, in `keeper/addresses.mainnet.json` and
+`site/lib/addresses.ts`.
 
 - While `mineableSeats()` is empty (no noted seat held by the vault with editions left), a mint draws its
   seat from the whole identity.md collection: `seat = work % N` with `N = COLLECTION.totalSupply()` (the

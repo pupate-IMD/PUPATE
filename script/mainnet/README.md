@@ -194,7 +194,10 @@ remain the reference and the fallback.
    (`BadWiring`). Nothing can be corrected after the deployment. With `ETHERSCAN_API_KEY` set, add
    `--verify` here as well, and start the keeper loop again.
 
-   The commons (2026-10-16). The token is deployed twice. The first `MetamorphMD`,
+   The commons (2026-10-16). The live `MetamorphMD` is `0xf77De2D44e90BF070bd4b8934470a5769c18e394`
+   (block 26204486, 4,843,484 gas). Two earlier deployments are abandoned with 0 mints and are never linked:
+   `0xE416b74A5ff79425f59F031b3DAa9DA1Dbf57E03` (block 26204346), the same code deployed one run too early,
+   and the first `MetamorphMD`,
    `0xA96e3AD80f1bc2D3A94cb774BbDB94b842729D09`, is abandoned with 0 mints: the vault could not afford a seat
    (a seat pot of 0.25 ETH against the cheapest seat at 1.95 ETH), and the rule changed so that a mint draws
    its seat from the whole identity.md collection while the vault holds no noted seat with editions left
