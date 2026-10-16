@@ -689,8 +689,9 @@ async function fixture(run) {
   run.md = { address: a.metamorph, abi: metamorphAbi };
   run.view = (functionName, args) => pub.readContract({ ...run.md, functionName, args });
   run.balance = (token, who) => pub.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [who] });
+  // The vault's seats, for the account of the run only: with none the mine is open all the same, and the
+  // contract draws each card's seat from the whole collection (the commons).
   const seats = await run.view("mineableSeats");
-  if (!seats.length) throw new Error("mineableSeats() is empty: the vault holds no noted seat");
   const from = Number(await run.view("bits"));
   const bits = await easeToOneBit(run);
   if (bits !== 1) throw new Error(`the difficulty stays at ${bits} bits`);
@@ -715,8 +716,9 @@ async function fixture(run) {
   const buy = buildSwap(a, true, E18 / 5n, 0n, head.timestamp + 1200n);
   await mined(walletOf(BUYER).sendTransaction({ to: buy.to, data: buy.data, value: buy.value }), "the router buy");
   const due = await run.view("dutiesDue");
+  const held = seats.length ? `seat${seats.length > 1 ? "s" : ""} ${seats.map((s) => `#${s}`).join(", ")} mineable` : "no seat held: the cards draw from the whole collection (the commons)";
   return (
-    `seat${seats.length > 1 ? "s" : ""} ${seats.map((s) => `#${s}`).join(", ")} mineable; difficulty ${from} -> ${bits} bit; ` +
+    `${held}; difficulty ${from} -> ${bits} bit; ` +
     `${funded.length ? `funded ${funded.join(", ")}; ` : ""}the dev wallet is anvil #${DEV} ${short(dev)} with ${tokens(await run.balance(a.token, dev))} PUPATE and no allowance; ` +
     `#${BUYER} bought PUPATE for 0.2 ETH through the Universal Router; dutiesDue() (flush ${due[0]}, burn ${due[1]}, convert ${due[2]})`
   );
@@ -1018,7 +1020,7 @@ async function main() {
   let t;
 
   await step("the production build carries no dev key", buildAndLook, { independent: true });
-  await step("the local stack: Metamorph MD at one bit, a noted seat", ensureStack);
+  await step("the local stack: Metamorph MD at one bit", ensureStack);
   await step("the run's fixture on the chain", () => fixture(run));
   await step("the dev server against the stack", () => startServer(run));
   await step("headless Edge, the dev wallet put into every page it opens", async () => {
