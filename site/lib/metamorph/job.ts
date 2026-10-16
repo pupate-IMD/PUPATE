@@ -156,7 +156,9 @@ export function anchorExpiring(job: Pick<LiveJob, "anchor">, block: bigint): boo
   return block - job.anchor >= ANCHOR_REBUILD_AGE;
 }
 
-/// The seats a mint may pick from right now; none means there is nothing to mine until the vault holds a seat.
+/// The noted seats the vault holds with editions left, in pick order. None is the commons: a mint then draws
+/// its seat from the whole identity.md collection, and the job is the same either way, so a live run never
+/// waits on this list (the numbers read it for the ready line, and the checks read it on the stack).
 export async function mineableSeats(client: PublicClient, a: LiveAddresses): Promise<readonly bigint[]> {
   return client.readContract({ address: a.metamorph, abi: metamorphAbi, functionName: "mineableSeats" });
 }

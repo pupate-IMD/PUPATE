@@ -91,7 +91,8 @@ export async function approvePupate(client: PublicClient, a: LiveAddresses, writ
 /// Why a found hash is not sent: the wallet holds less PUPATE than the price ("short"); someone minted
 /// first ("lost"); the wallet's own mint of this hash already landed ("landed", after a send whose answer
 /// went missing); the target moved under the hash ("difficulty"); the anchor left the window ("expired");
-/// no seat is mineable ("nothing"); all 3,333 are minted ("soldOut").
+/// the contract could draw no seat ("nothing": its NothingMineable, which an empty mineableSeats() alone no
+/// longer raises since the commons); all 3,333 are minted ("soldOut").
 export type Refusal = "short" | "lost" | "landed" | "difficulty" | "expired" | "nothing" | "soldOut";
 
 export type Prepared =
@@ -386,7 +387,9 @@ export const LINES = {
   approved: "PUPATE approved for every mint",
   expired: "your hash waited too long and expired · mining again",
   difficulty: "the difficulty changed before your mint landed · mining again",
-  nothing: "nothing to mine until the vault holds a seat",
+  /// NothingMineable: no seat could be drawn, held or from the whole collection (the collection's count
+  /// unreadable, or every seat tried full). An empty-handed vault is not that: that is the commons.
+  nothing: "no seat could be drawn for a card right now · stopped",
   soldOut: "3,333 of 3,333 minted",
   declined: "you declined in your wallet · auto-mint is off",
   /// A reverted mint whose block was past the anchor's window.

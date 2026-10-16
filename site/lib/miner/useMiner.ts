@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isAddressEqual, type Address, type Hex, type PublicClient, type TransactionReceipt } from "viem";
 import { metamorphAbi } from "../metamorph/abi";
-import { type LiveAddresses, type LiveJob, anchorExpiring, isLiveJob, jobChanged, liveJob, meets, mineableSeats, workOf } from "../metamorph/job";
+import { type LiveAddresses, type LiveJob, anchorExpiring, isLiveJob, jobChanged, liveJob, meets, workOf } from "../metamorph/job";
 import {
   LINES,
   type MintOutcome,
@@ -741,9 +741,10 @@ export function useMiner(link: LiveLink | null = null) {
   }, [dispatch, halt, say, setPending]);
   refreshRef.current = refreshJob;
 
-  /// A live run: the miner runs at once (the button turns to Stop), reads whether anything is mineable and
-  /// the first job, then mines it and polls every three seconds. A stop, another start or the page's end
-  /// meanwhile wins: nothing is dispatched after it.
+  /// A live run: the miner runs at once (the button turns to Stop), reads the first job, then mines it and
+  /// polls every three seconds. Whether the vault holds a seat is not asked: with none, the contract draws
+  /// each card's seat from the whole collection (the commons), and the job is the same. A stop, another
+  /// start or the page's end meanwhile wins: nothing is dispatched after it.
   const startLive = useCallback(
     async (wallet: Address | undefined, run: number) => {
       const l = linkRef.current;
@@ -763,10 +764,8 @@ export function useMiner(link: LiveLink | null = null) {
       let first: LiveJob;
       const overtaken = () => run !== runSeq.current || !liveRef.current || !runningRef.current;
       try {
-        const [open, j] = await Promise.all([mineableSeats(l.client, l.addresses), liveJob(l.client, l.addresses, wallet)]);
+        first = await liveJob(l.client, l.addresses, wallet);
         if (overtaken()) return;
-        if (open.length === 0) return halt(LINES.nothing);
-        first = j;
       } catch (e) {
         if (overtaken()) return;
         return halt(`the chain did not answer: ${errorText(e)}`);

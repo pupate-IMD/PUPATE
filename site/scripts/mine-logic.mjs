@@ -1271,6 +1271,8 @@ function chainStandIn() {
     receiptError: null,
     held: new Map(),
     fails: new Map(),
+    /// mineableSeats(): the vault's one seat, or none (the commons).
+    open: [1n],
   };
   const answer = (fn) =>
     ({
@@ -1285,7 +1287,7 @@ function chainStandIn() {
       dutiesDue: [false, false, false],
       DOMAIN: keccak256(toBytes("Metamorph MD work v1")),
       anchorHash: `0x${"5a".repeat(32)}`,
-      mineableSeats: [1n],
+      mineableSeats: s.open,
       tokenURI: "data:,",
     })[fn];
   const gate = async (name) => {
@@ -1360,7 +1362,7 @@ function find() {
   FakeWorker.made.findLast((w) => !w.dead).onmessage({ data: { type: "found", worker: 0, jobId: job.id, ...hit } });
   return { job, ...hit };
 }
-const mintedLog = (f, id) => logOf(metamorphAbi, MD_SI, "Minted", { id, seat: 1376n, round: 1, edition: Number(id), miner: ME, work: f.digest, gilt: false, price: PRICE1, epoch: 1 });
+const mintedLog = (f, id, seat = 1376n, round = 1) => logOf(metamorphAbi, MD_SI, "Minted", { id, seat, round, edition: Number(id), miner: ME, work: f.digest, gilt: false, price: PRICE1, epoch: 1 });
 const receiptOf = (hash, block, logs, status = "success") => ({ status, logs, blockNumber: block, transactionHash: hash });
 
 const realTimers = { setTimeout, clearTimeout, setInterval, clearInterval };
@@ -1393,7 +1395,7 @@ try {
   {
     FakeWorker.made = [];
     const c = chainStandIn();
-    const release = c.hold("mineableSeats");
+    const release = c.hold(JOB_READ);
     const h = renderHook(useMiner, c.link);
     h.result.start({ live: true, wallet: ME });
     await clock.advance(0);
@@ -1666,6 +1668,31 @@ try {
     );
     h.unmount();
   }
+
+  // 7. The commons: with mineableSeats() empty (the vault holds no seat) the live run goes on as on any other
+  // day. The job is read and handed to the engines, nothing halts, a find is minted, and the card's seat is
+  // whatever the receipt says (the contract drew it from the whole collection: seat 777, round 0).
+  {
+    const c = chainStandIn();
+    c.s.open = [];
+    const h = await liveRun(c);
+    const st = h.state;
+    const job = starts().at(-1);
+    // Without a job there is no find to post: the check then fails on its own terms, and the run goes on.
+    if (job) {
+      const f = find();
+      c.s.receipts.set(txOf(1), receiptOf(txOf(1), c.s.block, [mintedLog(f, 9n, 777n, 0)]));
+      c.s.prevWork = f.digest;
+    }
+    await clock.advance(POLL);
+    const n = h.notes;
+    check(
+      "the commons: mineableSeats() empty, and the live run still gets its job, mines it and mints the find; the card's seat is the receipt's (777, round 0)",
+      st.running && st.live && !!job?.live && c.s.sent.length === 1 && n.includes("Metamorph.md #9 is yours · seat identity.md #777 · mining the next one") && h.state.lastMint?.seat === 777 && !n.includes(M.LINES.nothing),
+      `running ${st.running}, live ${st.live}, ${c.s.sent.length} send(s); ${n.slice(0, 3).join(" | ")}`,
+    );
+    h.unmount();
+  }
 } finally {
   Object.assign(globalThis, realTimers);
   delete globalThis.window;
@@ -1910,7 +1937,7 @@ const deferred = () => {
     n5.minted === 70 && n5.lastHour === 34 && n6.minted === 71 && n6.lastHour === 35 && w.cardReads().length === 1 && n6.lastMintAt === T + 15,
   );
   const empty = numbersWorld({ open: [] });
-  check("no seat to mine: mineable 0 (the page's ready state)", (await L.loadMine(empty.client, numbersAt(0xe2), ms(1_000_000))).mineable === 0);
+  check("no seat held: mineable 0 (the page's ready line: cards draw from the whole collection)", (await L.loadMine(empty.client, numbersAt(0xe2), ms(1_000_000))).mineable === 0);
 }
 
 // The hook, without React (renderHook's stand-in) and on the hand clock.
