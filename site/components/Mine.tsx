@@ -498,7 +498,8 @@ export function Mine() {
           <figure>
             <img src="/cards/metamorph/b-12.svg" alt="Metamorph.md #12 emerged as its butterfly" width={360} height={360} loading="lazy" />
             <figcaption>
-              <b>Watch it emerge.</b> When the vault sells the seat, the card turns into its butterfly by itself, and earns double while staked.
+              <b>Watch it emerge.</b> When the vault sells the seat, or 90 days after the mint, the card turns into its butterfly by itself, and
+              earns double while staked.
             </figcaption>
           </figure>
           <figure>
@@ -511,8 +512,9 @@ export function Mine() {
         </div>
         <p className="mine-foot dim">
           {contracts ? "" : "Preview: the contracts are not live. "}A practice run hashes for real and mints nothing. 303 cards per seat
-          the vault holds, 3,333 in all; the price rises each epoch of 303 mints. A mint sometimes does the vault&apos;s housekeeping on
-          the way; the miner is paid for it. 30% of every mint goes to the developer. The design in full:{" "}
+          and round, 3,333 in all; while the vault holds no seat, the whole identity.md collection is the deck; the price rises each
+          epoch of 303 mints. A mint sometimes does the vault&apos;s housekeeping on the way; the miner is paid for it. 30% of every mint
+          goes to the developer. The design in full:{" "}
           <a href="https://github.com/pupate-IMD/PUPATE/blob/main/docs/superpowers/specs/2026-10-13-metamorph-md-design.md" target="_blank" rel="noreferrer">
             Metamorph MD on GitHub ↗
           </a>
