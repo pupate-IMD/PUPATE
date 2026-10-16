@@ -234,7 +234,8 @@ remain the reference and the fallback.
    ends with `mine-live: 23 of 23 steps passed`. Do not deploy on anything less.
 
    Then look at `https://pupate.fun/mine/`: no preview chip, the mint price, the epoch and the numbers from
-   the chain. Until the keeper has noted the first seat the mine reads "Ready. Nothing to mine until the
-   vault holds a seat.", Start mining stays off and the practice run is a link away. The page switches on
-   by itself once `mineableSeats()` is not empty: no second deployment. Announce it as
-   "contracts live, mining opens with the first seat".
+   the chain, Start mining on and the practice run a link away. Until the keeper has noted the first seat
+   the mine reads "Ready. The vault holds no seat yet, so cards draw from the whole identity.md
+   collection.", and every mint draws its seat from the whole collection (the commons); from the first noted
+   seat on, from the vault's seats, with no second deployment. Announce it as "contracts live, the mine is
+   open".

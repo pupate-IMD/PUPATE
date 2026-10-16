@@ -82,13 +82,16 @@ sent, a question before every broadcast, the addresses recorded.
   status feed gains a `mine` block (minted, epoch, price, bits, the last mint, the pot, the duties due, the
   noted and mineable seats, the staked cards). `keeper/README.md`, "The mine's duties", has the details,
   and `node keeper/test/metamorph.mjs` runs all four on a fresh local stack.
-- **The page switches on when the vault holds a noted seat.** The deployment that carries `metamorph` and
-  `metamorphArt` in `MAINNET` (`site/lib/addresses.ts`) turns `/mine/` and `/cards/` from the preview into
-  the live pages. While `mineableSeats()` is empty the mine reads "Ready. Nothing to mine until the vault
-  holds a seat.", with the price and the numbers from the chain, Start mining off and the practice run
-  open. The page reads `mineableSeats()` every three seconds, so the first seat the keeper notes opens
-  mining by itself, with no second deployment. A sale closes that seat again: `forgetSeats` forgets it,
-  and the mine waits for the next one.
+- **The page switches on with the deployment, a seat in the vault or not (the commons, 2026-10-16).** The
+  deployment that carries `metamorph` and `metamorphArt` in `MAINNET` (`site/lib/addresses.ts`) turns
+  `/mine/` and `/cards/` from the preview into the live pages, and the mine is open from that moment: Start
+  mining is on whenever the contract is live, the practice run a link away. While `mineableSeats()` is
+  empty the mine reads "Ready. The vault holds no seat yet, so cards draw from the whole identity.md
+  collection.", with the price and the numbers from the chain, and every mint draws its seat from the whole
+  collection. The page reads `mineableSeats()` every three seconds; from the first seat the keeper notes
+  the mints draw from the vault's seats instead, with no second deployment, and a sale (`forgetSeats`
+  forgets the seat) puts the mine back on the commons. The pre-register card stays up until the first card
+  is minted.
 - **Proof before the deployment.** `cd site && npm run mine-live` drives the same pages in headless Edge
   against the local stack with a dev wallet: connect through RainbowKit, approve, mine and mint at one
   bit, the card in the drawer with its tokenURI image, stake, claim IMD after a real conversion, unstake,
