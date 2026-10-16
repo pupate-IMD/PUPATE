@@ -14,6 +14,8 @@ contract MockERC721 {
 
     mapping(uint256 => address) private _owner;
     mapping(address => uint256) public balanceOf;
+    /// @dev The tokens that exist, as ERC721Enumerable counts them: minted and not burned.
+    uint256 public totalSupply;
     mapping(uint256 => address) public getApproved;
     mapping(address => mapping(address => bool)) public isApprovedForAll;
 
@@ -25,6 +27,7 @@ contract MockERC721 {
         require(_owner[tokenId] == address(0), "minted");
         _owner[tokenId] = to;
         balanceOf[to] += 1;
+        totalSupply += 1;
         emit Transfer(address(0), to, tokenId);
     }
 
@@ -34,6 +37,7 @@ contract MockERC721 {
         delete _owner[tokenId];
         delete getApproved[tokenId];
         balanceOf[owner] -= 1;
+        totalSupply -= 1;
         emit Transfer(owner, address(0), tokenId);
     }
 
