@@ -1,7 +1,8 @@
 // The mine, in numbers: the cards minted, the epoch and the mint price, the difficulty, the network's hash
 // rate, the share of the 3,333 minted, the seconds since the last mint, and whether the vault holds a seat a
-// mint can pick (none is the page's ready state). One eth_call reads the contract's views with Multicall3's
-// block number and timestamp, at one block, every three seconds and at once after a mint (useMineNumbers).
+// mint can pick (none is the commons: cards draw from the whole identity.md collection, and the page's
+// ready line says so). One eth_call reads the contract's views with Multicall3's block number and
+// timestamp, at one block, every three seconds and at once after a mint (useMineNumbers).
 //
 // The network rate is the mints of the last hour, each worth the hashes a mint takes now (2^bits), over the
 // hour's 3,600 seconds. The Minted log carries no time; a card's mintedAt is its block's timestamp, and the
@@ -57,7 +58,7 @@ export interface MineNumbers {
   bits: number;
   /// The last mint's time (unix seconds); null before the first mint.
   lastMintAt: number | null;
-  /// The seats a mint may pick from right now (mineableSeats().length).
+  /// The noted seats the vault holds with editions left (mineableSeats().length); 0 is the commons.
   mineable: number;
   /// The mints of the hour before `now`.
   lastHour: number;
