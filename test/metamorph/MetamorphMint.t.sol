@@ -66,7 +66,7 @@ contract MetamorphMintTest is MetamorphFixture {
         (
             uint32 seat,
             uint16 round,
-            uint16 edition,,
+            uint16 edition,,,
             uint40 mintedAt,
             uint96 paid,
             address who,
@@ -211,21 +211,12 @@ contract MetamorphMintTest is MetamorphFixture {
             }
             vm.prank(miner);
             uint256 id = md.mint(a, n);
-            (uint32 seat,,,,,,,) = md.cards(id);
+            (uint32 seat,,,,,,,,) = md.cards(id);
             assertEq(seat, open[work % open.length], "the hash indexes the mineable seats");
         }
         assertEq(md.editionsMinted(1376, 0), 4);
         assertEq(md.editionsMinted(42, 0), 4);
         assertEq(md.editionsMinted(7, 0), 4);
-    }
-
-    function test_noMineableSeatMeansNoMint() public {
-        _sell(1376);
-        uint256 a = _anchor();
-        uint256 n = _proof(miner, a);
-        vm.prank(miner);
-        vm.expectRevert(MetamorphMD.NothingMineable.selector);
-        md.mint(a, n);
     }
 
     function test_reboughtSeatStartsItsOwnEditions() public {
@@ -240,7 +231,7 @@ contract MetamorphMintTest is MetamorphFixture {
         assertEq(round, 1);
         vm.roll(block.number + 1);
         uint256 id = _mintAs(miner);
-        (, uint16 r, uint16 edition,,,,,) = md.cards(id);
+        (, uint16 r, uint16 edition,,,,,,) = md.cards(id);
         assertEq(r, 1);
         assertEq(edition, 1, "the new round's first edition");
         assertEq(md.editionsMinted(1376, 1), 1);
@@ -288,12 +279,12 @@ contract MetamorphMintTest is MetamorphFixture {
         assertEq(md.epoch(), 2);
         assertEq(md.mintPrice(), 62_500 ether);
         assertEq(md.target(), type(uint256).max >> 2, "epoch two's ceiling binds on the 303rd mint");
-        (,,,,, uint96 paidFirstEpoch,,) = md.cards(303);
+        (,,,,,, uint96 paidFirstEpoch,,) = md.cards(303);
         assertEq(paidFirstEpoch, 50_000 ether, "the 303rd mint still pays the first epoch's price");
         uint256 devBefore = token.balanceOf(developer);
         vm.roll(block.number + 1);
         _mintAs(miner);
-        (,,,,, uint96 paidSecondEpoch,,) = md.cards(304);
+        (,,,,,, uint96 paidSecondEpoch,,) = md.cards(304);
         assertEq(paidSecondEpoch, 62_500 ether, "the 304th pays the second epoch's");
         assertEq(token.balanceOf(developer) - devBefore, 62_500 ether * 3000 / 10_000);
     }
@@ -455,7 +446,7 @@ contract MetamorphMintTest is MetamorphFixture {
         }
         vm.prank(miner);
         uint256 g = md.mint(a, giltNonce);
-        (,,, bool giltFlag,,,,) = md.cards(g);
+        (,,, bool giltFlag,,,,,) = md.cards(g);
         assertTrue(giltFlag, "just under target/16 is gilt");
         // Every mint voids the open proofs: search again at the new chain state, for a plain one.
         vm.roll(block.number + 1);
@@ -469,7 +460,7 @@ contract MetamorphMintTest is MetamorphFixture {
         }
         vm.prank(miner);
         uint256 p = md.mint(a, plainNonce);
-        (,,, bool plainFlag,,,,) = md.cards(p);
+        (,,, bool plainFlag,,,,,) = md.cards(p);
         assertFalse(plainFlag, "just over target/16 is plain");
     }
 
@@ -489,7 +480,7 @@ contract MetamorphMintTest is MetamorphFixture {
         vm.roll(block.number + 1);
         vm.prank(miner);
         uint256 id = md.mint(anchor, nonce);
-        (,,, bool gilt,,,,) = md.cards(id);
+        (,,, bool gilt,,,,,) = md.cards(id);
         assertTrue(gilt, "gilt against the eased target, though not against the stored one");
     }
 
@@ -515,7 +506,7 @@ contract MetamorphMintTest is MetamorphFixture {
 
     /// @dev At the mainnet floor of 20 bits a proof is one hash in about a million, so the mint refuses a
     /// random nonce from anyone. A constructor that dropped the floor, or a mint that skipped the check, would
-    /// let most runs through (and they would then revert `NothingMineable`, as no seat is noted here). A run
+    /// let most runs through (and they would then mint from the commons, as no seat is noted here). A run
     /// that draws a genuine proof (2^-20 a run, about 1 in 4,000 for 256 runs) is assumed away, so no run
     /// fails for nothing and forge's fuzz cache has no false failure to replay.
     function testFuzz_aRandomNonceIsRefusedAtTwentyBits(uint256 nonce, address who) public {

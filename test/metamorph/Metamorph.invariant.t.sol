@@ -66,6 +66,10 @@ contract MetamorphInvariantTest is MetamorphFixture {
         assertEq(handler.seatsForgotten(), seatList.length, "and forgotten");
         assertEq(md.notedSeats().length, 0, "the list is empty");
         assertEq(handler.lastStage(1), 1, "card 1 is a butterfly");
+        handler.mint(2, 90);
+        uint256 last = md.totalMinted();
+        assertTrue(md.commons(last), "with every seat sold, the mint drew from the commons");
+        assertEq(handler.lastStage(last), 0, "a commons card is a chrysalis");
         handler.pass(1 days);
         handler.unstake(0);
         (staker,,) = md.stakeOf(1);
@@ -78,18 +82,24 @@ contract MetamorphInvariantTest is MetamorphFixture {
             assertEq(md.prevWork(), md.DOMAIN());
             return;
         }
-        (,,,,,,, bytes32 work) = md.cards(n);
+        (,,,,,,,, bytes32 work) = md.cards(n);
         assertEq(md.prevWork(), work);
     }
 
     /// @dev Seat 1376 starts at `SEEDED_EDITIONS`, so the cap and the mineable filter are crossed inside a run.
     /// The supply cap of 3,333 is out of a campaign's reach; `test_editionsRunOutAt303AndTheSupplyAt3333`
-    /// (MetamorphMint.t.sol) mints the whole collection.
+    /// (MetamorphMint.t.sol) mints the whole collection. The commons draws seats outside the list, so every
+    /// card's own bucket is checked too.
     function invariant_editionsNeverExceedTheCap() public view {
         for (uint256 i; i < seatList.length; i++) {
             for (uint16 r; r < 3; r++) {
                 assertLe(md.editionsMinted(seatList[i], r), 303);
             }
+        }
+        uint256 n = handler.mintedCount();
+        for (uint256 i; i < n; i++) {
+            (uint32 seat, uint16 round,,,,,,,) = md.cards(handler.minted(i));
+            assertLe(md.editionsMinted(seat, round), 303);
         }
     }
 

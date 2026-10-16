@@ -20,10 +20,12 @@ import {IMetamorphArt} from "../interfaces/IMetamorphArt.sol";
 import {ERC721Lite} from "./ERC721Lite.sol";
 
 /// @title Metamorph MD
-/// @notice 3,333 cards of the identity.md seats Pupate's vault holds, mined in the browser. One valid
-/// proof is one mint; the hash picks the seat; the fee is PUPATE, 70% to a pot converted to IMD for the
-/// stakers and 30% to the developer; a mint also runs the vault's due duties and pays the miner their
-/// rewards. A card is a chrysalis until the vault no longer holds its seat, then a butterfly. No keys.
+/// @notice 3,333 cards of identity.md seats, mined in the browser: the seats Pupate's vault holds, or,
+/// while it holds none, any seat of the collection (the commons). One valid proof is one mint; the hash
+/// picks the seat; the fee is PUPATE, 70% to a pot converted to IMD for the stakers and 30% to the
+/// developer; a mint also runs the vault's due duties and pays the miner their rewards. A card is a
+/// chrysalis until the vault no longer holds its seat, then a butterfly; a commons card emerges by time
+/// only. No keys.
 contract MetamorphMD is ERC721Lite, IUnlockCallback {
     using StateLibrary for IPoolManager;
     using PoolIdLibrary for PoolKey;
@@ -83,6 +85,8 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
 
     bytes32 public constant DOMAIN = keccak256("Metamorph MD work v1");
     uint16 public constant EDITIONS = 303;
+    /// @notice Seats a commons mint steps past full buckets, after the one the hash picks, before it gives up.
+    uint256 public constant COMMONS_STEPS = 16;
     uint16 public constant MAX_SUPPLY = 3333;
     uint16 public constant EPOCH = 303;
     uint256 public constant BASE_PRICE = 50_000 ether;
@@ -155,6 +159,9 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         uint16 round;
         uint16 edition;
         bool gilt;
+        /// minted while the vault held no noted seat with editions left: the seat was drawn from the whole
+        /// collection, and the card emerges by time only
+        bool commons;
         uint40 mintedAt;
         uint96 paid;
         address miner;
@@ -384,14 +391,15 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     // ------------------------------------------------------------------ the mint
 
     /// @notice Mint with a proof for `anchor` (a block 1 to 50 behind) and `nonce`. The hash picks the
-    /// seat; the fee is `mintPrice()` in PUPATE, 70% to the pot and 30% to the developer; then the
-    /// vault's due duties run and pay the caller.
+    /// seat, among the mineable seats or, while there is none, in the whole collection; the fee is
+    /// `mintPrice()` in PUPATE, 70% to the pot and 30% to the developer; then the vault's due duties run
+    /// and pay the caller.
     function mint(uint256 anchor, uint256 nonce) external nonReentrant returns (uint256 id) {
         if (totalMinted >= MAX_SUPPLY) revert SupplyExhausted();
         bytes32 work = workHash(_anchor(anchor), msg.sender, nonce);
         uint256 t = effectiveTarget();
         if (uint256(work) >= t) revert NotASolution();
-        (uint256 seat, uint16 round) = _pick(uint256(work));
+        (uint256 seat, uint16 round, bool commons_) = _pick(uint256(work));
         uint16 edition = ++editionsMinted[seat][round];
 
         uint16 epoch_ = epoch();
@@ -404,7 +412,15 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         id = ++totalMinted;
         bool gilt = uint256(work) < (t >> 4);
         cards[id] = Card(
-            uint32(seat), round, edition, gilt, uint40(block.timestamp), uint96(price), msg.sender, work
+            uint32(seat),
+            round,
+            edition,
+            gilt,
+            commons_,
+            uint40(block.timestamp),
+            uint96(price),
+            msg.sender,
+            work
         );
 
         prevWork = work;
@@ -426,11 +442,37 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
         if (h == bytes32(0)) revert BadAnchor();
     }
 
-    function _pick(uint256 work) private view returns (uint256 seat, uint16 round) {
+    /// @dev The hash indexes the mineable seats. While there is none, the commons: the hash draws a seat from
+    /// the whole collection, `1 + work % totalSupply()`, in the round Cocoon records for it (0 for a seat the
+    /// vault never held), so the card's bucket is `editionsMinted[seat][round]` as for any card and no two
+    /// cards share (seat, round, edition); a full bucket steps to the next seat, the last to the first, at
+    /// most `COMMONS_STEPS` times, then nothing is mineable. The commons is the fallback, never a choice.
+    function _pick(uint256 work) private view returns (uint256 seat, uint16 round, bool commons_) {
         uint256[] memory open = mineableSeats();
-        if (open.length == 0) revert NothingMineable();
-        seat = open[work % open.length];
-        (,,,,,, round) = COCOON.seats(seat);
+        if (open.length != 0) {
+            seat = open[work % open.length];
+            (,,,,,, round) = COCOON.seats(seat);
+            return (seat, round, false);
+        }
+        uint256 n = _collectionSize();
+        seat = 1 + work % n;
+        for (uint256 i; i <= COMMONS_STEPS; i++) {
+            (,,,,,, round) = COCOON.seats(seat);
+            if (editionsMinted[seat][round] < EDITIONS) return (seat, round, true);
+            seat = seat % n + 1;
+        }
+        revert NothingMineable();
+    }
+
+    /// @dev The seats the commons draws from: the collection's `totalSupply()`, at most 2^32 − 1 so that a
+    /// card stores its seat whole (audit L-4). A collection that cannot answer, or answers 0, leaves nothing
+    /// to mine.
+    function _collectionSize() private view returns (uint256 n) {
+        try COLLECTION.totalSupply() returns (uint256 total) {
+            n = total;
+        } catch {}
+        if (n == 0) revert NothingMineable();
+        if (n > type(uint32).max) n = type(uint32).max;
     }
 
     /// @dev Every mint moves the target, starting from the effective (eased) target, toward one mint per
@@ -469,12 +511,23 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     // ------------------------------------------------------------------ stages, royalty, metadata
 
     /// @notice 0 while the vault holds the card's seat in the card's round, 1 after it no longer does,
-    /// or 90 days after the mint whatever happened. Computed, never stored.
+    /// or 90 days after the mint whatever happened. A commons card emerges by the 90 days only: the vault
+    /// never held its seat for it, and whether it holds that seat now says nothing about the card.
+    /// Computed, never stored.
     function stageOf(uint256 id) public view returns (uint8) {
         Card memory c = cards[id];
         if (c.mintedAt == 0) revert NotMinted();
         if (block.timestamp >= uint256(c.mintedAt) + BUTTERFLY_CEILING) return 1;
+        if (c.commons) return 0;
         return _vaultHoldsRound(c.seat, c.round) ? 0 : 1;
+    }
+
+    /// @notice Whether the card was minted while the vault held no noted seat with editions left: its seat
+    /// was drawn from the whole collection, and it emerges by time only.
+    function commons(uint256 id) external view returns (bool) {
+        Card storage c = cards[id];
+        if (c.mintedAt == 0) revert NotMinted();
+        return c.commons;
     }
 
     /// @notice ERC-2981: 5% of every resale to the developer Cocoon names today.

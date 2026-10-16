@@ -39,7 +39,7 @@ contract MetamorphStakingTest is MetamorphFixture {
     }
 
     function _seatOf(uint256 id) private view returns (uint32 seat) {
-        (seat,,,,,,,) = md.cards(id);
+        (seat,,,,,,,,) = md.cards(id);
     }
 
     function test_stakeLocksAndWeighsOne() public {

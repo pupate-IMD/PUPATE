@@ -22,7 +22,8 @@ import {StubArt} from "../mocks/StubArt.sol";
 /// pools. Skipped without MAINNET_RPC_URL. The vault is given a seat (a holder hands it over and the
 /// vault adopts it after a fresh floor from a test attester), a card is mined and minted with duties,
 /// the pot is converted through the real pools by anyone and, once it holds a hundred prices, by a mint's
-/// duty, a staker claims IMD, the seat is sold, the card emerges.
+/// duty, a staker claims IMD, the seat is sold, the card emerges. A second test mints before the seat is
+/// noted, from the commons: the real collection answers `totalSupply()`.
 contract MetamorphForkTest is Test {
     Cocoon constant COCOON = Cocoon(payable(0x54993066369e57a49215f6fc2D9911a8e5a57a79));
     PupateHook constant HOOK = PupateHook(payable(0xb5e544166144A590E171bF0350e8F227858318CC));
@@ -74,7 +75,6 @@ contract MetamorphForkTest is Test {
         vm.prank(holder);
         IERC721Minimal(COLLECTION).transferFrom(holder, address(COCOON), seat);
         COCOON.adopt(seat);
-        md.noteSeat(seat);
 
         // The miner is funded with a deal: buying in the pool would work too, but a deal is simpler.
         deal(address(PUPATE), miner, 50_000_000 ether);
@@ -90,9 +90,11 @@ contract MetamorphForkTest is Test {
             return;
         }
         vm.fee(1 gwei);
+        md.noteSeat(seat);
         uint256 id = _mint();
-        (uint32 s,,,,,,,) = md.cards(id);
+        (uint32 s,,,,,,,,) = md.cards(id);
         assertEq(s, seat);
+        assertFalse(md.commons(id));
         assertEq(md.stageOf(id), 0);
 
         // Stake, then two more mints: three fees are far under the hundred prices the conversion duty waits
@@ -138,6 +140,33 @@ contract MetamorphForkTest is Test {
         IERC721Minimal(COLLECTION).transferFrom(address(COCOON), holder, seat);
         COCOON.settleSeat(seat);
         assertEq(md.stageOf(id), 1);
+    }
+
+    /// The vault holds a seat nobody has noted: the mint draws from the commons, the whole collection as the
+    /// real contract counts it (2,000 seats on 2026-10-16), and the card emerges by time only.
+    function test_aMintBeforeTheFirstNotedSeatDrawsFromTheRealCollection() public {
+        if (address(md) == address(0)) {
+            vm.skip(true);
+            return;
+        }
+        assertEq(md.mineableSeats().length, 0, "nothing noted");
+        uint256 supply = IERC721Minimal(COLLECTION).totalSupply();
+        assertGe(supply, 2000, "the collection counts its seats");
+        uint256 a = block.number - 1;
+        uint256 nonce = _nonce(a);
+        uint256 work = uint256(md.workHash(blockhash(a), miner, nonce));
+        vm.prank(miner);
+        uint256 id = md.mint(a, nonce);
+        (uint32 s, uint16 round, uint16 edition,, bool commons,,,,) = md.cards(id);
+        assertEq(s, 1 + work % supply, "one plus the work modulo the real supply");
+        (,,,,,, uint16 recorded) = COCOON.seats(s);
+        assertEq(round, recorded, "the round Cocoon records for that seat");
+        assertEq(edition, 1);
+        assertTrue(commons);
+        assertTrue(md.commons(id));
+        assertEq(md.stageOf(id), 0, "a chrysalis whether or not the vault holds that seat");
+        vm.warp(block.timestamp + 90 days);
+        assertEq(md.stageOf(id), 1, "a butterfly at 90 days");
     }
 
     /// @dev Mints at dear gas leave their duties alone while the pot fills to a hundred prices; then one

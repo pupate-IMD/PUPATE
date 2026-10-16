@@ -109,7 +109,7 @@ contract MetamorphViewsTest is MetamorphFixture {
         _sell(1376);
         vm.roll(block.number + 1);
         uint256 id = _mintAs(miner);
-        (uint32 seat,,,,,,,) = md.cards(id);
+        (uint32 seat,,,,,,,,) = md.cards(id);
         assertEq(seat, largest);
         assertEq(md.stageOf(id), 0, "a chrysalis: the vault holds that seat");
     }
@@ -144,7 +144,7 @@ contract MetamorphViewsTest is MetamorphFixture {
         uint256 work = uint256(md.workHash(blockhash(a), miner, n));
         vm.prank(miner);
         uint256 id = md.mint(a, n);
-        (uint32 seat,,,,,,,) = md.cards(id);
+        (uint32 seat,,,,,,,,) = md.cards(id);
         assertEq(seat, open[work % open.length], "the hash indexes the seats that are left");
 
         // The seat that moved is found at its new place, and the last one left can go too.
@@ -186,7 +186,7 @@ contract MetamorphViewsTest is MetamorphFixture {
         assertEq(md.notedSeats().length, 1);
         vm.roll(block.number + 1);
         uint256 id = _mintAs(miner);
-        (uint32 seat, uint16 round, uint16 edition,,,,,) = md.cards(id);
+        (uint32 seat, uint16 round, uint16 edition,,,,,,) = md.cards(id);
         assertEq(seat, 1376);
         assertEq(round, 1, "the new round");
         assertEq(edition, 1, "the first edition of the new round");
@@ -205,7 +205,7 @@ contract MetamorphViewsTest is MetamorphFixture {
         md.noteSeat(1376);
         vm.roll(block.number + 1);
         uint256 id = _mintAs(miner);
-        (, uint16 round, uint16 edition,,,,,) = md.cards(id);
+        (, uint16 round, uint16 edition,,,,,,) = md.cards(id);
         assertEq(round, 0, "the same round");
         assertEq(edition, 2, "the next edition, not a repeat");
     }

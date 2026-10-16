@@ -9,8 +9,9 @@ import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
 import {MockERC721} from "../mocks/MockERC721.sol";
 
 /// @dev Drives Metamorph MD with valid actions only (the suite fails on revert): mints with real
-/// proofs, stakes, unstakes, claims, converts, sells seats and forgets them, pays the vault tax, and moves
-/// the clock and the chain.
+/// proofs (of the vault's seats while it holds one with editions left, of the commons after), stakes,
+/// unstakes, claims, converts, sells seats and forgets them, pays the vault tax, and moves the clock and
+/// the chain.
 contract MetamorphHandler is Test {
     MetamorphMD public md;
     Cocoon public cocoon;
@@ -46,10 +47,12 @@ contract MetamorphHandler is Test {
 
     /// @dev A mint with the first nonce under the effective target, as the browser finds it. Gas is cheap, so
     /// the mint also runs the vault's due duties; when a conversion among them runs, what its `Converted`
-    /// event reports sold is counted as sold. Nothing else excuses a drop of the pot.
+    /// event reports sold is counted as sold. Nothing else excuses a drop of the pot. Once every seat is
+    /// sold, the mint draws from the commons: the mock collection counts a handful of seats, and a campaign
+    /// is far too short to fill seventeen buckets of 303, so `NothingMineable` is never a legitimate outcome.
     function mint(uint256 who, uint256 dt) external {
         address a = actors[who % actors.length];
-        if (md.totalMinted() >= md.MAX_SUPPLY() || md.mineableSeats().length == 0) return;
+        if (md.totalMinted() >= md.MAX_SUPPLY()) return;
         if (token.balanceOf(a) < md.mintPrice()) return;
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + bound(dt, 1, 600));

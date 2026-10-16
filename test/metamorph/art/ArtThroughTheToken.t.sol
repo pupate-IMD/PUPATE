@@ -73,7 +73,7 @@ contract ArtThroughTheTokenTest is MetamorphFixture {
         }
         vm.prank(miner);
         uint256 id = md.mint(a, nonce);
-        (,,, bool gilt,,,,) = md.cards(id);
+        (,,, bool gilt,,,,,) = md.cards(id);
         assertTrue(gilt, "a gilt proof");
         string memory json = md.tokenURI(id).jsonOf();
         assertTrue(json.contains('{"trait_type":"Gilt","value":"Yes"}'));
@@ -83,7 +83,7 @@ contract ArtThroughTheTokenTest is MetamorphFixture {
 
     /// The view the token builds for a card, from its public reads.
     function _viewOf(uint256 id) internal view returns (IMetamorphArt.View memory) {
-        (uint32 seat, uint16 round, uint16 edition, bool gilt, uint40 mintedAt, uint96 paid, address who,) =
+        (uint32 seat, uint16 round, uint16 edition, bool gilt,, uint40 mintedAt, uint96 paid, address who,) =
             md.cards(id);
         return IMetamorphArt.View({
             id: id,
