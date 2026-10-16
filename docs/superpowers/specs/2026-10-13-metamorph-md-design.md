@@ -440,6 +440,44 @@ Where an item here and the rest of this spec disagree, the item holds: it is wha
   - Egg and larva are client-side: the token has two stages, chrysalis and butterfly, and the site's
     incubator draws the prototype's egg and larva on the page while the search runs.
 
+### The commons (2026-10-16)
+
+The owner's decision of 2026-10-16: the mine opens now, and the vault cannot afford a seat (a seat pot of
+0.25 ETH against the cheapest identity.md seat at 1.95 ETH, and no fresh floor). The rule changes in one
+place and the token is redeployed from this code; the art, the price, the epochs, the 3,333, the 70/30
+split, the staking, the duties, `poke`, `convert`, the work chain and the retarget stay as they are. The
+first `MetamorphMD`, `0xA96e3AD80f1bc2D3A94cb774BbDB94b842729D09`, is abandoned with 0 mints.
+
+- While `mineableSeats()` is empty (no noted seat held by the vault with editions left), a mint draws its
+  seat from the whole identity.md collection: `seat = 1 + work % N` with `N = COLLECTION.totalSupply()`,
+  read at the mint (2,000 seats on 2026-10-16; the collection may grow; a collection past 2^32 − 1 seats is
+  drawn from its first 2^32 − 1, so a card's 32-bit seat is stored whole, as audit L-4 asks). A
+  `totalSupply()` that reverts or answers 0 makes the mint revert `NothingMineable`, as an empty list did
+  before. The card's round is what Cocoon's record says for that seat (the `round` of `COCOON.seats(seat)`,
+  0 for a seat the vault never held), so editions are counted in `editionsMinted[seat][round]` exactly as
+  before and no two cards ever share (seat, round, edition). If that bucket is full (`EDITIONS`), the mint
+  steps to the next seat (`seat % N + 1`: the last seat steps to the first), at most `COMMONS_STEPS` (16)
+  times, then reverts `NothingMineable`.
+- The moment the vault holds a noted seat with editions left, picks come from `mineableSeats()` only, as
+  before. The commons is the fallback, never a choice; the page and the keeper note and forget seats as
+  before.
+- A commons card, one minted while the vault held no such seat, carries `Card.commons` (a `bool` after
+  `gilt`, in the card's first slot; `cards(id)` returns nine fields: seat, round, edition, gilt, commons,
+  mintedAt, paid, miner, work) and emerges by time only: `stageOf` is 0 until `BUTTERFLY_CEILING` (90
+  days) and 1 after, whether or not the vault holds its seat meanwhile. The vault never held its seat for
+  it, and without the flag such a card would be a butterfly at once. A vault card keeps the rule under "The
+  card's two stages". `stake`, `claim`, `poke` and `tokenURI` follow `stageOf`, so a staked commons card
+  weighs 1 for 90 days and 2 from the next touch after.
+- `commons(uint256 id) returns (bool)`, a view for the site, reverts `NotMinted` like `stageOf`. No new
+  event (`Minted` is unchanged: its seat, round and edition name the bucket), no constructor change
+  (`script/DeployMetamorph.s.sol` and the wrapper's `token --again` are as they were), no change to the
+  art or its `View`. `IERC721Minimal`, the interface the token reads the collection through, gains
+  `totalSupply()`; Cocoon does not call it.
+- `NothingMineable` is reached only through the commons now: a `totalSupply()` that reverts or is 0, or
+  seventeen full buckets in a row. The row for it in "Errors the visitor can meet" and the line "Nothing to
+  mine until the vault holds a seat" under "The miner, underneath the page" no longer hold: the mine is
+  open from the deployment, and the page says so.
+
 ## The drawing
 
 The card is the prototype's frame (1080×1080, green-black `#0b1410`, hairline grid, ivory `#e9e6da`,

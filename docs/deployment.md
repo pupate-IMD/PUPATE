@@ -64,11 +64,14 @@ timelock.
 
 ## 5. Metamorph MD: the mine opens
 
-The contracts can be live before the vault holds a seat. `script/mainnet/README.md`, "Metamorph MD", is the
-runbook: the art, then the token at 20 bits, then the two addresses recorded and the keeper restarted, then
-the site. `script/mainnet/metamorph.mjs` (`status`, `art`, `rehearsal`, `token`, `record`) runs those steps one
-command each, as `launch.mjs` runs the launch: the chain read first, the runbook's refusals before anything is
-sent, a question before every broadcast, the addresses recorded.
+The contracts can be live before the vault holds a seat. Since the commons (2026-10-16) the mine is open from
+the token's deployment too: while the vault holds no noted seat with editions left, a mint draws its seat from
+the whole identity.md collection, and the first `MetamorphMD` (`0xA96e…9D09`, 0 mints) was abandoned for one
+that does, redeployed with `node script/mainnet/metamorph.mjs token --again`. `script/mainnet/README.md`,
+"Metamorph MD", is the runbook: the art, then the token at 20 bits, then the two addresses recorded and the
+keeper restarted, then the site. `script/mainnet/metamorph.mjs` (`status`, `art`, `rehearsal`, `token`,
+`record`) runs those steps one command each, as `launch.mjs` runs the launch: the chain read first, the
+runbook's refusals before anything is sent, a question before every broadcast, the addresses recorded.
 
 - **The keeper's new duties.** With `metamorph` in its addresses file (`keeper/addresses.mainnet.json`,
   named by `ADDRESSES` in the keeper's `.env` on the VPS) the keeper runs four more steps at the end of

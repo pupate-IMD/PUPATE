@@ -194,6 +194,20 @@ remain the reference and the fallback.
    (`BadWiring`). Nothing can be corrected after the deployment. With `ETHERSCAN_API_KEY` set, add
    `--verify` here as well, and start the keeper loop again.
 
+   The commons (2026-10-16). The token is deployed twice. The first `MetamorphMD`,
+   `0xA96e3AD80f1bc2D3A94cb774BbDB94b842729D09`, is abandoned with 0 mints: the vault could not afford a seat
+   (a seat pot of 0.25 ETH against the cheapest seat at 1.95 ETH), and the rule changed so that a mint draws
+   its seat from the whole identity.md collection while the vault holds no noted seat with editions left
+   (`docs/superpowers/specs/2026-10-13-metamorph-md-design.md`, "The commons"). The second is deployed from
+   this code, over the recorded address, with
+
+       node script/mainnet/metamorph.mjs token --again
+
+   which runs this step again with the same `ART` (the art stays), records the new address over the old one
+   in `keeper/.launch/metamorph.json` and `keeper/addresses.mainnet.json`, and prints the next step; then
+   `record` again, so `site/lib/addresses.ts` and the keeper take the new address. The constructor and the
+   script's checks are unchanged.
+
 3. Record the two addresses, and the keeper takes the mine's duties. Add `"metamorph"` (the token,
    `MetamorphMD`) and `"metamorphArt"` (the router, `MetamorphArt`) to `keeper/addresses.mainnet.json`, and
    the same two fields to `MAINNET` in `site/lib/addresses.ts`; commit both. The keeper reads `metamorph`
