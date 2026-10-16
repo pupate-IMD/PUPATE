@@ -963,7 +963,7 @@ function fakeNode(world) {
       case "stageOf":
         return world.owner.has(id) ? 0 : NOT_MINTED;
       case "cards":
-        return world.owner.has(id) ? [1, 0, id, false, 1_700_000_000 + id, PRICE1, getAddress(ME), toHex(id, { size: 32 })] : [0, 0, 0, false, 0, 0n, "0x0000000000000000000000000000000000000000", toHex(0, { size: 32 })];
+        return world.owner.has(id) ? [1, 0, id, false, false, 1_700_000_000 + id, PRICE1, getAddress(ME), toHex(id, { size: 32 })] : [0, 0, 0, false, false, 0, 0n, "0x0000000000000000000000000000000000000000", toHex(0, { size: 32 })];
       case "stakeOf":
         return world.stakes.get(id) ?? ["0x0000000000000000000000000000000000000000", 0, 0n];
       default:
@@ -1841,7 +1841,7 @@ function numbersWorld(over = {}) {
             return w.stamp;
           case "cards": {
             const id = Number(c.args[0]);
-            return [1376, 1, id, false, w.times.get(id) ?? 0, PRICE1, getAddress(ME), toHex(id, { size: 32 })];
+            return [1376, 1, id, false, false, w.times.get(id) ?? 0, PRICE1, getAddress(ME), toHex(id, { size: 32 })];
           }
           default:
             throw new Error(`the stand-in has no ${c.functionName}`);
@@ -2498,7 +2498,7 @@ async function numbersOnTheStack() {
   );
   // The hour, counted again from every card's mintedAt read one by one.
   const cards = await Promise.all(Array.from({ length: minted }, (_, i) => view("cards", [BigInt(i + 1)])));
-  const inHour = cards.filter((c) => c[4] > n.now - L.HOUR).length;
+  const inHour = cards.filter((c) => c[5] > n.now - L.HOUR).length;
   const text = L.numbersText(n);
   check(
     "the mints of the last hour = the cards whose mintedAt is within the hour, every card read; the rate is that × 2^bits ÷ 3,600",
@@ -2508,7 +2508,7 @@ async function numbersOnTheStack() {
   const block = await pub.getBlock({ blockNumber: n.block });
   check(
     "the last mint: lastMintAt(), the newest card's mintedAt (none before the first mint); the reading's clock is no earlier than its block's",
-    (minted > 0 ? n.lastMintAt === lastMintAt && cards[minted - 1][4] === lastMintAt : n.lastMintAt === null) && n.now >= Number(block.timestamp) && L.secondsSince(n, Date.now()) >= 0,
+    (minted > 0 ? n.lastMintAt === lastMintAt && cards[minted - 1][5] === lastMintAt : n.lastMintAt === null) && n.now >= Number(block.timestamp) && L.secondsSince(n, Date.now()) >= 0,
     `${L.fmtSince(L.secondsSince(n, Date.now()))} since the last mint, skew ${n.skew} s`,
   );
   // The same hour as the Minted logs tell it: each log's block timestamp is its card's mintedAt, so the walk

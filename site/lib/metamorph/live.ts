@@ -210,7 +210,11 @@ export async function loadMine(client: PublicClient, a: LiveAddresses, nowMs: nu
       multicallAddress: MULTICALL3,
       contracts: ids.map((id) => ({ ...md, functionName: "cards" as const, args: [BigInt(id)] as const })),
     });
-    ids.forEach((id, i) => known.set(id, Number(cards[i][4])));
+    // The card row by name, so the index cannot drift again: mintedAt is the sixth field (after commons).
+    ids.forEach((id, i) => {
+      const [, , , , , mintedAt] = cards[i];
+      known.set(id, Number(mintedAt));
+    });
     walk = hourWalk(minted, now, (id) => known.get(id));
   }
   return {
