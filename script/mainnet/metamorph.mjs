@@ -379,8 +379,8 @@ the site, from site/ (the deployment that carries the two addresses is the one t
   npm run mine-live                                            the end-to-end run on the local stack; must end with "mine-live: 23 of 23 steps passed"
   npm run copy-check && npm run typecheck && npm run build
   vercel --prod --yes
-  then https://pupate.fun/mine/: no preview chip, the mint price, the epoch and the numbers from the chain; "Ready. Nothing to mine
-  until the vault holds a seat." until the keeper notes the first seat, when the page switches on by itself`);
+  then https://pupate.fun/mine/: no preview chip, the mint price, the epoch and the numbers from the chain, Start mining on, and
+  "Ready. The vault holds no seat yet, so cards draw from the whole identity.md collection." until the keeper notes the first seat`);
 }
 
 // ------------------------------------------------------------------ the chain, the files

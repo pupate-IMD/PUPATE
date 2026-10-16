@@ -243,7 +243,8 @@ export const metamorphAbi = parseAbi([
   'function mint(uint256 anchor, uint256 nonce) returns (uint256 id)',
   'function dutiesDue() view returns (bool flushDue, bool burnDue, bool convertDue)',
   // The cards.
-  'function cards(uint256 id) view returns (uint32 seat, uint16 round, uint16 edition, bool gilt, uint40 mintedAt, uint96 paid, address miner, bytes32 work)',
+  'function cards(uint256 id) view returns (uint32 seat, uint16 round, uint16 edition, bool gilt, bool commons, uint40 mintedAt, uint96 paid, address miner, bytes32 work)',
+  'function commons(uint256 id) view returns (bool)',
   'function stageOf(uint256 id) view returns (uint8)',
   'function tokenURI(uint256 id) view returns (string)',
   'function ownerOf(uint256 id) view returns (address owner)',
