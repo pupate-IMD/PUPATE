@@ -171,6 +171,8 @@ export interface WalletCard {
   round: number;
   edition: number;
   gilt: boolean;
+  /// Minted while the vault held no seat (the commons): it emerges by time alone, 90 days after the mint.
+  commons: boolean;
   /// The mint's time, in seconds.
   mintedAt: number;
   /// The mint price paid, in PUPATE wei.
@@ -185,14 +187,14 @@ export interface WalletCard {
   debt: bigint;
 }
 
-type CardRow = readonly [number, number, number, boolean, number, bigint, Address, Hex];
+type CardRow = readonly [number, number, number, boolean, boolean, number, bigint, Address, Hex];
 type StakeRow = readonly [Address, number, bigint];
 
 function cardOf(id: number, c: CardRow, stage: number, s: StakeRow): WalletCard {
-  const [seat, round, edition, gilt, mintedAt, paid, miner, work] = c;
+  const [seat, round, edition, gilt, commons, mintedAt, paid, miner, work] = c;
   const [staker, weight, debt] = s;
   const staked = !isAddressEqual(staker, zeroAddress);
-  return { id, seat, round, edition, gilt, mintedAt, paid, miner, work, stage, staked, weight: staked ? weight : 0, debt: staked ? debt : 0n };
+  return { id, seat, round, edition, gilt, commons, mintedAt, paid, miner, work, stage, staked, weight: staked ? weight : 0, debt: staked ? debt : 0n };
 }
 
 export interface WalletRead {
@@ -313,7 +315,7 @@ export async function cardFacts(client: PublicClient, a: LiveAddresses, id: numb
     ],
   });
   if (card.status !== "success") throw card.error;
-  if (card.result[4] === 0) return null;
+  if (card.result[5] === 0) return null;
   if (stage.status !== "success") throw stage.error;
   if (stake.status !== "success") throw stake.error;
   return { ...cardOf(Number(n), card.result, stage.result, stake.result), owner: owner.status === "success" ? owner.result : null };

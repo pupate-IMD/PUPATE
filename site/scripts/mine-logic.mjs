@@ -127,6 +127,7 @@ const MD_METHODS = {
   "balanceOf(address)": "70a08231",
   "bits()": "4f9640de",
   "cards(uint256)": "8dc10768",
+  "commons(uint256)": "49680df1",
   "claim(uint256[])": "6ba4c138",
   "convert()": "91bbdcc7",
   "convertBackoffUntil()": "25e319d9",
