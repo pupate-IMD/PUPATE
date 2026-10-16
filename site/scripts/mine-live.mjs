@@ -1131,15 +1131,16 @@ async function main() {
     const [, id, seat, gilt] = re.exec(line);
     run.card = { id: Number(id), seat: Number(seat), gilt: !!gilt };
     const owner = await run.view("ownerOf", [BigInt(id)]);
-    const c = await run.view("cards", [BigInt(id)]);
-    if (!isAddressEqual(owner, dev) || !isAddressEqual(c[6], dev)) throw new Error(`card #${id} is held by ${owner} and was mined by ${c[6]}`);
-    if (Number(c[0]) !== run.card.seat || c[3] !== run.card.gilt) throw new Error(`cards(${id}) says seat ${c[0]}, gilt ${c[3]}`);
+    // The card row by name (seat, round, edition, gilt, commons, mintedAt, paid, miner, work), so no index drifts.
+    const [cardSeat, , , cardGilt, , , , cardMiner] = await run.view("cards", [BigInt(id)]);
+    if (!isAddressEqual(owner, dev) || !isAddressEqual(cardMiner, dev)) throw new Error(`card #${id} is held by ${owner} and was mined by ${cardMiner}`);
+    if (Number(cardSeat) !== run.card.seat || cardGilt !== run.card.gilt) throw new Error(`cards(${id}) says seat ${cardSeat}, gilt ${cardGilt}`);
     const notes = (await t.notes()).reverse();
     const from = notes.findIndex((l) => l.startsWith("started on CPU"));
     const at = notes.indexOf(line);
     const mint = wallet.state.sent.slice(run.sent0).find((s) => s.name === "mint");
     return (
-      `"${line}"; ownerOf(${id}) and cards(${id}).miner are the dev wallet, seat #${c[0]}, gilt ${c[3]}; the mint was signed with ` +
+      `"${line}"; ownerOf(${id}) and cards(${id}).miner are the dev wallet, seat #${cardSeat}, gilt ${cardGilt}; the mint was signed with ` +
       `${mint?.gas?.toLocaleString("en-US") ?? "?"} gas; the notes from the start: ${notes.slice(from + 1, at + 3).join(" | ")}`
     );
   });
