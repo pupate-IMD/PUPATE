@@ -188,14 +188,15 @@ export function Mine() {
   const epochNow = nums?.epoch ?? st?.epoch ?? null;
   const needsApproval = !!wallet && st?.allowance != null && st.allowance < st.price;
   const approved = !!contracts && !!wallet && st?.allowance != null && st.allowance >= st.price;
-  /// The ready state: the contracts are live and the vault holds no seat a mint can pick yet.
-  const nothingMineable = !!contracts && nums?.mineable === 0;
+  /// The commons: the contracts are live and the vault holds no seat a mint can pick, so the contract draws
+  /// each card's seat from the whole identity.md collection. The ready line says so; nothing else changes.
+  const commons = !!contracts && nums?.mineable === 0;
   /// The pre-register gate (the card in a pop-up over the page), while the list has an address and the mine
   /// has not opened. The preview is known at build time, so a live site never paints the card before its
-  /// numbers are read; live, "not opened" is a reading that says no card was ever minted and nothing is
-  /// mineable, and from the first mint on the card never returns, whatever the vault holds later.
+  /// numbers are read; live, "not opened" is a reading that says no card was ever minted (the vault's seats
+  /// do not decide: the mine is open with or without one), and from the first mint on the card never returns.
   const preview = TARGET === "local" ? !contracts : !STATIC?.metamorph;
-  const notOpened = !!contracts && nums !== null && nums.minted === 0 && nums.mineable === 0;
+  const notOpened = !!contracts && nums !== null && nums.minted === 0;
   const preRegister = !!PREREGISTER_URL && (preview || notOpened);
   const stepOn = [!!wallet, approved, m.running, m.auto];
 
@@ -209,8 +210,8 @@ export function Mine() {
         ? expectedSeconds
           ? `Mining. A hash takes about ${expectedSeconds < 90 ? `${Math.max(1, Math.round(expectedSeconds))} seconds` : `${Math.round(expectedSeconds / 60)} minutes`} on this machine at ${m.bits} bits.`
           : "Mining. Measuring this machine."
-        : nothingMineable
-          ? "Ready. Nothing to mine until the vault holds a seat."
+        : commons
+          ? "Ready. The vault holds no seat yet, so cards draw from the whole identity.md collection."
           : contracts && wallet
             ? needsApproval
               ? "Not mining. Approve PUPATE once, then start; a practice run costs nothing."
@@ -235,9 +236,9 @@ export function Mine() {
     if (!wallet) return { label: "Connect wallet", onClick: () => openConnectModal?.() };
     if (m.approving) return { label: "Approving PUPATE…", onClick: () => undefined, disabled: true };
     if (needsApproval) return { label: "Approve PUPATE", onClick: () => void approve().then(() => refetchStatus()) };
-    // Nothing to mine until the vault holds a seat: the price shows and the practice run stays a link away.
-    if (nothingMineable) return { label: "Start mining", onClick: () => undefined, disabled: true };
-    // Until the wallet's allowance is known the button waits, so Approve comes before Start when it is due.
+    // Start is on whenever the contract is live, a seat in the vault or not (the commons); the practice run
+    // stays a link away. Until the wallet's allowance is known the button waits, so Approve comes before
+    // Start when it is due.
     return { label: "Start mining", onClick: () => start({ live: true, wallet }), disabled: status.isLoading };
   }
   const cta = primary();
