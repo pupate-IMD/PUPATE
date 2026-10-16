@@ -449,14 +449,15 @@ split, the staking, the duties, `poke`, `convert`, the work chain and the retarg
 first `MetamorphMD`, `0xA96e3AD80f1bc2D3A94cb774BbDB94b842729D09`, is abandoned with 0 mints.
 
 - While `mineableSeats()` is empty (no noted seat held by the vault with editions left), a mint draws its
-  seat from the whole identity.md collection: `seat = 1 + work % N` with `N = COLLECTION.totalSupply()`,
+  seat from the whole identity.md collection: `seat = work % N` with `N = COLLECTION.totalSupply()` (the
+  collection numbers its seats from 0: on 2026-10-16 `ownerOf(0)` answers and `ownerOf(2000)` reverts),
   read at the mint (2,000 seats on 2026-10-16; the collection may grow; a collection past 2^32 − 1 seats is
   drawn from its first 2^32 − 1, so a card's 32-bit seat is stored whole, as audit L-4 asks). A
   `totalSupply()` that reverts or answers 0 makes the mint revert `NothingMineable`, as an empty list did
   before. The card's round is what Cocoon's record says for that seat (the `round` of `COCOON.seats(seat)`,
   0 for a seat the vault never held), so editions are counted in `editionsMinted[seat][round]` exactly as
   before and no two cards ever share (seat, round, edition). If that bucket is full (`EDITIONS`), the mint
-  steps to the next seat (`seat % N + 1`: the last seat steps to the first), at most `COMMONS_STEPS` (16)
+  steps to the next seat (`(seat + 1) % N`: the last seat, N − 1, steps to seat 0), at most `COMMONS_STEPS` (16)
   times, then reverts `NothingMineable`.
 - The moment the vault holds a noted seat with editions left, picks come from `mineableSeats()` only, as
   before. The commons is the fallback, never a choice; the page and the keeper note and forget seats as

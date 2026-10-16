@@ -443,10 +443,11 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
     }
 
     /// @dev The hash indexes the mineable seats. While there is none, the commons: the hash draws a seat from
-    /// the whole collection, `1 + work % totalSupply()`, in the round Cocoon records for it (0 for a seat the
-    /// vault never held), so the card's bucket is `editionsMinted[seat][round]` as for any card and no two
-    /// cards share (seat, round, edition); a full bucket steps to the next seat, the last to the first, at
-    /// most `COMMONS_STEPS` times, then nothing is mineable. The commons is the fallback, never a choice.
+    /// the whole collection, `work % totalSupply()` (identity.md numbers its seats from 0), in the round
+    /// Cocoon records for it (0 for a seat the vault never held), so the card's bucket is
+    /// `editionsMinted[seat][round]` as for any card and no two cards share (seat, round, edition); a full
+    /// bucket steps to the next seat, the last to seat 0, at most `COMMONS_STEPS` times, then nothing is
+    /// mineable. The commons is the fallback, never a choice.
     function _pick(uint256 work) private view returns (uint256 seat, uint16 round, bool commons_) {
         uint256[] memory open = mineableSeats();
         if (open.length != 0) {
@@ -455,11 +456,11 @@ contract MetamorphMD is ERC721Lite, IUnlockCallback {
             return (seat, round, false);
         }
         uint256 n = _collectionSize();
-        seat = 1 + work % n;
+        seat = work % n;
         for (uint256 i; i <= COMMONS_STEPS; i++) {
             (,,,,,, round) = COCOON.seats(seat);
             if (editionsMinted[seat][round] < EDITIONS) return (seat, round, true);
-            seat = seat % n + 1;
+            seat = (seat + 1) % n;
         }
         revert NothingMineable();
     }

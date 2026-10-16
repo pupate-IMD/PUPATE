@@ -152,13 +152,15 @@ contract MetamorphForkTest is Test {
         assertEq(md.mineableSeats().length, 0, "nothing noted");
         uint256 supply = IERC721Minimal(COLLECTION).totalSupply();
         assertGe(supply, 2000, "the collection counts its seats");
+        assertTrue(_exists(0), "identity.md numbers its seats from 0");
+        assertFalse(_exists(supply), "and its last seat is totalSupply() - 1");
         uint256 a = block.number - 1;
         uint256 nonce = _nonce(a);
         uint256 work = uint256(md.workHash(blockhash(a), miner, nonce));
         vm.prank(miner);
         uint256 id = md.mint(a, nonce);
         (uint32 s, uint16 round, uint16 edition,, bool commons,,,,) = md.cards(id);
-        assertEq(s, 1 + work % supply, "one plus the work modulo the real supply");
+        assertEq(s, work % supply, "the work modulo the real supply");
         (,,,,,, uint16 recorded) = COCOON.seats(s);
         assertEq(round, recorded, "the round Cocoon records for that seat");
         assertEq(edition, 1);
@@ -250,6 +252,15 @@ contract MetamorphForkTest is Test {
         bytes32 sep = OracleAttestation.domainSeparator(block.chainid, address(FEED));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(ATTESTER_KEY, OracleAttestation.digest(sep, a));
         FEED.report(a, abi.encodePacked(r, s, v));
+    }
+
+    /// @dev Whether the real collection has seat `id`: its `ownerOf` answers.
+    function _exists(uint256 id) private view returns (bool) {
+        try IERC721Minimal(COLLECTION).ownerOf(id) returns (address o) {
+            return o != address(0);
+        } catch {
+            return false;
+        }
     }
 
     /// @dev Walks token ids until one is held by an EOA.

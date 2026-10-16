@@ -8,8 +8,8 @@ import {MetamorphMD} from "../../src/metamorph/MetamorphMD.sol";
 import {IERC721Minimal} from "../../src/interfaces/IERC721Minimal.sol";
 
 /// @dev The commons (2026-10-16): while no noted seat is held by the vault with editions left, a mint draws
-/// its seat from the whole identity.md collection, `1 + work % totalSupply()`, in the round Cocoon records
-/// for that seat, and the card emerges by time only. The fixture's vault holds seat 1376, noted, so every
+/// its seat from the whole identity.md collection, `work % totalSupply()` (the collection numbers its seats
+/// from 0), in the round Cocoon records for that seat, and the card emerges by time only. The fixture's vault holds seat 1376, noted, so every
 /// test starts by selling it; the mock collection then counts one seat, and a test mints more into it when
 /// the pick needs room.
 contract MetamorphCommonsTest is MetamorphFixture {
@@ -27,7 +27,7 @@ contract MetamorphCommonsTest is MetamorphFixture {
         uint256 a = _anchor();
         uint256 n = _proof(miner, a);
         bytes32 work = md.workHash(blockhash(a), miner, n);
-        uint256 expected = 1 + uint256(work) % 20;
+        uint256 expected = uint256(work) % 20;
         uint256 price = md.mintPrice();
         bool gilt = uint256(work) < md.target() >> 4;
         vm.expectEmit(true, true, true, true, address(md));
@@ -35,7 +35,7 @@ contract MetamorphCommonsTest is MetamorphFixture {
         vm.prank(miner);
         uint256 id = md.mint(a, n);
         (uint32 seat, uint16 round, uint16 edition,, bool commons,,,,) = md.cards(id);
-        assertEq(seat, expected, "one plus the work modulo the collection's supply");
+        assertEq(seat, expected, "the work modulo the collection's supply");
         assertEq(round, 0, "a seat the vault never held is in round 0");
         assertEq(edition, 1);
         assertTrue(commons, "the card is marked");
@@ -45,17 +45,17 @@ contract MetamorphCommonsTest is MetamorphFixture {
         assertEq(md.ownerOf(id), miner);
     }
 
-    function test_theCommonsPickIsOnePlusTheWorkModuloTheSupply() public {
+    function test_theCommonsPickIsTheWorkModuloTheSupply() public {
         _grow(5);
         for (uint256 residue; residue < 5; residue++) {
             vm.roll(block.number + 1);
             vm.warp(block.timestamp + 90);
             (uint256 id,) = _mintCommons(residue, 5);
             (uint32 seat,,,,,,,,) = md.cards(id);
-            assertEq(seat, residue + 1, "seat = 1 + work % totalSupply");
+            assertEq(seat, residue, "seat = work % totalSupply");
             assertTrue(md.commons(id));
         }
-        for (uint256 seat = 1; seat <= 5; seat++) {
+        for (uint256 seat; seat < 5; seat++) {
             assertEq(md.editionsMinted(seat, 0), 1);
         }
     }
@@ -77,7 +77,7 @@ contract MetamorphCommonsTest is MetamorphFixture {
         assertEq(recorded, 1);
         assertEq(md.mineableSeats().length, 0);
 
-        (uint256 id,) = _mintCommons(1, 3);
+        (uint256 id,) = _mintCommons(2, 3);
         (uint32 seat, uint16 round, uint16 edition,,,,,,) = md.cards(id);
         assertEq(seat, 2);
         assertEq(round, 1, "Cocoon's round for the seat");
@@ -86,36 +86,36 @@ contract MetamorphCommonsTest is MetamorphFixture {
         assertEq(md.editionsMinted(2, 0), 0, "the old round's bucket is untouched");
 
         vm.roll(block.number + 1);
-        (id,) = _mintCommons(2, 3);
+        (id,) = _mintCommons(1, 3);
         (seat, round,,,,,,,) = md.cards(id);
-        assertEq(seat, 3);
+        assertEq(seat, 1);
         assertEq(round, 0, "never held: round 0");
     }
 
     function test_aFullBucketStepsToTheNextSeat() public {
         _grow(3);
-        _fill(2, 0, 303);
+        _fill(1, 0, 303);
         (uint256 id,) = _mintCommons(1, 3);
         (uint32 seat, uint16 round, uint16 edition,, bool commons,,,,) = md.cards(id);
-        assertEq(seat, 3, "seat 2's bucket is full: the next seat");
+        assertEq(seat, 2, "seat 1's bucket is full: the next seat");
         assertEq(round, 0);
         assertEq(edition, 1);
         assertTrue(commons);
-        assertEq(md.editionsMinted(2, 0), 303, "the full bucket is left as it is");
+        assertEq(md.editionsMinted(1, 0), 303, "the full bucket is left as it is");
 
-        // The step wraps from the last seat to the first.
-        _fill(3, 0, 303);
+        // The step wraps from the last seat, totalSupply() - 1, to seat 0.
+        _fill(2, 0, 303);
         vm.roll(block.number + 1);
         (id,) = _mintCommons(2, 3);
         (seat,,,,,,,,) = md.cards(id);
-        assertEq(seat, 1, "past the last seat comes the first");
+        assertEq(seat, 0, "past the last seat comes seat 0");
     }
 
     /// The walk is the seat the hash picks and at most sixteen steps after it: with seventeen full buckets
     /// in a row there is nothing to mine, and with sixteen the mint lands on the seventeenth seat.
     function test_sixteenFullStepsLeaveNothingMineable() public {
         _grow(20);
-        for (uint256 seat = 1; seat <= 17; seat++) {
+        for (uint256 seat; seat <= 16; seat++) {
             _fill(seat, 0, 303);
         }
         uint256 a = _anchor();
@@ -127,11 +127,11 @@ contract MetamorphCommonsTest is MetamorphFixture {
         assertEq(token.balanceOf(miner), before, "no fee");
         assertEq(md.totalMinted(), 0);
 
-        _fill(17, 0, 302);
+        _fill(16, 0, 302);
         vm.prank(miner);
         uint256 id = md.mint(a, nonce);
         (uint32 seat,, uint16 edition,,,,,,) = md.cards(id);
-        assertEq(seat, 17, "sixteen steps from seat 1");
+        assertEq(seat, 16, "sixteen steps from seat 0");
         assertEq(edition, 303, "the bucket's last edition");
     }
 
@@ -167,18 +167,18 @@ contract MetamorphCommonsTest is MetamorphFixture {
     /// A commons card's seat was never held by the vault for it, so the vault-holds rule would make it a
     /// butterfly at once; it emerges by the 90 days only, whether the vault holds its seat meanwhile or not.
     function test_aCommonsCardEmergesByTimeOnly() public {
-        // One seat in the collection: every pick is seat 1, which the vault never held.
+        // One seat in the collection: every pick is seat 0, which the vault never held.
         uint256 id = _mintAs(miner);
         (uint32 seat, uint16 round,,, bool commons,,,,) = md.cards(id);
-        assertEq(seat, 1);
+        assertEq(seat, 0);
         assertEq(round, 0);
         assertTrue(commons);
-        assertEq(md.stageOf(id), 0, "a chrysalis, though the vault does not hold seat 1");
+        assertEq(md.stageOf(id), 0, "a chrysalis, though the vault does not hold seat 0");
         assertEq(md.tokenURI(id), _stub(id, 0), "the art is handed stage 0");
 
-        _giveSeat(1);
-        assertEq(md.stageOf(id), 0, "still a chrysalis while the vault holds seat 1 in round 0");
-        _sell(1);
+        _giveSeat(0);
+        assertEq(md.stageOf(id), 0, "still a chrysalis while the vault holds seat 0 in round 0");
+        _sell(0);
         assertEq(md.stageOf(id), 0, "and still one after the vault sold it");
 
         vm.warp(block.timestamp + 90 days - 1);
@@ -187,7 +187,7 @@ contract MetamorphCommonsTest is MetamorphFixture {
         assertEq(md.stageOf(id), 1, "a butterfly at 90 days");
         assertEq(md.tokenURI(id), _stub(id, 1), "the art is handed stage 1");
         vm.prank(other);
-        collection.transferFrom(other, address(cocoon), 1);
+        collection.transferFrom(other, address(cocoon), 0);
         assertEq(md.stageOf(id), 1, "and for good");
     }
 
@@ -250,7 +250,7 @@ contract MetamorphCommonsTest is MetamorphFixture {
         vm.prank(miner);
         uint256 id = md.mint(a, nonce);
         (uint32 seat,,,,,,,,) = md.cards(id);
-        assertEq(seat, 1 + work % largest);
+        assertEq(seat, work % largest);
     }
 
     // ------------------------------------------------------------------ helpers
@@ -269,7 +269,7 @@ contract MetamorphCommonsTest is MetamorphFixture {
     }
 
     /// @dev The first proof for `who` at `anchor` whose work is `residue` modulo `n`: the commons then picks
-    /// seat `residue + 1`.
+    /// seat `residue`.
     function _proofWithResidue(address who, uint256 anchor, uint256 residue, uint256 n)
         private
         view
@@ -291,13 +291,13 @@ contract MetamorphCommonsTest is MetamorphFixture {
         id = md.mint(a, nonce);
     }
 
-    /// @dev What the stub art says for card `id` of seat 1, round 0, edition 1, in epoch 1 at 50,000 PUPATE.
+    /// @dev What the stub art says for card `id` of seat 0, round 0, edition 1, in epoch 1 at 50,000 PUPATE.
     function _stub(uint256 id, uint8 stage) private view returns (string memory) {
         (,,, bool gilt,,,,,) = md.cards(id);
         return string.concat(
             "stub:",
             vm.toString(id),
-            ":1:0:1:",
+            ":0:0:1:",
             vm.toString(uint256(stage)),
             ":",
             gilt ? "gilt" : "plain",
