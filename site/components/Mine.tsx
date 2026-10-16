@@ -294,7 +294,8 @@ export function Mine() {
               </li>
             ))}
           </ol>
-          {contracts ? null : <span className="chip gold">Preview · contracts not live</span>}
+          {/* Known at build time, so a live site never paints the chip before its addresses load. */}
+          {preview ? <span className="chip gold">Preview · contracts not live</span> : null}
         </div>
         <div>
           <p className="mint-price">
